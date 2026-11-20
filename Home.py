@@ -457,6 +457,11 @@ if True:
             _ws = _gours
         if not _lshow:
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
+        # Nov 20 (owner): the Show choice filters the game lines too -- 🔒 rows only, 💰 rows only, or everything
+        if _show == "💰 Money picks":
+            _ws = [r for r in _ws if r.get("money")]
+        elif _show == "🔒 Locks only":
+            _ws = [r for r in _ws if r.get("lock")]
         if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter
             # Nov 19 (owner): two result columns, two charts -- the pick, and the model's likely winner
             _gproxy = [{"pick": r.get("best_result"),
@@ -473,8 +478,6 @@ if True:
             _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
                                    by={"Pick result": "pick", "Winner result": "winner",
                                        "Money result": "money"})
-        if _show == "💰 Money picks":                          # Nov 20 (owner): the 💰 game lines first
-            _ws = sorted(_ws, key=lambda r: not r.get("money"))
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
@@ -530,7 +533,10 @@ if True:
         if not _wdf.empty:
             _wdf = _wdf[[c for c in _ORDER if c in _wdf.columns] + [c for c in _wdf.columns if c not in _ORDER]]
         if _wdf.empty:
-            st.caption("No tested game-line picks today.")
+            st.caption({"💰 Money picks": "No 💰 game lines" + (" today" if not _past else "") + " — switch to All "
+                                          "playable to see every game.",
+                        "🔒 Locks only": "No 🔒 game lines" + (" today" if not _past else "") + " — switch to All "
+                                         "playable to see every game."}.get(_show, "No tested game-line picks today."))
         else:
             st.caption("☑️ Tick **Pick**, **Winner** or **Money** on any row to log that bet — each box sits beside "
                        "what it bets on.")
