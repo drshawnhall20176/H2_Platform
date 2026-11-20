@@ -92,7 +92,9 @@ if True:
                       key="home_best_show", label_visibility="collapsed",
                       help=_PE_H.MONEY_HELP)
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
-                  help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
+                  help="Reloads each props sport's board. Boards are rebuilt every hour on the server (Nov 20: "
+                       "building them here ran the app out of memory); this picks up the newest one."):
+        _BBD_r = __import__("best_bets_data"); _BBD_r.load_generic_best_bets_board.clear()
         import best_bets_data as _BBD
         with st.spinner("Building today's boards…"):
             for _k in _props_sports:

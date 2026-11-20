@@ -66,7 +66,7 @@ def boards(day: str) -> None:
             continue
         t0 = time.time()
         try:
-            plays, meta, _ = BBD.load_generic_best_bets_board(key, day, BBD.O.DEFAULT_BOOK)
+            plays, meta, _ = BBD.build_generic_board(key, day, BBD.O.DEFAULT_BOOK)   # Nov 20: built + saved whole
             saved = (TB.load_props(key, day) or {}).get("rows") or []
             print(f"{key} board: {len(plays)} plays, {len(saved)} on Today's best, {time.time() - t0:.0f}s")
         except Exception as exc:                                # noqa: BLE001
