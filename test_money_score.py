@@ -73,3 +73,13 @@ def test_scoreboard_counts_game_line_money(monkeypatch):
     g = [r for r in b["sports"] if r["sport"] == "games:NCAAMB"][0]
     assert (g["hits"], g["misses"]) == (1, 1) and abs(g["units"] - 0.2) < 1e-9
     assert MSB.table(b)[-1]["Sport"].endswith("game lines")
+
+
+def test_pick_clv_follows_the_picks_own_side():
+    import clv
+    row = {"side": "Under", "line": 20.5, "ts": "2026-11-20T23:00", "first_ts": "2026-11-20T15:00", "first_line": 21.5,
+           "first_side": "Over", "first_over_price": -110, "first_under_price": -110, "over_price": -110,
+           "under_price": -110}
+    assert clv.pick_clv(row) == "beat"           # Under 21.5 taken, closed 20.5: the market moved toward the pick
+    assert clv.pick_clv(dict(row, line=22.5)) == "lost"
+    assert clv.pick_clv(dict(row, side=None)) is None

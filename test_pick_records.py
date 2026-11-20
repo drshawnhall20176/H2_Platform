@@ -166,3 +166,14 @@ def test_money_record_text(monkeypatch):
     monkeypatch.setattr(MS, "get_setting", lambda k, d=None: {"sports": {"NBA": {"n": 1483, "hit": 0.5172, "roi": 0.0439}}})
     assert PE.money_record_text("NBA") == "💰 767–716 (52%, +4.4%/$1)"
     assert PE.money_record_text("NFL") is None
+
+
+def test_lock_needs_a_price_that_pays_and_stakes_are_quarter_kelly():
+    """Nov 20: 🔒 only where the price pays (NHL 🔒 hit as stated but lost 6.2% at their prices)."""
+    import props_engine as PE
+    assert PE.is_lock(0.65, 0.2) and PE.is_lock(0.65, 0.2, ev=0.01) and not PE.is_lock(0.65, 0.2, ev=-0.03)
+    assert PE.play_is_lock({"ModelProb": 0.65, "Cushion": 0.2, "EV": -0.05, "RealPrice": None})   # no price: no gate
+    assert not PE.play_is_lock({"ModelProb": 0.65, "Cushion": 0.2, "EV": -0.05, "RealPrice": -200})
+    # 55% at +100: Kelly 10% -> quarter 2.5% -> capped 2u; 50% at +110: Kelly 4.5% -> 1.25u (rounded to .25)
+    assert PE.stake_units(0.55, 100) == 2.0 and PE.stake_units(0.50, 110) == 1.25
+    assert PE.stake_units(0.45, -110) is None and PE.stake_units(None, 100) is None

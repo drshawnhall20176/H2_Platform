@@ -100,7 +100,8 @@ def _record(rows: Sequence[Dict]) -> Dict:
 
 def _lock(done: Sequence[Dict]) -> Dict:
     """The 🔒 Most probable record (hits / misses / hit_rate, plus the chance shown and profit at the price)."""
-    rec = _record([r for r in done if PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"))])
+    rec = _record([r for r in done if PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"),
+                                                   ev=r.get("ev"))])
     row = PG.lock_record(done) or {}
     rec.update(chance=row.get("Model said"), profit=row.get("Profit per $1"), priced=row.get("Priced", 0))
     return rec
@@ -111,7 +112,8 @@ def _money(done: Sequence[Dict]) -> Dict:
     row = PG.money_record(done) or {}
     h, n = row.get("Hits", 0), row.get("Graded", 0)
     return {"hits": h, "misses": n - h, "hit_rate": (h / n) if n else None, "chance": row.get("Model said"),
-            "profit": row.get("Profit per $1"), "needed": row.get("Needed")}
+            "profit": row.get("Profit per $1"), "needed": row.get("Needed"),
+            "clv_beat": row.get("CLV beat", 0), "clv_lost": row.get("CLV lost", 0), "clv_same": row.get("CLV same", 0)}
 
 
 def summarize_slate(graded: Sequence[Dict]) -> Dict:

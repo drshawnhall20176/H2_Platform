@@ -38,7 +38,8 @@ def slate_record(sport: str, slate: str, load: Callable, today: Optional[str] = 
         n = (mo.get("hits") or 0) + (mo.get("misses") or 0)
         if n:
             best = {"hits": mo["hits"], "misses": mo["misses"],
-                    "units": (mo.get("profit") or 0.0) * n, "needed": mo.get("needed")}
+                    "units": (mo.get("profit") or 0.0) * n, "needed": mo.get("needed"),
+                    "clv_beat": mo.get("clv_beat") or 0, "clv_lost": mo.get("clv_lost") or 0}
     return best
 
 
@@ -68,9 +69,10 @@ def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, tes
     test = test or PE.MONEY_TEST
     today = today or PE._et_today()
     last = min(test["to"], (date.fromisoformat(today) - timedelta(days=1)).isoformat())
-    out, tot = [], {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0}
+    out, tot = [], {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "clv_beat": 0, "clv_lost": 0}
     for sp in test["sports"]:
-        row = {"sport": sp, "hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "slates": 0}
+        row = {"sport": sp, "hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "slates": 0, "clv_beat": 0,
+               "clv_lost": 0}
         if test["from"] <= last:
             for d in _days(test["from"], last):
                 r = slate_record(sp, d, load, today)
@@ -82,8 +84,10 @@ def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, tes
                 row["units"] += r["units"]
                 row["need_sum"] += (r["needed"] or 0) * n
                 row["slates"] += 1
+                row["clv_beat"] += r.get("clv_beat") or 0
+                row["clv_lost"] += r.get("clv_lost") or 0
         out.append(row)
-        for k in ("hits", "misses", "units", "need_sum"):
+        for k in ("hits", "misses", "units", "need_sum", "clv_beat", "clv_lost"):
             tot[k] += row[k]
     # Nov 20: the game-line 💰 (money_score.py), one row per league
     try:
@@ -107,6 +111,9 @@ def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, tes
     except Exception:                                           # noqa: BLE001 -- props rows still show
         pass
     for r in out + [tot]:
+        c = r.get("clv_beat", 0) + r.get("clv_lost", 0)
+        r["clv"] = r.get("clv_beat", 0) / c if c else None
+        r["clv_n"] = c
         n = r["hits"] + r["misses"]
         r["n"] = n
         r["hit_rate"] = r["hits"] / n if n else None
@@ -133,5 +140,6 @@ def table(board: Dict, live: Optional[Dict[str, int]] = None) -> List[Dict]:
                      "Hit rate": r["hit_rate"], "Needed": r["needed"],
                      "Units ($1 a pick)": round(r["units"], 2) if r["n"] else None,
                      "Per $1": r["roi"],
+                     "Beat the close": (f"{r['clv']:.0%} of {r['clv_n']}" if r.get("clv") is not None else "—"),
                      "Today": (live or {}).get(r["sport"], 0)})
     return rows

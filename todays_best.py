@@ -118,7 +118,7 @@ def props_from_snapshots(sport: str, date_str: str, snaps=None) -> List[Dict]:
         side = s.get("bet_side") or s.get("side")
         line = s.get("bet_line") if s.get("bet_line") is not None else s.get("line")
         chance = s.get("bet_chance") if s.get("bet_chance") is not None else s.get("chance")
-        lock = PE.is_lock(s.get("chance"), s.get("cushion"), s.get("gap"), s.get("book"))
+        lock = PE.is_lock(s.get("chance"), s.get("cushion"), s.get("gap"), s.get("book"), ev=s.get("ev"))
         money = PE.snapshot_is_money(sport, s)
         if tag not in PLAYABLE and not lock and not money:
             continue

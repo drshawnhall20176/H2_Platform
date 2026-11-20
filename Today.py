@@ -129,7 +129,9 @@ try:
         _m = _CT.money_picks([r for r in _g_rows if r.get("sport") == sp_key], parse_time=C._kick_dt, now=_now_et, n=1)
         if _m:
             m = _m[0]
-            _card = {**m, "money": True, "move": "", "basis": f"{m['edge']:+.0%} edge" if m.get("edge") is not None else "",
+            _card = {**m, "money": True, "move": "",
+                     "basis": (f"{m['edge']:+.0%} edge" if m.get("edge") is not None else "")
+                     + (f" · stake {m['stake']:g}u" if m.get("stake") else ""),
                      "record": "", "score": (1, m.get("chance") or 0), "kind": "Prop"}
             _cards[sp_key] = [c for c in _have if c.get("pick") != m["pick"]][:3] + [_card] + \
                 [c for c in _have if c.get("pick") != m["pick"]][3:]
@@ -139,6 +141,7 @@ except Exception:                                               # noqa: BLE001 -
 # Nov 20: a game line's 💰 (money_score.py: college basketball, Money Score +4% to +12%) -- the sport's best one, in the
 # 4th spot when its row has no 💰 yet
 try:
+    import props_engine as _PEM2
     _now_et2 = _dt.now(_ET)
     for sp_key in {r.get("sport") for r in _g_win if r.get("money")}:
         _have = _cards.get(sp_key, [])
@@ -152,7 +155,10 @@ try:
         _card = {"sport": sp_key, "pick": g["money_pick"], "chance": g.get("money_chance"), "lock": False, "move": "",
                  "price": f"{float(g['money_price']):+.0f}" if g.get("money_price") is not None else "—",
                  "game": g.get("game") or "", "time": g.get("time") or "", "money": True,
-                 "record": "", "basis": f"Money Score {g['money_score']:+.0%}", "score": (1, g.get("money_chance") or 0),
+                 "record": "", "basis": f"Money Score {g['money_score']:+.0%}"
+                 + (f" · stake {_PEM2.stake_units(g.get('money_chance'), g.get('money_price')):g}u"
+                    if _PEM2.stake_units(g.get('money_chance'), g.get('money_price')) else ""),
+                 "score": (1, g.get("money_chance") or 0),
                  "kind": "Line"}
         _cards[sp_key] = _have[:3] + [_card] + _have[3:]
         _npicks[sp_key] = _npicks.get(sp_key, 0) + 1
@@ -239,6 +245,11 @@ try:
             st.dataframe(_mdf, hide_index=True, width="stretch",
                          column_config={"Needed": st.column_config.TextColumn(help="The hit rate the prices needed "
                                                                                    "to break even"),
+                                        "Beat the close": st.column_config.TextColumn(
+                                            help="Of the 💰 props whose line or price moved before the game, the share "
+                                                 "that moved toward the pick. The books' closing number is the "
+                                                 "sharpest there is: beating it more often than not says the edge is "
+                                                 "real, long before wins and losses can."),
                                         "Today": st.column_config.NumberColumn(help="💰 picks on today's boards")})
             st.caption(_PEM.MONEY_HELP + " Every 💰 pick counts, at the price it showed — not only the ones bet.")
 except Exception:                                               # noqa: BLE001 -- the scoreboard never breaks the page
