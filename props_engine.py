@@ -1145,7 +1145,7 @@ MONEY_HELP = ("💰 Money picks (live test, Nov 20–23, every props sport): the
               "own fair price. In testing, NBA picks like these returned +6% per $1 over 107 graded picks; the other "
               "sports had too few to judge, which is what this weekend is for. Graded every morning — the running "
               "record is on Today. Stake: a quarter of the Kelly stake for that chance and price, in units "
-              "(1u = 1% of your bankroll), 0.25u to 2u.")
+              "(1u = 1% of your bankroll), 0.25u to 2u — scaled down so the whole day's 💰 picks total 10u at most.")
 
 
 def _et_today() -> str:
@@ -1253,16 +1253,25 @@ def play_is_lock(p: Dict) -> bool:
                    bool(p.get("Pickem")), ev=p.get("EV") if p.get("RealPrice") is not None else None)
 
 
-def stake_units(chance, price, kelly_frac: float = 0.25, cap: float = 2.0) -> Optional[float]:
+def stake_units(chance, price, kelly_frac: float = 0.25, cap: float = 2.0, capped: bool = True,
+                day: Optional[str] = None) -> Optional[float]:
     """Nov 20: a suggested stake in units (1u = 1% of the bankroll): a quarter of the Kelly stake for this chance at this
-    price, rounded to 0.25u, between 0.25u and `cap`. None when the price doesn't pay."""
+    price, at most `cap`; then (capped) scaled so the day's 💰 picks fit the daily budget (stakes.DAILY_CAP, 10u),
+    rounded to 0.25u, at least 0.25u. None when the price doesn't pay."""
     p, d = maybe(chance), decimal(price) if price is not None else None
     if p is None or not d or d <= 1:
         return None
     f = (p * d - 1) / (d - 1)
     if f <= 0:
         return None
-    return max(0.25, min(cap, round(100 * f * kelly_frac * 4) / 4))
+    u = min(cap, 100 * f * kelly_frac)
+    if capped:
+        try:
+            import stakes as _ST
+            u *= _ST.factor(day)
+        except Exception:                                       # noqa: BLE001
+            pass
+    return max(0.25, round(u * 4) / 4)
 
 
 def is_parlay_use(tag: Optional[str]) -> bool:
