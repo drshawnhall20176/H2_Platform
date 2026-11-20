@@ -175,8 +175,30 @@ def deliver(text: str, webhook: Optional[str], post=None) -> bool:
     return MB.deliver(text, webhook, post)
 
 
+def game_money(day: str, now: datetime, games=None) -> List[Dict]:
+    """Nov 20: the day's game-line 💰 picks (money_score.py), games not started, as post rows."""
+    try:
+        if games is None:
+            import money_score as MSC
+            import todays_best as TB
+            games = TB.winner_rows(day, leagues=list(MSC.MONEY_LEAGUES))
+        out = []
+        for r in games or []:
+            if not r.get("money"):
+                continue
+            st = _start(day, r.get("time") or "")
+            if st is not None and st <= now:
+                continue
+            out.append({"sport": r.get("sport"), "pick": r.get("money_pick"), "time": r.get("time") or "",
+                        "price": r.get("money_price"), "book": "", "chance": r.get("money_chance"), "money": True,
+                        "lock": False, "game": r.get("game") or "", "kind": "game"})
+        return sorted(out, key=lambda x: -(x["chance"] or 0))[:MAX_MONEY]
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
 def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force: bool = False, get=None, save=None,
-        collect=None, webhook: Optional[str] = None, post=None) -> int:
+        collect=None, webhook: Optional[str] = None, post=None, games=None, past_games=None) -> int:
     import model_store as MS
     get = get or MS.get_setting
     save = save or MS.save_setting
@@ -194,7 +216,8 @@ def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force:
         print("posted the test message" if ok else "H2_COMMUNITY_WEBHOOK not set — nothing posted")
         return 0 if ok else 1
     if kind == "auto":
-        return max(run(k, now, dry_run, force, get, save, collect, webhook, post) for k in ("results", "picks"))
+        return max(run(k, now, dry_run, force, get, save, collect, webhook, post, games, past_games)
+                   for k in ("results", "picks"))
     if kind == "picks":
         day = now.strftime("%Y-%m-%d")
         key = KEY.format(date=day, kind="picks")
@@ -204,7 +227,8 @@ def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force:
         if not picks_due(now) and not force:
             print("picks post: not time yet")
             return 0
-        chosen = choose(collect(day, PROPS_SPORTS)["rows"], day, now)
+        chosen = choose(collect(day, PROPS_SPORTS)["rows"], day, now) + game_money(day, now, games)
+        chosen.sort(key=lambda x: (_start(day, x["time"]) is None, _start(day, x["time"]) or now))
         if not chosen:
             print(f"no 🔒 / 💰 picks saved for {day} yet")
             return 0
@@ -230,6 +254,16 @@ def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force:
             return 0
         rows = collect(yday, PROPS_SPORTS, past=True)["rows"]
         res = {(r.get("sport"), r.get("pick")): r.get("result") for r in rows if r.get("kind") == "Prop"}
+        try:                                                    # Nov 20: game-line 💰 results
+            if past_games is None:
+                import money_score as MSC
+                import todays_best as TB
+                past_games = TB.winner_rows(yday, leagues=list(MSC.MONEY_LEAGUES), past=True)
+            for g in past_games or []:
+                if g.get("money_pick"):
+                    res[(g.get("sport"), g.get("money_pick"))] = g.get("money_result")
+        except Exception:                                       # noqa: BLE001
+            pass
         text = results_text(yday, posted, res)
         if not text:
             print(f"results for {yday}: not graded yet")

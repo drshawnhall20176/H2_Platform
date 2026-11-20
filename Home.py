@@ -5,6 +5,7 @@ import schedule_board as SB
 from datetime import datetime as _dt
 import pytz as _pytz
 import props_engine as _PE_H
+import money_score as _MSC
 
 _ET = _pytz.timezone("US/Eastern")
 
@@ -434,12 +435,18 @@ if True:
             # Nov 19 (owner): two result columns, two charts -- the pick, and the model's likely winner
             _gproxy = [{"pick": r.get("best_result"),
                         "pick_chance": r.get("best_chance") if r.get("best_tested") else r.get("backtest"),
-                        "winner": r.get("winner_result"), "winner_chance": r.get("chance")} for r in _ws]
+                        "winner": r.get("winner_result"), "winner_chance": r.get("chance"),
+                        # Nov 20: the Money Score's side, on games scoring +4% or better (money_score.BAND)
+                        "money": r.get("money_result") if (r.get("money_score") or -1) >= _MSC.BAND[0] else None,
+                        "money_chance": r.get("money_chance")} for r in _ws]
             C.hit_miss_pair([("Pick result", _gproxy, "pick", "pick_chance"),
-                             ("Winner result", _gproxy, "winner", "winner_chance")],
-                            key="home_win_hm", title="Game lines: how the picks and the likely winners did")
+                             ("Winner result", _gproxy, "winner", "winner_chance"),
+                             ("Money result (score +4%+)", _gproxy, "money", "money_chance")],
+                            key="home_win_hm", title="Game lines: how the picks, the likely winners and the money "
+                                                     "picks did")
             _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
-                                   by={"Pick result": "pick", "Winner result": "winner"})
+                                   by={"Pick result": "pick", "Winner result": "winner",
+                                       "Money result": "money"})
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
@@ -457,12 +464,18 @@ if True:
                                          is not None else ""),
                                "Value": r.get("best_value") if r.get("best_tested") else None,
                                "Likely winner": f"{r['winner']} ({r['chance']:.0%})",
+                               # Nov 20: the third measure -- what the price pays (money_score.py)
+                               "Money score": r.get("money_score"),
+                               "Money pick": ((("💰 " if r.get("money") else "") + r["money_pick"]
+                                               + (f" {float(r['money_price']):+.0f}" if r.get("money_price") is not None
+                                                  else "")) if r.get("money_pick") else "—"),
                                "League": r["league"],
                                "Final": r.get("final") or "—",
                                "Pick result": _TB.RESULT_ICON.get(r.get("best_result"), "—"),
-                               "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—")} for r in _ws[:LEANS_CAP]])
+                               "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—"),
+                               "Money result": _TB.RESULT_ICON.get(r.get("money_result"), "—")} for r in _ws[:LEANS_CAP]])
         if not _past and not _wdf.empty:
-            _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result"])
+            _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result", "Money result"])
         if not _wdf.empty and not _wdf["Spread move"].any():
             _wdf = _wdf.drop(columns=["Spread move"])
         if _scope != "All sports" and not _wdf.empty:
@@ -470,7 +483,8 @@ if True:
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
             _wdf = _wdf.drop(columns=["Weather"])
         if not _wdf.empty:                                       # columns with nothing in them (no tested picks) go
-            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover", "Spread", "Total")
+            _wdf = _wdf.drop(columns=[c for c in ("Chance", "Price", "Value", "Backtest cover", "Spread", "Total",
+                                                  "Money score")
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
@@ -478,6 +492,11 @@ if True:
             _sel_lines = _LU.picked(_ws[:LEANS_CAP], _LU.selectable(_wdf, "home_win_sel", hide_index=True, width="stretch",
                          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                                         "Value": st.column_config.NumberColumn(format="percent"),
+                                        "Money score": st.column_config.NumberColumn(
+                                            format="percent", help="What the price pays: expected return per $1 at "
+                                            "the best price, from a chance that trusts the model only as far as its "
+                                            "record against the books has earned. 💰 = college basketball, +4% to "
+                                            "+12% (the range that made money in testing)."),
                                         "Backtest cover": st.column_config.NumberColumn(format="percent")}))
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})

@@ -136,6 +136,28 @@ try:
             _npicks[sp_key] = _npicks.get(sp_key, 0) + 1
 except Exception:                                               # noqa: BLE001 -- the page always renders
     pass
+# Nov 20: a game line's 💰 (money_score.py: college basketball, Money Score +4% to +12%) -- the sport's best one, in the
+# 4th spot when its row has no 💰 yet
+try:
+    _now_et2 = _dt.now(_ET)
+    for sp_key in {r.get("sport") for r in _g_win if r.get("money")}:
+        _have = _cards.get(sp_key, [])
+        if any(c.get("money") for c in _have[:4]):
+            continue
+        _gm = [r for r in _g_win if r.get("sport") == sp_key and r.get("money")
+               and not ((C._kick_dt(r.get("time")) or _now_et2) < _now_et2)]
+        if not _gm:
+            continue
+        g = max(_gm, key=lambda r: r.get("money_score") or 0)
+        _card = {"sport": sp_key, "pick": g["money_pick"], "chance": g.get("money_chance"), "lock": False, "move": "",
+                 "price": f"{float(g['money_price']):+.0f}" if g.get("money_price") is not None else "—",
+                 "game": g.get("game") or "", "time": g.get("time") or "", "money": True,
+                 "record": "", "basis": f"Money Score {g['money_score']:+.0%}", "score": (1, g.get("money_chance") or 0),
+                 "kind": "Line"}
+        _cards[sp_key] = _have[:3] + [_card] + _have[3:]
+        _npicks[sp_key] = _npicks.get(sp_key, 0) + 1
+except Exception:                                               # noqa: BLE001
+    pass
 
 _order = sorted([s for s in live if _games.get(s.key) or _cards.get(s.key)],
                 key=lambda s: (-_npicks.get(s.key, 0), -_games.get(s.key, 0)))
@@ -191,6 +213,9 @@ try:
         for _r in _g_rows:
             if _r.get("money") and _r.get("kind") == "Prop":
                 _live[_r.get("sport")] = _live.get(_r.get("sport"), 0) + 1
+        for _r in _g_win:                                       # Nov 20: game-line 💰 (money_score.py)
+            if _r.get("money"):
+                _live["games:" + str(_r.get("sport"))] = _live.get("games:" + str(_r.get("sport")), 0) + 1
         _t = _mb["total"]
         _f, _to = _dt.fromisoformat(_mb["from"]), _dt.fromisoformat(_mb["to"])
         with st.container(border=True):
