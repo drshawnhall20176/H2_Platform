@@ -48,7 +48,22 @@ def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> Lis
         return []
     cfg = dict(kw.pop("column_config", None) or {})
     cfg.update({c: st.column_config.CheckboxColumn(c, default=False) for c in cols})   # sized to the header
-    ed = st.data_editor(df, key=key, disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
+    # Nov 20 (owner: "missing the select all tick box for each of the selectable columns"): one per tick column
+    alls = []
+    if len(df) > 1 and cols:
+        boxes = st.columns(len(cols) + 1)
+        for c, box in zip(cols, boxes):
+            if box.checkbox(f"Select all {c.replace('✓ ', '')}", key=f"{key}__all_{c}"):
+                alls.append(c)
+        if alls:
+            df = df.copy()
+            for c in alls:
+                df[c] = True
+        if len(alls) > 1:
+            st.caption("⚠️ More than one column is fully ticked — on some games those bets take opposite sides of the "
+                       "same game, which just pays the books' cut twice. Untick one unless you mean it.")
+    ed = st.data_editor(df, key=f"{key}__{'_'.join(sorted(alls))}" if alls else key,
+                        disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
     out = []
     try:
         for i, row in enumerate(ed.to_dict("records")):

@@ -145,3 +145,17 @@ LU.panel([{"sport": "NCAAMB", "pick": "A Rebounds Under 6.5", "player": "A", "si
     at.checkbox(key="t_log_real").uncheck().run()
     at.button(key="t_log_go").click().run()
     assert got["its"][0]["price"] == -110 and got["real"] is False
+
+
+def test_tick_grid_select_all_per_column():
+    """Nov 20 (owner): a select-all box for each tick column."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string("""
+import pandas as pd, streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+df = pd.DataFrame({"Game": ["a", "b", "c"], "✓ Money": [False] * 3, "✓ Pick": [False] * 3})
+st.write(f"ticks={LU.tick_grid(df, ['✓ Money', '✓ Pick'], 'g')}")
+""").run()
+    assert "ticks=[]" in " ".join(m.value for m in at.markdown)
+    at.checkbox(key="g__all_✓ Money").check().run()
+    assert "ticks=[(0, '✓ Money'), (1, '✓ Money'), (2, '✓ Money')]" in " ".join(m.value for m in at.markdown)
