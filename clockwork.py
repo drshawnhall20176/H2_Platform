@@ -31,7 +31,7 @@ WORKFLOWS = ("warm-slates", "settle-results", "capture-closing-lines", "capture-
 # Inputs for a dispatch, where the defaults would change what the run does. A run started by clockwork (GitHub's
 # token) doesn't set off the workflow_run chain the scheduled one would, so morning-brief is dispatched on its own
 # crons -- as "auto" (whatever note is due, never resent), which also runs the morning review when it's due.
-INPUTS = {"morning-brief": {"kind": "auto"}}
+INPUTS = {"morning-brief": {"kind": "auto"}, "community-post": {"kind": "auto"}}
 WORKFLOWS = WORKFLOWS + tuple(INPUTS)
 DELAY = 8           # minutes after a due time before stepping in
 GRACE = 40          # minutes after a due time when it's let go
