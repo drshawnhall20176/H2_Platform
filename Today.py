@@ -10,6 +10,7 @@ way (tested, todays_best.spread_move). The owner's brief sits at the top, under 
 """
 import streamlit as st
 from datetime import datetime as _dt
+from datetime import timedelta as _td
 
 import pytz as _pytz
 
@@ -173,14 +174,59 @@ if _owner:
     except Exception:                                           # noqa: BLE001 -- the brief is a bonus
         pass
 
+# ---------- 💰 live test scoreboard (Nov 20, owner: "run that concept live this weekend to see how it does") ----------
+@st.cache_data(ttl=600, show_spinner=False)
+def _money_board(day):
+    import money_scoreboard as _MSB
+    return _MSB.scoreboard(today=day)
+
+
+try:
+    import money_scoreboard as _MSB
+    import props_engine as _PEM
+    _mday = _dt.now(_ET).strftime("%Y-%m-%d")
+    if _PEM.MONEY_TEST["from"] <= _mday <= (_dt.fromisoformat(_PEM.MONEY_TEST["to"]) + _td(days=2)).strftime("%Y-%m-%d"):
+        _mb = _money_board(_mday)
+        _live = {}
+        for _r in _g_rows:
+            if _r.get("money") and _r.get("kind") == "Prop":
+                _live[_r.get("sport")] = _live.get(_r.get("sport"), 0) + 1
+        _t = _mb["total"]
+        _f, _to = _dt.fromisoformat(_mb["from"]), _dt.fromisoformat(_mb["to"])
+        with st.container(border=True):
+            C.section_header("💰", f"Money picks · live test, {_f:%a %b %-d} – {_to:%a %b %-d}")
+            if _t["n"]:
+                C.kpi_row([
+                    {"icon": "🧾", "value": f"{_t['hits']}–{_t['misses']}", "label": "💰 record so far"},
+                    {"icon": "🎯", "value": f"{_t['hit_rate']:.0%}", "label": f"hit rate (needed {_t['needed']:.0%})",
+                     "trend": "good" if _t["hit_rate"] >= _t["needed"] else "bad"},
+                    {"icon": "💵", "value": f"{_t['units']:+.2f}u", "label": "units, $1 a pick",
+                     "trend": "good" if _t["units"] >= 0 else "bad"},
+                    {"icon": "📈", "value": f"{_t['roi']:+.1%}", "label": "return per $1"},
+                ])
+            else:
+                st.caption("No 💰 picks graded yet — the first night's results land with tomorrow's morning review.")
+            import pandas as _pdm
+            _mdf = _pdm.DataFrame(_MSB.table(_mb, _live))
+            _fmt = {"Hit rate": "{:.0%}", "Needed": "{:.0%}", "Units ($1 a pick)": "{:+.2f}", "Per $1": "{:+.1%}"}
+            for _c, _f in _fmt.items():
+                _mdf[_c] = [_f.format(v) if v is not None and v == v else "—" for v in _mdf[_c]]
+            st.dataframe(_mdf, hide_index=True, width="stretch",
+                         column_config={"Needed": st.column_config.TextColumn(help="The hit rate the prices needed "
+                                                                                   "to break even"),
+                                        "Today": st.column_config.NumberColumn(help="💰 picks on today's boards")})
+            st.caption(_PEM.MONEY_HELP + " Every 💰 pick counts, at the price it showed — not only the ones bet.")
+except Exception:                                               # noqa: BLE001 -- the scoreboard never breaks the page
+    pass
+
 C.kpi_row([{"icon": "🎯", "value": str(_g_sum["picks"]), "label": "Player picks from winning pick types"},
            {"icon": "🏟️", "value": str(_g_sum["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(sum(1 for s in _order if _cards.get(s.key))), "label": "Sports with a pick"},
            {"icon": "🗓️", "value": str(len(_order)), "label": "Sports playing today"}])
 st.caption("One row per sport playing today, busiest first: its strongest picks (pick types with a winning 30-day "
            "record, playable game lines, and college basketball spreads moving our way), and its best 💰 Money pick "
-           "where the sport has them (the model 6–15% better than the sportsbook price — the one group that has made "
-           "money in testing; re-decided by sport every week). Open a sport for its full desk: every table, filter "
+           "where the sport has them (live test this weekend: the model 3–20% better than the sportsbook price, a 40%+ "
+           "chance, and a fair price — see the 💰 scoreboard above). Open a sport for its full desk: every table, filter "
            "and logging.")
 
 for s in _order:

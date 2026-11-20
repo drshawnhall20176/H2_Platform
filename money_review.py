@@ -4,8 +4,8 @@ money_review.py — which sports get 💰 Money picks, re-decided every week fro
 Owner: "this should be updated on some recurring basis. Sports with short seasons should be accounted for some how."
 
 Every Monday (money-review workflow, kept on schedule by clockwork) each props sport's graded pre-game reads in the
-money band (props_engine.MONEY_BAND: the model 6-15% better than the sportsbook price; pick'em-only lines and markets
-with no record of their own left out) are scored at the price they carried:
+money rule (props_engine.in_money_band, Nov 20: the model 3-20% better than the sportsbook price, a 40%+ chance, and
+the price no more than 3% off the books' own fair; pick'em-only lines and markets with no record of their own left out) are scored at the price they carried:
 
   * TURN ON when the sport's last MAX_READS band reads (at least MIN_READS, over at least MIN_DAYS[sport] slate
     days) returned at least ON_ROI per $1, the low end of the 90% range (resampling whole slate days) is above zero,
@@ -71,7 +71,9 @@ def rescore(sport: str, r: Dict) -> Optional[Dict]:
     for side, pr, ps in (("Over", op, p), ("Under", up, 1 - p)):
         dec = PE.decimal(pr)
         if dec and (best is None or ps * dec - 1 > best["ev"]):
-            best = {"side": side, "ev": ps * dec - 1, "dec": dec, "hit": (r["actual"] > thr) == (side == "Over")}
+            pms = pm if side == "Over" else 1 - pm
+            best = {"side": side, "ev": ps * dec - 1, "dec": dec, "hit": (r["actual"] > thr) == (side == "Over"),
+                    "p": ps, "mev": pms * dec - 1}
     return best
 
 
@@ -84,7 +86,8 @@ def scored(sport: str, graded: Sequence[Dict]) -> List[Dict]:
         if (r.get("book") or "") in PE.PICKEM_BOOKS:
             continue
         x = rescore(sport, r)
-        if x is None or not PE.in_money_band(sport, x["ev"], r.get("book"), market=r.get("market")):
+        if x is None or not PE.in_money_band(sport, x["ev"], r.get("book"), market=r.get("market"), chance=x.get("p"),
+                                             mev=x.get("mev")):
             continue
         out.append({"date": str(r.get("slate_date")), "dec": x["dec"], "hit": x["hit"]})
     out.sort(key=lambda x: x["date"])

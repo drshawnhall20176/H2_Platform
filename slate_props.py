@@ -371,6 +371,25 @@ def why(row: Dict) -> str:
     return text
 
 
+def recent_hits(row: Dict, side: str) -> Dict:
+    """Nov 20 (weekend audit -- the prop tools people compare us with lead with this): how often the player cleared
+    TONIGHT's line, for the pick's side, in his last 5 and last 10 games (newest first), e.g. {"L5": "4/5", "L10":
+    "7/10", "HitL10": 0.7}. Empty without a line or games."""
+    vals, line = list(row.get("values") or []), row.get("line")
+    if line is None or not vals or side not in ("Over", "Under"):
+        return {}
+    out = {}
+    for n in (5, 10):
+        w = vals[:n]
+        if len(w) < min(n, 3):
+            continue
+        k = sum(1 for v in w if PE.clears(v, line)) if side == "Over" else \
+            sum(1 for v in w if not PE.clears(v, line) and v != PE.threshold(line))
+        out[f"L{n}"] = f"{k}/{len(w)}"
+        out[f"HitL{n}"] = k / len(w)
+    return out
+
+
 def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[str] = None) -> Optional[Dict]:
     """A Player props row -> the play shape every pick page reads (build_best_bets' schema), or None when there is
     no book line or no side. Conviction and grade go only to plays Player props leans on."""
@@ -437,6 +456,8 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[s
         "RealPrice": price, "RealPriceBook": best[0] if best else None, "PriceSource": "book" if price is not None else "model_fair",
         "Conviction": conviction, "ConvictionSource": "book" if p_mkt else "model_typical",
         "_ceiling": round(1.0 / p_mkt, 2) if p_mkt else None,
+        "MarketProb": round(p_mkt, 4) if p_mkt else None,              # Nov 20: the books' no-vig chance of the side
+        **recent_hits(row, "Over" if yes_only else side),
         "Lean": lean, "EV": td_value if td_value is not None else row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],
