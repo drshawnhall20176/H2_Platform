@@ -41,7 +41,7 @@ DAY = day.strftime("%Y-%m-%d")
 PAST = day < today
 
 
-@st.cache_data(ttl=900, show_spinner="Loading the board…")
+@st.cache_data(ttl=900, show_spinner="Loading the board…", max_entries=16)
 def _rows(sport, d, live):
     snaps = [r for r in (SE.from_snapshot(s) for s in MS.load_snapshots(sport, [d])) if r]
     if snaps or not live:

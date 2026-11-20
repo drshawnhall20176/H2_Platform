@@ -15,9 +15,11 @@ the second deployment its own entrypoint path; it contains no logic of its own, 
 
 import re
 import streamlit as st
+import cache_guard as _CG
+_CG.install()             # Nov 20: cap every cache before any module defines one
 from pathlib import Path
 
-import sports
+sports = _CG.safe_import("sports")   # Nov 20: survives a code reload landing mid-import
 
 _H2_MARK = Path(__file__).parent / "assets" / "h2_mark.png"
 
@@ -594,7 +596,18 @@ def run():
                 if getattr(pg, "url_path", None) == goto or (goto == "today" and getattr(pg, "title", None) == "Today"):
                     st.switch_page(pg)
     sport_bar(getattr(nav, "url_path", None), page_of, keys, page_ok)
-    nav.run()
+    _CG.watchdog()                                          # Nov 20: clear caches before memory runs out
+    try:
+        nav.run()
+        st.session_state["_reload_retry"] = False
+    except Exception as _exc:                                   # noqa: BLE001
+        # Nov 20: a code reload caught this page mid-import -- run it once more instead of showing the crash
+        if _CG.is_reload_race(_exc) and not st.session_state.get("_reload_retry"):
+            st.session_state["_reload_retry"] = True
+            import time as _time
+            _time.sleep(0.5)
+            st.rerun()
+        raise
 
 
 def sport_bar(url_path, page_of: dict, keys, page_ok) -> None:

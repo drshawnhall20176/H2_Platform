@@ -56,7 +56,7 @@ def get_api_key():
         return os.environ.get("ODDS_API_KEY")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate(date_str: str, stats_date_str: str):
     # A REAL, CONFIRMED FIX, not the original design: the actual network fetch here (E.build_
     # slate) used to be called directly, independently cached under THIS page's own function

@@ -110,3 +110,52 @@ def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
     assert "Final" not in today and "Sport" not in today
     past = list(GLT.frame(rows, past=True, show_sport=True).columns)
     assert past[:7] == ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result"]
+
+
+def test_select_all_ticks_every_row():
+    """Nov 20 (owner): a select-all box on every ticked-row table."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string("""
+import pandas as pd, streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+rows = LU.selectable(pd.DataFrame({"Pick": ["a", "b", "c"]}), "t_sel")
+st.write(f"picked={rows}")
+""").run()
+    assert "picked=[]" in " ".join(m.value for m in at.markdown)
+    at.checkbox(key="t_sel__all").check().run()
+    assert "picked=[0, 1, 2]" in " ".join(m.value for m in at.markdown)
+
+
+def test_tracking_only_logs_picks_without_a_price(monkeypatch):
+    """Nov 20 (owner): pick'em-only picks have no price; tracking-only logging records them at -110."""
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    got = {}
+
+    def fake_log(its, mode, stake, pstake, podds, real, tag, date_str):
+        got["its"], got["real"] = its, real
+        return {"singles": its, "ticket": None, "skipped": 0}
+    monkeypatch.setattr(TB, "log_selection", fake_log)
+    at = AppTest.from_string("""
+import streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+LU.panel([{"sport": "NCAAMB", "pick": "A Rebounds Under 6.5", "player": "A", "side": "Under", "line": 6.5,
+           "market": "Rebounds", "price": None}], "t_log", "2026-11-20")
+""").run()
+    at.checkbox(key="t_log_real").uncheck().run()
+    at.button(key="t_log_go").click().run()
+    assert got["its"][0]["price"] == -110 and got["real"] is False
+
+
+def test_tick_grid_select_all_per_column():
+    """Nov 20 (owner): a select-all box for each tick column."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string("""
+import pandas as pd, streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+df = pd.DataFrame({"Game": ["a", "b", "c"], "✓ Money": [False] * 3, "✓ Pick": [False] * 3})
+st.write(f"ticks={LU.tick_grid(df, ['✓ Money', '✓ Pick'], 'g')}")
+""").run()
+    assert "ticks=[]" in " ".join(m.value for m in at.markdown)
+    at.checkbox(key="g__all_✓ Money").check().run()
+    assert "ticks=[(0, '✓ Money'), (1, '✓ Money'), (2, '✓ Money')]" in " ".join(m.value for m in at.markdown)

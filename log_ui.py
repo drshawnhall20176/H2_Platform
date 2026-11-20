@@ -25,7 +25,12 @@ def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
     if not C.is_owner():
         st.dataframe(df, **kw)
         return []
+    # Nov 20 (owner: "can we add a select all tick box?"): every ticked-row table on the site gets one
+    everything = len(df) > 1 and st.checkbox(f"Select all {len(df)}", key=f"{key}__all")
     ev = st.dataframe(df, on_select="rerun", selection_mode="multi-row", key=key, **kw)
+    if everything:
+        st.caption(f"☑️ All {len(df)} rows are selected — untick **Select all** to pick rows one by one.")
+        return list(range(len(df)))
     try:
         return sorted(int(i) for i in (ev.selection.rows or []))
     except Exception:                                           # noqa: BLE001 -- older Streamlit / tests
@@ -43,7 +48,22 @@ def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> Lis
         return []
     cfg = dict(kw.pop("column_config", None) or {})
     cfg.update({c: st.column_config.CheckboxColumn(c, default=False) for c in cols})   # sized to the header
-    ed = st.data_editor(df, key=key, disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
+    # Nov 20 (owner: "missing the select all tick box for each of the selectable columns"): one per tick column
+    alls = []
+    if len(df) > 1 and cols:
+        boxes = st.columns(len(cols) + 1)
+        for c, box in zip(cols, boxes):
+            if box.checkbox(f"Select all {c.replace('✓ ', '')}", key=f"{key}__all_{c}"):
+                alls.append(c)
+        if alls:
+            df = df.copy()
+            for c in alls:
+                df[c] = True
+        if len(alls) > 1:
+            st.caption("⚠️ More than one column is fully ticked — on some games those bets take opposite sides of the "
+                       "same game, which just pays the books' cut twice. Untick one unless you mean it.")
+    ed = st.data_editor(df, key=f"{key}__{'_'.join(sorted(alls))}" if alls else key,
+                        disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
     out = []
     try:
         for i, row in enumerate(ed.to_dict("records")):
@@ -85,6 +105,9 @@ def _tag_records(sport: str) -> Dict:
 
 def picked(items: Sequence[Dict], rows: Sequence[int]) -> List[Dict]:
     return [dict(items[i]) for i in rows if 0 <= i < len(items)]
+
+
+TRACK_PRICE = -110
 
 
 def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-test", past: bool = False) -> None:
@@ -146,9 +169,17 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
     if broken:
         st.warning("These are missing the player, side or line and won't be logged — reload the page and tick them "
                    "again: " + "; ".join(str(b) for b in broken))
+    # Nov 20 (owner: 15 pick'em-only picks, tracking only, "Nothing logged -- check the prices"): a tracking-only log
+    # doesn't need a slip price -- picks without one are logged at TRACK_PRICE so their hit or miss is recorded
+    nop = [x.get("pick") for x in its if x.get("price") is None]
+    if not real and nop:
+        its = [x if x.get("price") is not None else dict(x, price=TRACK_PRICE) for x in its]
+        st.caption(f"Tracking only: {len(nop)} pick{'s' if len(nop) != 1 else ''} with no price will be logged at "
+                   f"{TRACK_PRICE:+d} so the hit or miss is recorded — the profit on those is notional.")
     missing = [x.get("pick") for x in its if x.get("price") is None]
     if missing:
-        st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged.")
+        st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged "
+                   "with real money (untick **Real money** to track them without a price).")
     # Nov 9: the coach grades the ticket before it's logged (or placed) -- legs, parlay size, same-game stacks, the
     # chance it hits vs what it pays, and the owner's daily limits (My Coach → My limits)
     blocked = False

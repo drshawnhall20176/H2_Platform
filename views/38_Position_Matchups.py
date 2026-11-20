@@ -53,7 +53,7 @@ class _NoGames(Exception):
     """Raised (never returned) for an empty schedule, so st.cache_data doesn't keep it."""
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, max_entries=16)
 def load_games(sport_key: str, date_str: str):
     # An empty list is NOT cached. A schedule feed that hiccups for one request used to come back as [],
     # get cached for 10 minutes, and make a real slate (e.g. yesterday's NBA games) read "No games found"
@@ -64,7 +64,7 @@ def load_games(sport_key: str, date_str: str):
     return games
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=16)
 def load_bundle(sport_key: str, date_str: str, game_json: str, previous: bool):
     import json
     return PD.load_bundle(sport_key, date_str, json.loads(game_json), previous)
@@ -237,7 +237,7 @@ def render_side(side, off_name, def_name, stat=None):
               "production, and rank by how much of the slot a player will actually see.")
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=16)
 def load_nfl_log(date_str: str):
     return PD.load_nfl_log(date_str)
 

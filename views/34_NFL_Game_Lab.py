@@ -53,13 +53,13 @@ if not sports.require_sport(["NFL"], "NFL Game Lab"):
     st.stop()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate_meta(date_str: str):
     _, meta = NSC.load_nfl_slate_cached(date_str)
     return meta
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str):
     """All game-level signals for one matchup -- cached per game.
     Two dates: date_str picks the game; stats_date_str picks which season's scoring rates power

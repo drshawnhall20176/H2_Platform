@@ -166,7 +166,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                "per game. Stakes are a quarter of the Kelly stake, scaled so the day's 💰 picks total 10u at most.")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def _rows(league: str, day: str, past: bool) -> List[Dict]:
     import todays_best as TB
     return TB.winner_rows(day, leagues=[league], past=past)
