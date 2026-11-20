@@ -468,7 +468,11 @@ if True:
                                "Money score": r.get("money_score"),
                                "Money pick": ((("💰 " if r.get("money") else "") + r["money_pick"]
                                                + (f" {float(r['money_price']):+.0f}" if r.get("money_price") is not None
-                                                  else "")) if r.get("money_pick") else "—"),
+                                                  else "")
+                                               + (f" · {_PE_H.stake_units(r.get('money_chance'), r.get('money_price')):g}u"
+                                                  if r.get("money") and _PE_H.stake_units(r.get("money_chance"),
+                                                                                         r.get("money_price")) else ""))
+                                              if r.get("money_pick") else "—"),
                                "League": r["league"],
                                "Final": r.get("final") or "—",
                                "Pick result": _TB.RESULT_ICON.get(r.get("best_result"), "—"),
