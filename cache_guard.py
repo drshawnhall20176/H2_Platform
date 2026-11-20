@@ -77,3 +77,28 @@ def watchdog(now: float | None = None, rss=None, clear=None) -> bool:
     print(f"[cache_guard] memory {used:.0f} MB over {limit_mb():.0f} MB: data caches cleared"
           + (f", now {after:.0f} MB" if after is not None else "") + f" (clear #{_STATE['clears']})")
     return True
+
+
+# --------------------------------------------------------------------------- the reload race (Nov 20)
+# Streamlit Cloud reloads the code in place when a change is pushed ("Updated app!"). A page that is importing a module
+# at that instant can find it half-replaced and crash -- the owner's log: "'NoneType' object has no attribute
+# '__dict__'" importing sports.py right after an update. That's a timing accident, not a bug in the page, so the page
+# is simply run again once.
+def is_reload_race(exc: BaseException) -> bool:
+    msg = str(exc)
+    return (isinstance(exc, AttributeError) and "'NoneType' object has no attribute '__dict__'" in msg) or \
+        (isinstance(exc, ImportError) and "partially initialized module" in msg)
+
+
+def safe_import(name: str, tries: int = 3):
+    """importlib.import_module, retried when a code reload catches it half-way."""
+    import importlib
+    import sys
+    for i in range(tries):
+        try:
+            return importlib.import_module(name)
+        except (AttributeError, ImportError) as exc:
+            if not is_reload_race(exc) or i == tries - 1:
+                raise
+            sys.modules.pop(name, None)
+            time.sleep(0.3 * (i + 1))
