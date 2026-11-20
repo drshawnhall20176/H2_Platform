@@ -393,7 +393,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
                 label = f"{p['home'] if home else p['away']} moneyline"
             else:
                 home = (p.get("edge") or 0) >= 0
-                price = p.get("spread_price") if _dec(p.get("spread_price")) else STD_PRICE
+                price = IP.spread_price_for(p, "home" if home else "away")
+                price = price if _dec(price) else STD_PRICE
                 ch = p.get("cover_est")
                 hs = p.get("home_spread")
                 label = (f"{p['home']} {hs:+g}" if home else f"{p['away']} {-hs:+g}") if hs is not None else "—"
@@ -430,7 +431,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
         else:
             home = (float(mm) + float(hs)) >= 0
             out.update(bet_market="Spread", bet_side="home" if home else "away",
-                       bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price") or STD_PRICE)
+                       bet_line=float(hs) if home else -float(hs),
+                       bet_price=IP.spread_price_for(p, "home" if home else "away") or STD_PRICE)
         # Nov 6 (research/backtest_ncaamb_totals.py, 2 seasons, 5,214 games, walk-forward): NCAAMB total leans 3+ points
         # off the line -- Unders hit 45.3% (558; 44.0% in November), Overs 50.8% (1,625). Shown as the lean's backtest so
         # the model's college Unders are never mistaken for an edge.
@@ -448,7 +450,7 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
     if p.get("cover_est") is not None and p.get("edge") is not None and hs is not None:
         home = p["edge"] >= 0
         out.update(bet_market="Spread", bet_side="home" if home else "away",
-                   bet_line=float(hs) if home else -float(hs), bet_price=p.get("spread_price"))
+                   bet_line=float(hs) if home else -float(hs), bet_price=IP.spread_price_for(p, "home" if home else "away"))
         out.update(best=(f"{p['home']} {float(hs):+g}" if home else f"{p['away']} {-float(hs):+g}"),
                    lean_detail=f"model {(p['home'] if home else p['away'])} {(-float(mm) if home else float(mm)):+.1f}"
                    if mm is not None else out.get("lean_detail", ""),
