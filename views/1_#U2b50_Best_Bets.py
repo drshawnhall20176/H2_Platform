@@ -380,6 +380,11 @@ if _props_model:
     for p in view:
         p["_cushion"] = BBD_PE.cushion_text(p.get("Cushion"))
         p["_warn"] = " · ".join(p.get("Warnings") or []) or "—"
+        try:                                                    # Nov 20: the props Money Score (props_money.py)
+            import props_money as _PMS
+            p["_mscore"] = _PMS.play_score(_active.key, p)
+        except Exception:                                       # noqa: BLE001
+            p["_mscore"] = None
         p["_stake"] = (f"{BBD_PE.stake_units(p.get('ModelProb'), p.get('RealPrice')):g}u"
                        if BBD_PE.play_is_money(_active.key, p)
                        and BBD_PE.stake_units(p.get("ModelProb"), p.get("RealPrice")) else "")
@@ -394,6 +399,9 @@ if _props_model:
     _cols.insert(_cols.index("_cushion"), "L10")
     _cols.insert(_cols.index("_cushion") + 1, "_use")
     _rename["_use"] = "Use"
+    if any(p.get("_mscore") is not None for p in view):       # Nov 20: the Money Score, information beside 💰
+        _cols.insert(_cols.index("_use") + 1, "_mscore")
+        _rename["_mscore"] = "Money score"
     if any(p.get("_stake") for p in view):                    # Nov 20: a stake on each 💰 (quarter Kelly, 1u = 1%)
         _cols.insert(_cols.index("_use") + 1, "_stake")
         _rename["_stake"] = "Stake"
@@ -404,14 +412,18 @@ if _show_blowout_risk:
     _rename["_blowout_risk"] = "Blowout Risk"
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}"}, na_rep="—")
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}",
+                              "Money score": "{:+.1%}"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
 if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
                "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "
                "brackets is the best price elsewhere — your book doesn't post that player. **L5 / L10**: how many of "
-               "his last 5 / 10 games cleared tonight's line on the pick's side.")
+               "his last 5 / 10 games cleared tonight's line on the pick's side. **Money score**: what the price pays "
+               "per $1, from a chance that trusts the model only as far as its record against the books has earned "
+               "(refit every morning). Shown beside 💰 while it builds a live record; in testing NBA picks scoring "
+               "+4% to +12% returned +3.5% per $1 over 1,131.")
     if _held:
         with st.expander(f"⚠️ Model vs the books — check the news before betting ({len(_held)})"):
             st.caption("The book's line is far from the projection — usually minutes, a role change or an injury the "
