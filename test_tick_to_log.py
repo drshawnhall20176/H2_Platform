@@ -124,3 +124,24 @@ st.write(f"picked={rows}")
     assert "picked=[]" in " ".join(m.value for m in at.markdown)
     at.checkbox(key="t_sel__all").check().run()
     assert "picked=[0, 1, 2]" in " ".join(m.value for m in at.markdown)
+
+
+def test_tracking_only_logs_picks_without_a_price(monkeypatch):
+    """Nov 20 (owner): pick'em-only picks have no price; tracking-only logging records them at -110."""
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    got = {}
+
+    def fake_log(its, mode, stake, pstake, podds, real, tag, date_str):
+        got["its"], got["real"] = its, real
+        return {"singles": its, "ticket": None, "skipped": 0}
+    monkeypatch.setattr(TB, "log_selection", fake_log)
+    at = AppTest.from_string("""
+import streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+LU.panel([{"sport": "NCAAMB", "pick": "A Rebounds Under 6.5", "player": "A", "side": "Under", "line": 6.5,
+           "market": "Rebounds", "price": None}], "t_log", "2026-11-20")
+""").run()
+    at.checkbox(key="t_log_real").uncheck().run()
+    at.button(key="t_log_go").click().run()
+    assert got["its"][0]["price"] == -110 and got["real"] is False

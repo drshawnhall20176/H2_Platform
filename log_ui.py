@@ -92,6 +92,9 @@ def picked(items: Sequence[Dict], rows: Sequence[int]) -> List[Dict]:
     return [dict(items[i]) for i in rows if 0 <= i < len(items)]
 
 
+TRACK_PRICE = -110
+
+
 def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-test", past: bool = False) -> None:
     """The log box for ticked picks. Nothing is written until the button is pressed."""
     import components as C
@@ -151,9 +154,17 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
     if broken:
         st.warning("These are missing the player, side or line and won't be logged — reload the page and tick them "
                    "again: " + "; ".join(str(b) for b in broken))
+    # Nov 20 (owner: 15 pick'em-only picks, tracking only, "Nothing logged -- check the prices"): a tracking-only log
+    # doesn't need a slip price -- picks without one are logged at TRACK_PRICE so their hit or miss is recorded
+    nop = [x.get("pick") for x in its if x.get("price") is None]
+    if not real and nop:
+        its = [x if x.get("price") is not None else dict(x, price=TRACK_PRICE) for x in its]
+        st.caption(f"Tracking only: {len(nop)} pick{'s' if len(nop) != 1 else ''} with no price will be logged at "
+                   f"{TRACK_PRICE:+d} so the hit or miss is recorded — the profit on those is notional.")
     missing = [x.get("pick") for x in its if x.get("price") is None]
     if missing:
-        st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged.")
+        st.caption("Add a price for: " + "; ".join(str(m) for m in missing) + " — picks without one aren't logged "
+                   "with real money (untick **Real money** to track them without a price).")
     # Nov 9: the coach grades the ticket before it's logged (or placed) -- legs, parlay size, same-game stacks, the
     # chance it hits vs what it pays, and the owner's daily limits (My Coach → My limits)
     blocked = False
