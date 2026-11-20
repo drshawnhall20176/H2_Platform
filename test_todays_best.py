@@ -97,7 +97,8 @@ def test_best_line_tested_pick_vs_lean(monkeypatch):
          "model_total": 154.5}
     monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_SINGLE})
     b = TB.best_line(p, "NCAAMB", 0.967)
-    assert b["best"] == "MVSU +34.5" and b["best_tested"] and abs(b["best_value"] - (0.56 * (1 + 100 / 105) - 1)) < 1e-9
+    away = IP.other_side_price(-105)                         # Nov 20: the away pick at the away side's price
+    assert b["best"] == "MVSU +34.5" and b["best_tested"] and abs(b["best_value"] - (0.56 * IP._dec(away) - 1)) < 1e-9
     monkeypatch.setattr(IP, "hoops_use", lambda lg, rec: {"use": PE.USE_PASS})
     lean = TB.best_line(p, "NCAAMB", 0.967)
     assert lean["best"] == "MVSU +34.5" and not lean["best_tested"] and lean["best_value"] is None
@@ -315,3 +316,14 @@ def test_tested_tennis_and_hoops_picks_carry_the_bet_for_the_log_box():
     import intl_picks as IP
     f = IP.bet_fields(b["_rec"], b["bet_market"], b["bet_side"], b["bet_line"], -428, 0, True)
     assert f["side"] == "Ben Shelton" and f["sport"] == "TENNIS" and f["notes"] == "gl:TENNIS:g1"
+
+
+def test_away_spread_picks_use_the_away_price_not_the_homes():
+    """Nov 20: NHL away +1.5 picks were booked at the home -1.5's price (+207 instead of about -250)."""
+    import intl_picks as IP
+    assert IP.spread_price_for({"spread_price": 207}, "home") == 207
+    est = IP.spread_price_for({"spread_price": 207}, "away")
+    assert -270 < est < -240
+    assert IP.spread_price_for({"spread_price": 207, "spread_away_price": -260}, "away") == -260
+    assert abs(IP.other_side_price(-110) + 109) <= 1
+    assert IP.spread_price_for({"spread_price": None}, "away") is None
