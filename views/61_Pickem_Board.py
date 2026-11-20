@@ -20,26 +20,7 @@ SPORT_KEY = _active.key
 C.page_header("🎲", "Pick'em Board",
               f"PrizePicks, Underdog, DK Pick6, Dabble and ParlayPlay lines — More or Less, checked against the sportsbooks — "
               f"{_active.icon} {_active.label}")
-# Nov 18 (owner): follows the sport picked on the Sport desk, and can switch right here -- the choice is the same
-# shared one (session "sport"), so the desk and the sidebar follow it too.
-try:
-    _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
-except Exception:                                               # noqa: BLE001
-    _owner = True
-_choices = [s for s in sports.selectable_sports(_owner) if s.key in BBD.PROPS_MODEL_SPORTS]
-if _choices:
-    _keys = [s.key for s in _choices]
-
-    def _switch():
-        k = st.session_state.get("pk_sport_pick")
-        if k:
-            st.session_state["sport"] = k
-
-    _cur = st.session_state.get("sport")
-    st.session_state["pk_sport_pick"] = _cur if _cur in _keys else None    # mirror the shared pick (desk, sidebar)
-    st.pills("Sport", _keys, key="pk_sport_pick", on_change=_switch,
-             format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}")
-
+# Nov 18 / 19 (owner): follows the shared sport -- switch it with the sport bar at the top of the page.
 if SPORT_KEY not in BBD.PROPS_MODEL_SPORTS:
     st.info(f"The Pick'em Board reads player props from the props model, which covers "
             f"{', '.join(BBD.PROPS_MODEL_SPORTS)}. Pick one of those in the sport picker.")

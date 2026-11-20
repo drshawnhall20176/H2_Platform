@@ -568,7 +568,8 @@ if True:
                 st.markdown(f"**Blowouts: {_bh} of {len(_gb)} happened — the chances said about {_be:.1f}.** "
                             + ("Right on." if abs(_bh - _be) <= max(1.0, 0.25 * _be) else
                                ("More than expected." if _bh > _be else "Fewer than expected."))
-                            + " A 27% chance should miss about 3 times in 4, so judge these by that count, not one game.")
+                            + f" At about {_be / len(_gb):.0%} each, most of these games were never expected to be "
+                              "blowouts — judge the list by that count, not by any one game.")
             C.hit_miss_breakdown(_btop, "likely_result", "likely_chance", key="home_blow_hm",
                                  title="The model's most likely outcome — right or wrong")
             _btop = C.show_filter(_btop, "likely_result", key="home_blow_show")

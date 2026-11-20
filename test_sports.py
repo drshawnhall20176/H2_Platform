@@ -2649,3 +2649,87 @@ def test_kickoff_text_adds_the_weekday_only_for_the_week_list():
     dt = S.game_dt("2026-10-10T19:30:00Z")
     assert S.kickoff_text(dt) == "3:30 PM ET" and S.kickoff_text(dt, with_day=True) == "Sat 3:30 PM ET"
     assert S.kickoff_text(None) == "time TBD"
+
+
+def test_sport_bar_offers_only_the_sports_the_page_exists_for():
+    """Nov 19 (owner): Command Center (every sport page) gets a sport picker; switching never lands on a missing page."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import streamlit as st
+import streamlit_app as A
+st.session_state.setdefault("sport", "NBA")
+ok = lambda key, title, sp: not (key == "12" and sp != "NFL")
+A.sport_bar("command_center", {"command_center": ("0", "Command Center"), "nfl_matchup": ("12", "Matchup Lab")},
+            ["NBA", "NFL", "NHL"], ok)
+A.sport_bar("nfl_matchup", {"command_center": ("0", "Command Center"), "nfl_matchup": ("12", "Matchup Lab")},
+            ["NBA", "NFL", "NHL"], ok)
+A.sport_bar("home", {}, ["NBA", "NFL"], ok)
+st.write(st.session_state["sport"])
+''').run()
+    assert not at.exception, at.exception
+    assert len(at.get("button_group")) == 1                    # one bar: Matchup Lab (NFL only) and the desk get none
+    at.button_group[0].set_value("NHL").run()
+    assert at.session_state["sport"] == "NHL"
+
+
+
+def test_command_center_sport_bar_has_an_all_choice():
+    """Nov 19 (owner): an "All" button on Command Center for the tool as a whole, beside the sport buttons."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string('''
+import streamlit as st
+import streamlit_app as A
+st.session_state.setdefault("sport", "NBA")
+pages = {"command_center": ("0", "Command Center"), "nba_props": ("5", "Props")}
+A.sport_bar(st.session_state.get("_page", "command_center"), pages, ["NBA", "NHL"], lambda k, t, s: True)
+''').run()
+    assert not at.exception, at.exception
+    assert list(at.button_group[0].options)[0].endswith("All sports")
+    at.button_group[0].set_value("__all__").run()
+    assert at.session_state["cc_all"] is True and at.session_state["sport"] == "NBA"   # the sport stays for other pages
+    at.button_group[0].set_value("NHL").run()
+    assert at.session_state["cc_all"] is False and at.session_state["sport"] == "NHL"
+    at.session_state["_page"] = "nba_props"                     # other pages never offer "All"
+    at.run()
+    assert not any(o.endswith("All sports") for o in at.button_group[0].options)
+
+
+def test_command_center_all_view_renders(monkeypatch):
+    """The All view reads the boards already saved today (no live builds -- Nov 19: building five was too slow)."""
+    from streamlit.testing.v1 import AppTest
+    import best_bets_data as BBD
+    import betlog as B
+    import todays_best as TB
+
+    def boom(*a, **k):
+        raise AssertionError("the All view must not build a board")
+
+    def row(sp, i, lock):
+        return dict(sport=sp, kind="Prop", time="7:30 PM", pick=f"{sp} Guy {i} Points Over 20.5", game=f"A{i} @ B{i}",
+                    price=-110, book="draftkings", chance=0.6 + i / 100, lock=lock)
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", boom)
+    monkeypatch.setattr(BBD, "load_mlb_best_bets_board", boom)
+    monkeypatch.setattr(TB, "load_props", lambda sp, d: ({"at": "2026-11-19T19:05:00+00:00",
+                                                           "rows": [row(sp, 1, True), row(sp, 2, False)]}
+                                                          if sp == "NBA" else None))
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [
+        dict(sport="NBA", game="A1 @ B1"), dict(sport="NBA", game="C @ D"), dict(sport="NHL", game="E @ F")])
+    monkeypatch.setattr(B, "list_bets", lambda **kw: [])
+    monkeypatch.setattr(S, "in_season", lambda k, day=None: k in ("NBA", "NHL"))
+    page = str(_HERE / "views" / "0_#L01f3c6_Command_Center.py")
+    at = AppTest.from_string(f"""
+import runpy, streamlit as st
+st.session_state["cc_all"] = True
+runpy.run_path({page!r})
+""", default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "Sport by sport" in text
+    df = at.dataframe[0].value.set_index("Sport")
+    nba = [i for i in df.index if "NBA" in i][0]
+    nhl = [i for i in df.index if "NHL" in i][0]
+    assert df.loc[nba, "Games today"] == 2 and df.loc[nba, "Picks"] == 2 and df.loc[nba, "🔒"] == 1
+    assert df.loc[nba, "Board saved"] == "2:05 PM" and df.loc[nhl, "Board saved"] == "not built yet"
+    assert df.loc[nhl, "Games today"] == 1
+    assert any(p.startswith("🔒") for p in at.dataframe[1].value["Pick"])
