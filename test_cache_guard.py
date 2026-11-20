@@ -95,3 +95,15 @@ def test_app_loads_the_saved_board_instead_of_building(monkeypatch):
     monkeypatch.setenv("H2_BOARD_LIVE", "1")
     load.age = 0.1
     assert BBD.saved_board("NCAAF", day, "draftkings") is None                      # the warm job always builds
+
+
+def test_heavy_sports_are_never_built_inside_the_app(monkeypatch):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "saved_board", lambda *a, **k: None)
+    monkeypatch.setattr(BBD, "_in_app", lambda: True)
+    monkeypatch.setattr(BBD, "build_generic_board", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built")))
+    BBD.load_generic_best_bets_board.clear()
+    assert BBD.load_generic_best_bets_board("NCAAF", "2026-11-21", "draftkings")[0] == []
+    monkeypatch.setattr(BBD, "build_generic_board", lambda *a, **k: (["p"], [], []))
+    assert BBD.load_generic_best_bets_board("NBA", "2026-11-21", "draftkings")[0] == ["p"]      # light sports build
+    BBD.load_generic_best_bets_board.clear()

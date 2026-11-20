@@ -120,6 +120,7 @@ else:
                 st.warning(f"No slate data available for {_active.label} on {date_str}. "
                           "Try a date when games are scheduled.")
             st.stop()
+    BBD.board_pending_note(_active.key, date_str, preferred_book)   # Nov 20: heavy sports load the saved board
     ss_key = f"_available_books_{_active.key}_{date_str}"
     if st.session_state.get(ss_key) != available_books:
         st.session_state[ss_key] = available_books
