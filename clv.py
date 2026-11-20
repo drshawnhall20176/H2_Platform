@@ -62,6 +62,15 @@ def of(row: Dict, entry: str = "bet") -> Optional[Dict]:
     return out
 
 
+def pick_clv(row: Dict) -> Optional[str]:
+    """Nov 20: beat / lost / same for the side a saved read ended on (a 💰 or 🔒 pick), from the first time it was read
+    to its last pre-game view -- the market's verdict on the pick, known long before enough wins and losses are."""
+    if row.get("side") not in ("Over", "Under"):
+        return None
+    c = of(dict(row, first_side=row["side"]), "first")
+    return c["result"] if c else None
+
+
 def record(rows: Iterable[Dict], entry: str = "bet", key=lambda c, r: c["tag"]) -> Dict[str, Dict]:
     """{group: {"beat", "lost", "same", "n", "beat_rate" (of those that moved)}} -- grouped by the entry tag."""
     import props_engine as PE

@@ -46,6 +46,7 @@ def test_score_label_result_and_money_band(monkeypatch):
     assert MSC.is_money("NCAAMB", best) == (MSC.BAND[0] <= best["score"] < MSC.BAND[1])
     assert not MSC.is_money("NBA", best) and not MSC.is_money("NCAAMB", dict(best, score=0.20))
     assert not MSC.is_money("NCAAMB", dict(best, mkt="TOT"))
+    assert not MSC.is_money("NCAAMB", dict(best, score=0.08, chance=0.04))           # a long shot
     assert MSC.score_record(_rec(), "NCAAMB", w_by={})["best"] is None                # no fit: no score
 
 
@@ -72,3 +73,13 @@ def test_scoreboard_counts_game_line_money(monkeypatch):
     g = [r for r in b["sports"] if r["sport"] == "games:NCAAMB"][0]
     assert (g["hits"], g["misses"]) == (1, 1) and abs(g["units"] - 0.2) < 1e-9
     assert MSB.table(b)[-1]["Sport"].endswith("game lines")
+
+
+def test_pick_clv_follows_the_picks_own_side():
+    import clv
+    row = {"side": "Under", "line": 20.5, "ts": "2026-11-20T23:00", "first_ts": "2026-11-20T15:00", "first_line": 21.5,
+           "first_side": "Over", "first_over_price": -110, "first_under_price": -110, "over_price": -110,
+           "under_price": -110}
+    assert clv.pick_clv(row) == "beat"           # Under 21.5 taken, closed 20.5: the market moved toward the pick
+    assert clv.pick_clv(dict(row, line=22.5)) == "lost"
+    assert clv.pick_clv(dict(row, side=None)) is None

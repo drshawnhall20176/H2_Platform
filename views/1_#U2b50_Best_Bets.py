@@ -276,11 +276,16 @@ _USE_FILTER = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg",
                "Parlay legs": ("🎟️ Parlay + Single", "🎟️ Parlay leg"),
                BBD_PE.MOST_PROBABLE: (),      # Nov 2: 60%+ to hit, 15%+ cushion, not held for news (any Use tag)
                BBD_PE.MONEY_PICK + "s": ()}   # Nov 19: the edge band that has returned money in testing
+if _active.key == "NCAAMB" and _props_model:       # Nov 20 (weekend audit): say it where the picks are
+    st.warning("College basketball props are new and running hot: their first ~70 graded picks said 53–57% and hit "
+               "44–46%. Treat these chances as optimistic until the record catches up — the game-line 💰 picks "
+               "(Money Score) are the tested college basketball play.", icon="⚠️")
 _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_filter",
                       help="🎟️ Parlay legs: 15%+ cushion, 60%+ to hit, a positive edge, no warnings. 🎯 Singles: a real "
                            "edge (+3% at the price) — some are too close to the number to chain into a parlay. 🔒 Most probable: "
                            "60%+ to hit with the projection 15%+ past the line, not held for a news check — the reads "
-                           "that have hit most often so far, whatever the price (see Postgame Review). A line only a pick'em app posts "
+                           "that have hit most often so far, and (Nov 20) only at a price that pays: a likely pick at a price "
+                           "that doesn't isn't promoted. A line only a pick'em app posts "
                            "is never a 🔒: no sportsbook price checks it. " + BBD_PE.MONEY_HELP)
              if _props_model else "All playable")
 # Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
@@ -375,6 +380,14 @@ if _props_model:
     for p in view:
         p["_cushion"] = BBD_PE.cushion_text(p.get("Cushion"))
         p["_warn"] = " · ".join(p.get("Warnings") or []) or "—"
+        try:                                                    # Nov 20: the props Money Score (props_money.py)
+            import props_money as _PMS
+            p["_mscore"] = _PMS.play_score(_active.key, p)
+        except Exception:                                       # noqa: BLE001
+            p["_mscore"] = None
+        p["_stake"] = (f"{BBD_PE.stake_units(p.get('ModelProb'), p.get('RealPrice')):g}u"
+                       if BBD_PE.play_is_money(_active.key, p)
+                       and BBD_PE.stake_units(p.get("ModelProb"), p.get("RealPrice")) else "")
         p["_use"] = (("💰 " if BBD_PE.play_is_money(_active.key, p) else "") + ("🔒 " if BBD_PE.play_is_lock(p) else "")
                      + str(p.get("Use") or ""))                 # Nov 19: 💰 Money pick / 🔒 Most probable icons
     _cols.insert(_cols.index("_display_line") + 1, "_cushion")
@@ -386,6 +399,12 @@ if _props_model:
     _cols.insert(_cols.index("_cushion"), "L10")
     _cols.insert(_cols.index("_cushion") + 1, "_use")
     _rename["_use"] = "Use"
+    if any(p.get("_mscore") is not None for p in view):       # Nov 20: the Money Score, information beside 💰
+        _cols.insert(_cols.index("_use") + 1, "_mscore")
+        _rename["_mscore"] = "Money score"
+    if any(p.get("_stake") for p in view):                    # Nov 20: a stake on each 💰 (quarter Kelly, 1u = 1%)
+        _cols.insert(_cols.index("_use") + 1, "_stake")
+        _rename["_stake"] = "Stake"
     _cols.append("_warn")
     _rename.update({"_cushion": "Cushion", "_warn": "Warnings"})
 if _show_blowout_risk:
@@ -393,14 +412,18 @@ if _show_blowout_risk:
     _rename["_blowout_risk"] = "Blowout Risk"
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}"}, na_rep="—")
+st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}",
+                              "Money score": "{:+.1%}"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
 if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
                "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "
                "brackets is the best price elsewhere — your book doesn't post that player. **L5 / L10**: how many of "
-               "his last 5 / 10 games cleared tonight's line on the pick's side.")
+               "his last 5 / 10 games cleared tonight's line on the pick's side. **Money score**: what the price pays "
+               "per $1, from a chance that trusts the model only as far as its record against the books has earned "
+               "(refit every morning). Shown beside 💰 while it builds a live record; in testing NBA picks scoring "
+               "+4% to +12% returned +3.5% per $1 over 1,131.")
     if _held:
         with st.expander(f"⚠️ Model vs the books — check the news before betting ({len(_held)})"):
             st.caption("The book's line is far from the projection — usually minutes, a role change or an injury the "

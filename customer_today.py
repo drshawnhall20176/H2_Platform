@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional
 
 import pick_records as PR
+import props_engine as PE
 
 WINNING, NEW = "✅ Winning record", "🆕 Too new to judge"
 PROPS_SPORTS = ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB", "WNBA", "MLB")
@@ -57,7 +58,8 @@ def money_picks(rows: List[Dict], parse_time: Optional[Callable] = None, now=Non
         out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"), "edge": r.get("edge"),
                     "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None
                                                        else ""),
-                    "game": r.get("game") or "", "time": r.get("time") or "", "lock": bool(r.get("lock"))})
+                    "game": r.get("game") or "", "time": r.get("time") or "", "lock": bool(r.get("lock")),
+                    "stake": PE.stake_units(r.get("chance"), r.get("price"))})
         if len(out) >= n:
             break
     return out

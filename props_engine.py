@@ -1098,11 +1098,21 @@ def most_probable(chance, cushion, gap=None) -> bool:
             and str(gap or "") != "big")
 
 
-def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
+LOCK_MIN_EV = 0.0
+
+
+def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False, ev=None) -> bool:
     """🔒 Most probable, Nov 18 (owner said yes): most_probable AND a sportsbook line. A line only a pick'em app posts
     (book = prizepicks / pick6 / ...) has no book price checking the model -- research/pickem_study.py found the
-    model's side on those hit 44-51%, below a coin flip on held-out data. Those stay listed, labelled pick'em only."""
-    return bool(most_probable(chance, cushion, gap)) and not pickem and (book or "") not in PICKEM_BOOKS
+    model's side on those hit 44-51%, below a coin flip on held-out data. Those stay listed, labelled pick'em only.
+
+    Nov 20 (weekend audit, owner: "build how you deem best"): and the PRICE must pay -- edge LOCK_MIN_EV or better at the
+    price, when the price is known. NHL 🔒 hit 60.9% as stated but needed 64.3% at their prices (-6.2% per $1 over
+    1,523); NBA 🔒 with a positive edge returned +7.4%. A likely pick at a price that doesn't pay isn't promoted."""
+    if not (bool(most_probable(chance, cushion, gap)) and not pickem and (book or "") not in PICKEM_BOOKS):
+        return False
+    e = maybe(ev)
+    return e is None or e >= LOCK_MIN_EV
 
 
 # Nov 19 (owner: "is there a page or table that highlights picks projected to make money ... I would love to test
@@ -1134,7 +1144,8 @@ MONEY_HELP = ("💰 Money picks (live test, Nov 20–23, every props sport): the
               "the sportsbook, gives it at least a 40% chance, and the sportsbook's price is within 3% of the books' "
               "own fair price. In testing, NBA picks like these returned +6% per $1 over 107 graded picks; the other "
               "sports had too few to judge, which is what this weekend is for. Graded every morning — the running "
-              "record is on Today.")
+              "record is on Today. Stake: a quarter of the Kelly stake for that chance and price, in units "
+              "(1u = 1% of your bankroll), 0.25u to 2u.")
 
 
 def _et_today() -> str:
@@ -1239,7 +1250,19 @@ def snapshot_is_money(sport: str, s: Dict) -> bool:
 def play_is_lock(p: Dict) -> bool:
     """is_lock for a board play (Best Bets / Today rows)."""
     return is_lock(p.get("ModelProb"), p.get("Cushion"), p.get("Gap"), p.get("PricedAt") if p.get("Pickem") else None,
-                   bool(p.get("Pickem")))
+                   bool(p.get("Pickem")), ev=p.get("EV") if p.get("RealPrice") is not None else None)
+
+
+def stake_units(chance, price, kelly_frac: float = 0.25, cap: float = 2.0) -> Optional[float]:
+    """Nov 20: a suggested stake in units (1u = 1% of the bankroll): a quarter of the Kelly stake for this chance at this
+    price, rounded to 0.25u, between 0.25u and `cap`. None when the price doesn't pay."""
+    p, d = maybe(chance), decimal(price) if price is not None else None
+    if p is None or not d or d <= 1:
+        return None
+    f = (p * d - 1) / (d - 1)
+    if f <= 0:
+        return None
+    return max(0.25, min(cap, round(100 * f * kelly_frac * 4) / 4))
 
 
 def is_parlay_use(tag: Optional[str]) -> bool:

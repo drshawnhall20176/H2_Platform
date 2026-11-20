@@ -97,6 +97,11 @@ def _line(p: Dict, mark: str = "") -> str:
         bits.append(f"{pr}" + (f" {p['book']}" if p.get("book") else ""))
     if p.get("chance") is not None:
         bits.append(f"{p['chance']:.0%}")
+    if p.get("money") and not mark:
+        import props_engine as PE
+        u = PE.stake_units(p.get("chance"), p.get("price"))
+        if u:
+            bits.append(f"**{u:g}u**")
     return (mark + " " if mark else "") + " · ".join(bits)
 
 
