@@ -36,8 +36,8 @@ def now_et() -> datetime:
 
 
 def picks_due(now: datetime) -> bool:
-    """Weekdays from 3:30 PM, weekends from 11:30 AM (New York)."""
-    start = (11, 30) if now.weekday() >= 5 else (15, 30)
+    """Weekdays from 3:30 PM, weekends from 10:30 AM (New York): Sunday NFL starts at 1 PM."""
+    start = (10, 30) if now.weekday() >= 5 else (15, 30)
     return (now.hour, now.minute) >= start
 
 

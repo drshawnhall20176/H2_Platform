@@ -1,7 +1,7 @@
 # The H2 Discord bot (community_post.py), Nov 20.
 #
 # picks:   the day's 💰 Money picks and strongest 🔒 Most probable picks -> the PUBLIC community channel. Weekdays
-#          after 3:30 PM New York, weekends after 11:30 AM. Once a day.
+#          after 3:30 PM New York, weekends after 10:30 AM. Once a day.
 # results: the next morning, the same picks marked ✅ / ❌ with the day's record. Once a day, when they're graded.
 # Only model picks go out -- never the owner's bets (those stay in the private morning brief).
 #
