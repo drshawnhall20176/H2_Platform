@@ -10,7 +10,7 @@ G = {"sport": "EUROLEAGUE", "game_id": "g1", "kickoff": "2026-11-12T19:30:00+00:
 
 def test_tick_item_takes_the_models_side_of_each_market():
     sp = HG.tick_item(G, "Spread")
-    assert sp["pick"] == "KK Crvena zvezda +6" and sp["bet_side"] == "away" and sp["bet_line"] == 6.0 and sp["price"] == -110
+    assert sp["pick"] == "KK Crvena zvezda +6" and sp["bet_side"] == "away" and sp["bet_line"] == 6.0 and sp["price"] == -109   # Nov 20: the away side's own (estimated) price
     ml = HG.tick_item(G, "Moneyline")
     assert ml["pick"] == "Real Madrid moneyline" and ml["price"] == -250 and ml["bet_line"] is None
     tot = HG.tick_item(G, "Total")
@@ -82,3 +82,23 @@ def test_book_tick_columns_sit_next_to_what_they_bet():
     cols = list(df.columns)
     assert cols.index("✓ Home spread") == cols.index("Book spread") + 1 and cols[-1] == "Why"
     assert df.loc[0, "Book ML"] == "Real Madrid -250 / +200"
+
+
+def test_home_game_lines_log_pick_winner_or_money_from_their_own_tick_boxes():
+    """Nov 20 (owner): the Home game-lines table had a tick for the Pick only."""
+    import ast
+    src = open("Home.py").read()
+    assert '"✓ Pick"' in src and '"✓ Winner"' in src and '"✓ Money"' in src
+    tree = ast.parse(src)
+    fn = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_line_items"][0]
+    ns = {}
+    import pick_records as _PR                                     # noqa: F401
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "Home.py", "exec"), {"_PR": __import__("pick_records")}, ns)
+    full = {"sport": "NCAAMB", "home": "Duke", "away": "Army", "home_spread": -8.5, "spread_price": -110,
+            "best_home": -400, "best_away": 320, "model_p": 0.8, "model_margin": 9.0}
+    row = {"winner": "Duke", "price": -400, "_full": full, "money_market": "Spread", "money_side": "away",
+           "money_line": 8.5, "money_price": -108, "money_pick": "Army +8.5", "money": True}
+    items = ns["_line_items"]([row], [(0, "✓ Winner"), (0, "✓ Money")])
+    assert items[0]["pick"] == "Duke moneyline" and items[0]["price"] == -400 and items[0]["bet_market"] == "Moneyline"
+    assert items[1]["pick"] == "Army +8.5" and items[1]["bet_line"] == 8.5 and items[1]["price"] == -108
+    assert items[1]["bet_side"] == "away" and items[1]["note"] == "💰 Money pick"

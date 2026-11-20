@@ -490,7 +490,8 @@ def side_item(p, market: str, side: str, line=None, price=None):
         if line is None:
             if p.get("home_spread") is not None:
                 line = float(p["home_spread"]) if side == "home" else -float(p["home_spread"])
-                price = price if price is not None else (p.get("spread_price") or -110)
+                # Nov 20: the away side's own price (it used to take the home side's -- puck lines especially)
+                price = price if price is not None else (IP.spread_price_for(p, side) or -110)
             elif p.get("model_margin") is not None:
                 line = _half(-p["model_margin"] if side == "home" else p["model_margin"])
             else:

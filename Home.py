@@ -214,6 +214,32 @@ if True:
     # Nov 14: every lock is listed (the old 60-row cap, applied after the time sort, cut the late games' locks)
     _cap = len(_rows) if _show.startswith("🔒") else 250
     _sel_props, _sel_lines = [], []                             # Nov 8: ticked rows, logged by the box below the lists
+
+    def _line_items(rows, ticks):
+        """Nov 20 (owner: "no tick box for me to select anything other than the pick"): the game-lines table's three
+        tick columns -> log items: the Pick (as before), the Likely winner's moneyline, or the Money pick."""
+        import hoops_games_page as _HG
+        out = []
+        for i, col in ticks:
+            if not 0 <= i < len(rows):
+                continue
+            r = rows[i]
+            full = r.get("_full") or {}
+            if col == "✓ Pick" and r.get("bet_market") and r.get("best"):
+                out.append(dict(r, price=r.get("bet_price"), pick=r["best"],
+                                grade=("tracking only" if r.get("status") else _PR.grade(r))))
+            elif col == "✓ Winner" and full:
+                it = _HG.side_item(full, "Moneyline", "home" if r.get("winner") == full.get("home") else "away",
+                                   price=r.get("price"))
+                if it:
+                    out.append(it)
+            elif col == "✓ Money" and full and r.get("money_market"):
+                it = _HG.side_item(full, r["money_market"], r.get("money_side"), line=r.get("money_line"),
+                                   price=r.get("money_price"))
+                if it:
+                    out.append(dict(it, pick=r.get("money_pick") or it["pick"],
+                                    note="💰 Money pick" if r.get("money") else "Money Score pick"))
+        return out
     if _past and _rows:                                         # Nov 19: looking back -- the split, by chance range
         C.hit_miss_breakdown(_rows, "result", "chance", key="home_best_hm", title="Picks that hit and missed")
         _rows = C.show_filter(_rows, "result", key="home_best_hm_show")
@@ -447,6 +473,8 @@ if True:
             _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
                                    by={"Pick result": "pick", "Winner result": "winner",
                                        "Money result": "money"})
+        if _show == "💰 Money picks":                          # Nov 20 (owner): the 💰 game lines first
+            _ws = sorted(_ws, key=lambda r: not r.get("money"))
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
@@ -454,6 +482,7 @@ if True:
                                "Model": r.get("model_txt") or r.get("lean_detail") or "",
                                "Spread move": " ".join(x for x in (r.get("spread_move") or "",
                                                                     f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
+                               "✓ Pick": False,
                                "Pick": r.get("best") or "—",
                                "Use": _PR.lean_use(r),
                                "Record (30d)": ((("⚠️ " if r.get("lean_verdict") in _PR.HIDE else "")
@@ -463,9 +492,11 @@ if True:
                                "Price": (f"{float(r['best_price']):+.0f}" if r.get("best_tested") and r.get("best_price")
                                          is not None else ""),
                                "Value": r.get("best_value") if r.get("best_tested") else None,
+                               "✓ Winner": False,
                                "Likely winner": f"{r['winner']} ({r['chance']:.0%})",
                                # Nov 20: the third measure -- what the price pays (money_score.py)
                                "Money score": r.get("money_score"),
+                               "✓ Money": False,
                                "Money pick": ((("💰 " if r.get("money") else "") + r["money_pick"]
                                                + (f" {float(r['money_price']):+.0f}" if r.get("money_price") is not None
                                                   else "")
@@ -493,7 +524,10 @@ if True:
         if _wdf.empty:
             st.caption("No tested game-line picks today.")
         else:
-            _sel_lines = _LU.picked(_ws[:LEANS_CAP], _LU.selectable(_wdf, "home_win_sel", hide_index=True, width="stretch",
+            st.caption("☑️ Tick **Pick**, **Winner** or **Money** on any row to log that bet — each box sits beside "
+                       "what it bets on.")
+            _ticks_l = _LU.tick_grid(_wdf, ["✓ Pick", "✓ Winner", "✓ Money"], "home_win_ticks", hide_index=True,
+                                     width="stretch",
                          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                                         "Value": st.column_config.NumberColumn(format="percent"),
                                         "Money score": st.column_config.NumberColumn(
@@ -501,7 +535,8 @@ if True:
                                             "the best price, from a chance that trusts the model only as far as its "
                                             "record against the books has earned. 💰 = college basketball, +4% to "
                                             "+12% with a 40%+ chance (what made money in testing)."),
-                                        "Backtest cover": st.column_config.NumberColumn(format="percent")}))
+                                        "Backtest cover": st.column_config.NumberColumn(format="percent")})
+            _sel_lines = _line_items(_ws[:LEANS_CAP], _ticks_l)
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})
         _bits = []
@@ -548,7 +583,9 @@ if True:
                                  column_config={"Best US price": st.column_config.NumberColumn(format="%+d"),
                                                 "Sharp fair chance": st.column_config.NumberColumn(format="percent"),
                                                 "Edge vs sharp": st.column_config.NumberColumn(format="percent")}))
-            _sel_lines = list(_sel_lines) + [dict(r, best=r["pick"], bet_price=r.get("price")) for r in _sel_sf]
+            _sel_lines = list(_sel_lines) + [dict(r, best=r["pick"], bet_price=r.get("price"), price=r.get("price"),
+                                                  grade=("tracking only" if r.get("status") else _PR.grade(r)))
+                                             for r in _sel_sf if r.get("bet_market") and r.get("pick")]
             st.caption(C.money_md(
                 "A US book's price that beats Pinnacle's no-vig line by 2% or more. Untested: these are tracked to see "
                 "whether the edge holds up (the Soccer Lab keeps the record). Small flat stakes only, if any."))
@@ -625,11 +662,7 @@ if True:
         st.caption("No blowout calls for these games yet — the learning job logs them each morning and afternoon "
                    "(NBA, college basketball, NFL, college football, NHL).")
     # ---- Log picks to the Bet Log (Nov 8: tick rows in the tables above -- props and game lines -- singles / parlay)
-    _ticked = list(_sel_props)
-    for r in _sel_lines:
-        if r.get("bet_market") and r.get("best"):
-            _ticked.append(dict(r, price=r.get("bet_price"), pick=r["best"],
-                                grade=("tracking only" if r.get("status") else _PR.grade(r))))
+    _ticked = list(_sel_props) + list(_sel_lines)
     _LU.panel(_ticked, "home_log", _today, past=_past)
     st.divider()
 
