@@ -309,7 +309,7 @@ def refresh_boards(day: str, sports_=PROPS_SPORTS, build=None, load=None) -> Lis
     load = load or TB.load_props
     if build is None:
         import best_bets_data as BBD
-        build = lambda key: BBD.load_generic_best_bets_board(key, day, BBD.O.DEFAULT_BOOK)
+        build = lambda key: BBD.build_generic_board(key, day, BBD.O.DEFAULT_BOOK)   # Nov 20: build + save
     done = []
     for key in sports_:
         try:
