@@ -147,7 +147,7 @@ else:
 # Both come from data the model's own percentage does not use. OFF BY DEFAULT: each reads fresh data (one odds request
 # per game; every opponent's recent games), which can take a minute or more the first time, so the Desk opens fast and
 # the owner opts in. Results are cached for 15 minutes. Fail-soft: a missing source only means fewer angles.
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=16)
 def _cached_game_env(sport_key: str, d: str, _meta, _api_key, odds_sport_key: str):
     return AC.load_game_env(sport_key, d, _meta, _api_key, odds_sport_key)
 

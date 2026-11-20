@@ -52,7 +52,7 @@ def get_api_key():
         return os.environ.get("ODDS_API_KEY")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate(sport_key: str, date_str: str):
     # sport_key is unused inside the function body (E/P are already correctly re-resolved to the
     # active sport on every script rerun) — it exists SOLELY to make st.cache_data's cache key

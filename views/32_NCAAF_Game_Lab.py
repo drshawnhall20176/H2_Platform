@@ -163,7 +163,7 @@ with st.expander("🎯 Player props", expanded=True):
     PS.render("NCAAF", datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d"), title="Today's priced props")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate_meta(date_str: str):
     """Load just the game-level meta, not full player rows -- Game Lab doesn't need player data. Nov 14: from the
     schedule alone (ncaaf_engine.slate_meta); the full slate is only a fallback."""
@@ -178,7 +178,7 @@ def load_slate_meta(date_str: str):
     return meta
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_game(date_str: str, stats_date_str: str, home_name: str, away_name: str):
     """All signals for one specific game -- cached per game so switching games reuses data.
 

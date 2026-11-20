@@ -15,6 +15,8 @@ the second deployment its own entrypoint path; it contains no logic of its own, 
 
 import re
 import streamlit as st
+import cache_guard as _CG
+_CG.install()             # Nov 20: cap every cache before any module defines one
 from pathlib import Path
 
 import sports
@@ -594,6 +596,7 @@ def run():
                 if getattr(pg, "url_path", None) == goto or (goto == "today" and getattr(pg, "title", None) == "Today"):
                     st.switch_page(pg)
     sport_bar(getattr(nav, "url_path", None), page_of, keys, page_ok)
+    _CG.watchdog()                                          # Nov 20: clear caches before memory runs out
     nav.run()
 
 
