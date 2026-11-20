@@ -131,3 +131,13 @@ def test_missed_game_line_bets_are_named_by_side_and_line():
     assert MB._bet_name({"market": "Spread", "side": "Niners Chemnitz", "line": 3.5}) == "Niners Chemnitz +3.5"
     assert MB._bet_name({"player": "Game total", "market": "Total", "side": "Over", "line": 221.5}) == "Over 221.5"
     assert MB._bet_name({"player": "Jalen Brunson", "market": "Points"}) == "Jalen Brunson"
+
+
+def test_missed_list_keeps_whole_names_and_counts_the_rest():
+    """Nov 20: the brief cut the missed list at 120 characters ("... Fenerbahce SK, Saski )", 8 of 17 shown)."""
+    import morning_brief as MB
+    names = ["Darius Garland", "Karl-Anthony Towns", "Darius Garland"] + [f"Team {i}" for i in range(9)]
+    t = MB.missed_text(names)
+    assert t.startswith("Darius Garland ×2, Karl-Anthony Towns, Team 0")
+    assert t.endswith("+3 more") and "Team 5" in t and "Team 6" not in t
+    assert MB.missed_text(["Saski Baskonia"]) == "Saski Baskonia"

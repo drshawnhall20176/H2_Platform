@@ -130,6 +130,18 @@ def scorecard(reports: Dict[str, Dict], yday: str) -> List[str]:
     return out
 
 
+def missed_text(names, show: int = 8) -> str:
+    """Nov 20 (owner screenshot): the list was cut at 120 characters -- 8 of 17 misses and "Saski )". Whole names,
+    each once (a player missed twice is listed once, with ×2), the first `show`, then "+N more"."""
+    seen = {}
+    for n in names:
+        if n:
+            seen[n] = seen.get(n, 0) + 1
+    items = [f"{n} ×{k}" if k > 1 else n for n, k in seen.items()]
+    more = len(items) - show
+    return ", ".join(items[:show]) + (f" +{more} more" if more > 0 else "")
+
+
 def _bet_name(b: Dict) -> str:
     """Nov 19: a short name for a lost bet. Game-line bets have no player, and the brief used to print the first 30
     characters of their notes ("Alt spread. Model fair spread ")."""
@@ -164,7 +176,7 @@ def bets_yesterday(bets: Sequence[Dict], yday: str) -> List[str]:
         line = f"{name}: {w}–{lo}, {usd(pl)}"
         misses = [_bet_name(b) for b in group if B._result(b) == "loss"]
         if name == "Singles" and misses:
-            line += f" (missed: {', '.join(m for m in misses if m)[:120]})"
+            line += f" (missed: {missed_text(misses)})"
         if len(done) < len(group):
             line += f" · {len(group) - len(done)} not settled yet"
         out.append(line)
