@@ -276,6 +276,7 @@ with st.spinner("Loading tonight's board..."):
         plays, n_games = today_board(_active.key, today)
     except Exception:
         plays, n_games = [], 0
+BBD.board_pending_note(_active.key, today)                     # Nov 20: heavy sports load the server's saved board
 
 if _active.key == "MLB":
     # Guarantees THIS session's own quick_log real-price side-channel is populated, regardless

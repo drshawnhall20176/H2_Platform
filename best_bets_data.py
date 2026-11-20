@@ -1082,7 +1082,35 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
         except Exception:                                       # noqa: BLE001
             pass
         return plays, meta, books
+    # Nov 20 (owner: the app crashed again opening college basketball, then college football, before the first saved
+    # board existed): inside the app, the two heavy sports are never built live -- the page says the board is on its
+    # way instead. Scripts (no Streamlit runtime) still build.
+    if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
+        try:
+            st.session_state[f"_board_pending_{sport_key}"] = True
+        except Exception:                                       # noqa: BLE001
+            pass
+        return [], [], list(O.US_BOOKS.keys())
     return build_generic_board(sport_key, date_str, preferred_book)
+
+
+def _in_app() -> bool:
+    try:
+        from streamlit import runtime
+        return runtime.exists()
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def board_pending_note(sport_key: str, date_str: str, book: str = O.DEFAULT_BOOK) -> None:
+    """The message a page shows when a heavy sport's board hasn't been saved yet."""
+    try:
+        if sport_key in HEAVY_BOARDS and _in_app() and saved_board(sport_key, date_str, book) is None:
+            st.info(f"⏳ Today's {sport_key} board is built on the server every hour (it's too big to build here "
+                    "without crashing the app). The first one of the day lands shortly after the hourly run — check "
+                    "back in a few minutes.")
+    except Exception:                                           # noqa: BLE001
+        pass
 
 
 def build_generic_board(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> tuple:
