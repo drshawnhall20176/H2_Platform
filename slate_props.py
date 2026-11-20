@@ -457,6 +457,7 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[s
         "Conviction": conviction, "ConvictionSource": "book" if p_mkt else "model_typical",
         "_ceiling": round(1.0 / p_mkt, 2) if p_mkt else None,
         "MarketProb": round(p_mkt, 4) if p_mkt else None,              # Nov 20: the books' no-vig chance of the side
+        "ModelRaw": round(sp["p_model"], 4) if sp.get("p_model") is not None else None,   # the model's own, unblended
         **recent_hits(row, "Over" if yes_only else side),
         "Lean": lean, "EV": td_value if td_value is not None else row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
