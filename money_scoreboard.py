@@ -42,7 +42,25 @@ def slate_record(sport: str, slate: str, load: Callable, today: Optional[str] = 
     return best
 
 
-def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, test: Optional[Dict] = None) -> Dict:
+def game_record(day: str, games: Callable) -> Dict[str, Dict]:
+    """Nov 20: the day's game-line 💰 (money_score.py), graded: {"games:<sport>": {hits, misses, units, needed}}."""
+    out: Dict[str, Dict] = {}
+    for r in games(day) or []:
+        res = r.get("money_result")
+        if not r.get("money") or res not in ("win", "loss"):
+            continue
+        d = PE.decimal(r.get("money_price")) if r.get("money_price") is not None else None
+        if not d:
+            continue
+        x = out.setdefault(f"games:{r.get('sport')}", {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0})
+        x["hits" if res == "win" else "misses"] += 1
+        x["units"] += (d - 1) if res == "win" else -1.0
+        x["need_sum"] += 1 / d
+    return out
+
+
+def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, test: Optional[Dict] = None,
+               games: Optional[Callable] = None) -> Dict:
     """{"sports": [{sport, hits, misses, units, roi, hit_rate, needed, slates}], "total": {...}, "from", "to"}."""
     if load is None:
         import model_store as MS
@@ -67,6 +85,27 @@ def scoreboard(load: Optional[Callable] = None, today: Optional[str] = None, tes
         out.append(row)
         for k in ("hits", "misses", "units", "need_sum"):
             tot[k] += row[k]
+    # Nov 20: the game-line 💰 (money_score.py), one row per league
+    try:
+        import money_score as MSC
+        if games is None:
+            import todays_best as TB
+            games = lambda d: TB.winner_rows(d, leagues=list(MSC.MONEY_LEAGUES), past=True)   # noqa: E731
+        grows = {f"games:{lg}": {"sport": f"games:{lg}", "hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0,
+                                 "slates": 0} for lg in MSC.MONEY_LEAGUES if lg in test["sports"]}
+        if grows and test["from"] <= last:
+            for d in _days(test["from"], last):
+                for k, v in game_record(d, games).items():
+                    if k in grows:
+                        for f in ("hits", "misses", "units", "need_sum"):
+                            grows[k][f] += v[f]
+                        grows[k]["slates"] += 1
+        for row in grows.values():
+            out.append(row)
+            for k in ("hits", "misses", "units", "need_sum"):
+                tot[k] += row[k]
+    except Exception:                                           # noqa: BLE001 -- props rows still show
+        pass
     for r in out + [tot]:
         n = r["hits"] + r["misses"]
         r["n"] = n
@@ -82,7 +121,11 @@ def table(board: Dict, live: Optional[Dict[str, int]] = None) -> List[Dict]:
     rows = []
     for r in board["sports"]:
         try:
-            name = f"{S.get(r['sport']).icon} {S.get(r['sport']).label.split(' — ')[0]}"
+            if r["sport"].startswith("games:"):
+                g = S.get(r["sport"].split(":", 1)[1])
+                name = f"{g.icon} {g.label.split(' — ')[0]} game lines"
+            else:
+                name = f"{S.get(r['sport']).icon} {S.get(r['sport']).label.split(' — ')[0]} props"
         except Exception:                                       # noqa: BLE001
             name = r["sport"]
         rows.append({"Sport": name,

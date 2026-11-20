@@ -66,3 +66,10 @@ jobs:
           MORNING: ${{ github.event.inputs.morning }}
         run: |
           if [ -n "$MORNING" ]; then python daily_review.py --date "$MORNING"; else python daily_review.py; fi
+
+      # Nov 20: refit the game-line Money Score on every graded game (money_score.py) -- the fit today's games use
+      - name: Money Score refit
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python money_score.py fit
