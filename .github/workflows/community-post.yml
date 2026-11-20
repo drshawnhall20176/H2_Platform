@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       kind:
-        description: "auto, picks or results"
+        description: "auto, picks, results, or test (posts a one-line 'bot connected' message)"
         required: true
         default: "auto"
       dry_run:

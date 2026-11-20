@@ -185,6 +185,14 @@ def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force:
     if collect is None:
         import todays_best as TB
         collect = TB.collect
+    if kind == "test":                                          # Nov 20: check the webhook without waiting for picks
+        text = "✅ **H2 Sports bot connected.** Today's 💰 and 🔒 model picks will post here this afternoon."
+        print(text)
+        if dry_run:
+            return 0
+        ok = deliver(text, webhook, post)
+        print("posted the test message" if ok else "H2_COMMUNITY_WEBHOOK not set — nothing posted")
+        return 0 if ok else 1
     if kind == "auto":
         return max(run(k, now, dry_run, force, get, save, collect, webhook, post) for k in ("results", "picks"))
     if kind == "picks":

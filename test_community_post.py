@@ -58,3 +58,10 @@ def test_results_wait_until_most_picks_are_graded():
                "money": False, "lock": True} for i in range(5)]
     assert CP.results_text("2026-11-20", posted, {("NBA", "P0"): "hit"}) is None
     assert CP.results_text("2026-11-20", posted, {("NBA", f"P{i}"): "hit" for i in range(4)})
+
+
+def test_test_kind_posts_one_line_and_fails_without_a_webhook():
+    sent = []
+    assert CP.run("test", webhook="https://x", post=sent.append, get=lambda k: None, save=None,
+                  collect=lambda *a, **k: {"rows": []}) == 0 and "connected" in sent[0]["content"]
+    assert CP.run("test", webhook="", get=lambda k: None, save=None, collect=lambda *a, **k: {"rows": []}) == 1
