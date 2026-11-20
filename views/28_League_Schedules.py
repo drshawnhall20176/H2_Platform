@@ -82,7 +82,7 @@ if current in sports.LAB_SPORTS:
     _lab = sports.LAB_SPORTS[current]
     st.divider()
 
-    @st.cache_data(ttl=600, show_spinner="Loading schedule...")
+    @st.cache_data(ttl=600, show_spinner="Loading schedule...", max_entries=16)
     def _lab_games(sport_key_inner: str):
         return LS.load(sport_key_inner)
 

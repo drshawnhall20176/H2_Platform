@@ -41,7 +41,7 @@ if not sports.require_sport(["NCAAF"], "NCAAF Anytime TD Engine"):
     st.stop()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate(date_str: str, stats_date_str: str):
     rows, meta = NSC.load_ncaaf_slate_cached(date_str)
     for r in rows:

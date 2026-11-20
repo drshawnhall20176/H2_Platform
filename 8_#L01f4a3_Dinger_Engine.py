@@ -38,7 +38,7 @@ C.page_header("💣", "H2 Sports — Dinger Engine",
 # for the full real, confirmed finding.
  
  
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def load_slate(date_str: str, fip_constant: float, venue_split=None, time_split=None):
     import best_bets_data as BBD
     # A REAL, CONFIRMED FIX, not the original design: the real E.build_slate(date_str, fip_
