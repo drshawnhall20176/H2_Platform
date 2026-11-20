@@ -85,32 +85,80 @@ def test_likely_range_is_honest_about_small_samples():
     assert PR.range_text(0, 0) == "—" and PR.likely_range(0, 0) is None
 
 
-def test_money_pick_rule_and_record():
-    """Nov 19: 💰 = NBA, sportsbook price, edge 6-15% (research/money_rules.py: +4.8% per $1 over 1,499 reads)."""
+def test_money_pick_rule_and_record(monkeypatch):
+    """Nov 20 rule: edge 3-20% at a sportsbook price, chance 40%+, the price within 3% of the books' no-vig fair."""
     import props_engine as PE, postgame as PG
-    assert PE.is_money("NBA", 0.08) and not PE.is_money("NBA", 0.05) and not PE.is_money("NBA", 0.16)
-    assert not PE.is_money("NHL", 0.08) and not PE.is_money("NBA", 0.08, book="prizepicks")
-    assert not PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": None})
-    assert PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": -110, "PricedAt": "draftkings"})
-    rows = [{"sport": "NBA", "ev": 0.08, "price": 110, "result": "hit", "chance": 0.55, "book": "draftkings"},
-            {"sport": "NBA", "ev": 0.07, "price": -110, "result": "miss", "chance": 0.56, "book": "fanduel"},
-            {"sport": "NBA", "ev": 0.02, "price": -110, "result": "hit", "chance": 0.55}]
+    monkeypatch.setitem(PE.MONEY_TEST, "to", "2000-01-01")             # outside the live test: NBA only (default)
+    monkeypatch.setattr(PE, "money_sports", lambda now=None, day=None: ("NBA",))
+    ok = dict(chance=0.47, mev=-0.01)
+    assert PE.is_money("NBA", 0.08, **ok) and PE.is_money("NBA", 0.03, **ok) and not PE.is_money("NBA", 0.02, **ok)
+    assert not PE.is_money("NBA", 0.20, **ok)
+    assert not PE.is_money("NBA", 0.08, chance=0.35, mev=0.0)           # a long shot
+    assert not PE.is_money("NBA", 0.08, chance=0.47, mev=-0.05)         # a juiced price
+    assert not PE.is_money("NBA", 0.08)                                 # no chance / market check: never
+    assert not PE.is_money("NHL", 0.08, **ok) and not PE.is_money("NBA", 0.08, book="prizepicks", **ok)
+    assert not PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": None, "ModelProb": 0.47, "MarketProb": 0.47})
+    # +110 at a 47% no-vig: 0.47 * 2.1 - 1 = -1.3% -> fair enough
+    assert PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": 110, "PricedAt": "draftkings", "ModelProb": 0.51,
+                                    "MarketProb": 0.47})
+    assert not PE.play_is_money("NBA", {"EV": 0.08, "RealPrice": -150, "PricedAt": "draftkings", "ModelProb": 0.64,
+                                        "MarketProb": 0.55})               # 0.55 * 1.667 - 1 = -8%: juiced
+    rows = [{"sport": "NBA", "ev": 0.08, "price": 110, "result": "hit", "chance": 0.51, "side": "Over",
+             "p_market": 0.47, "book": "draftkings"},
+            {"sport": "NBA", "ev": 0.07, "price": -110, "result": "miss", "chance": 0.56, "side": "Under",
+             "p_market": 0.48, "book": "fanduel"},
+            {"sport": "NBA", "ev": 0.02, "price": -110, "result": "hit", "chance": 0.55, "side": "Over",
+             "p_market": 0.5}]
     r = PG.money_record(rows)
     assert r["Graded"] == 2 and r["Hits"] == 1 and abs(r["Profit per $1"] - 0.05) < 1e-9
+
+
+def test_money_live_test_turns_every_sport_on_for_its_dates(monkeypatch):
+    import model_store as MS
+    import props_engine as PE
+    PE._MONEY_CACHE.clear()
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None: {"sports": {"NBA": {"on": False}}})
+    monkeypatch.setattr(PE, "MONEY_TEST", {"from": "2026-11-20", "to": "2026-11-23", "sports": ("NBA", "NHL")})
+    assert PE.money_sports(day="2026-11-21") == ("NBA", "NHL")
+    assert PE.money_sports(day="2026-11-24") == () and PE.money_sports(day="2026-11-19") == ()
+    s = {"sport": "NHL", "slate_date": "2026-11-21", "ev": 0.05, "price": 120, "chance": 0.49, "side": "Over",
+         "p_market": 0.45, "book": "draftkings", "market": "Shots on Goal"}
+    assert PE.snapshot_is_money("NHL", s) and not PE.snapshot_is_money("NHL", dict(s, slate_date="2026-11-25"))
+    PE._MONEY_CACHE.clear()
+
+
+def test_money_scoreboard_adds_up_the_test_slates():
+    import money_scoreboard as MSB
+    reviews = {("NBA", "2026-11-21"): {"slates": {"2026-11-20": {"money": {"hits": 3, "misses": 2, "profit": 0.10,
+                                                                            "needed": 0.45}}}},
+               ("NBA", "2026-11-22"): {"slates": {"2026-11-21": {"money": {"hits": 1, "misses": 3, "profit": -0.5,
+                                                                            "needed": 0.5}}}},
+               ("NHL", "2026-11-22"): {"slates": {"2026-11-20": {"money": {"hits": 2, "misses": 0, "profit": 1.0,
+                                                                            "needed": 0.48}}}}}
+    b = MSB.scoreboard(load=lambda sp, m: reviews.get((sp, m)), today="2026-11-22",
+                       test={"from": "2026-11-20", "to": "2026-11-23", "sports": ("NBA", "NHL")})
+    nba, nhl = b["sports"]
+    assert (nba["hits"], nba["misses"], round(nba["units"], 2)) == (4, 5, -1.5)
+    assert (nhl["hits"], nhl["misses"], nhl["units"]) == (2, 0, 2.0)          # finished on a later morning
+    assert b["total"]["n"] == 11 and abs(b["total"]["units"] - 0.5) < 1e-9
+    rows = MSB.table(b, {"NBA": 4})
+    assert rows[0]["Record"] == "4–5" and rows[0]["Today"] == 4
 
 
 def test_money_picks_reach_today_even_tagged_no_edge():
     import props_engine as PE, todays_best as TB
     p = {"Player": "A", "Market": "Points", "Side": "Over", "Line": 20.5, "ModelProb": 0.55, "EV": 0.09,
-         "RealPrice": -110, "PricedAt": "draftkings", "Use": PE.USE_PASS, "Cushion": 0.05}
+         "RealPrice": -110, "PricedAt": "draftkings", "Use": PE.USE_PASS, "Cushion": 0.05, "MarketProb": 0.51}
     rows = TB.props_rows("NBA", [p, dict(p, Player="B", EV=0.02)])
     assert [r["player"] for r in rows] == ["A"] and rows[0]["money"]
 
 
 def test_untested_markets_are_not_money_picks():
     import props_engine as PE
-    assert not PE.is_money("NBA", 0.10, market="Steals") and PE.is_money("NBA", 0.10, market="Threes Made")
-    assert not PE.play_is_money("NBA", {"EV": 0.13, "RealPrice": 182, "Market": "Steals"})
+    ok = dict(chance=0.45, mev=0.0)
+    assert not PE.is_money("NBA", 0.10, market="Steals", **ok) and PE.is_money("NBA", 0.10, market="Threes Made", **ok)
+    assert not PE.play_is_money("NBA", {"EV": 0.13, "RealPrice": 182, "Market": "Steals", "ModelProb": 0.4,
+                                        "MarketProb": 0.36})
 
 
 def test_money_record_text(monkeypatch):

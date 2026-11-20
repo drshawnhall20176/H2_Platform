@@ -165,3 +165,13 @@ def test_anytime_td_yes_under_50_shows_when_the_price_pays(monkeypatch):
 def test_anytime_td_trusts_a_players_own_rate_for_200_touches():
     import football_props as FP
     assert FP.MARKET_SHRINK["Anytime TD"] == 200.0 and FP.EFF_SHRINK["touch"] == 50.0   # Rush + Rec Yards unchanged
+
+
+def test_recent_hits_count_tonights_line_for_the_pick_side():
+    """Nov 20: L5 / L10 -- how often he cleared tonight's line (newest games first), for the pick's side."""
+    import slate_props as SP
+    row = {"line": 20.5, "values": [25, 18, 22, 30, 12, 21, 19, 24, 26, 10, 40]}
+    assert SP.recent_hits(row, "Over") == {"L5": "3/5", "HitL5": 0.6, "L10": "6/10", "HitL10": 0.6}
+    assert SP.recent_hits(row, "Under")["L10"] == "4/10"
+    assert SP.recent_hits(dict(row, values=[22, 25]), "Over") == {}
+    assert SP.recent_hits(dict(row, line=None), "Over") == {}

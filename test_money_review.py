@@ -55,8 +55,10 @@ def test_money_sports_follow_the_saved_verdict(monkeypatch):
     import model_store as MS
     PE._MONEY_CACHE.clear()
     monkeypatch.setattr(MS, "get_setting", lambda k, d=None: {"sports": {"NBA": {"on": False}, "NFL": {"on": True}}})
+    monkeypatch.setitem(PE.MONEY_TEST, "to", "2000-01-01")
     assert PE.money_sports() == ("NFL",)
-    assert PE.is_money("NFL", 0.08, market="Receptions") and not PE.is_money("NBA", 0.08, market="Points")
+    assert PE.is_money("NFL", 0.08, market="Receptions", chance=0.5, mev=0.0)
+    assert not PE.is_money("NBA", 0.08, market="Points", chance=0.5, mev=0.0)
     PE._MONEY_CACHE.clear()
 
 

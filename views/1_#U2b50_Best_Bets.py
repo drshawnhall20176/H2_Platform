@@ -281,9 +281,7 @@ _use_pick = (st.radio("Show", list(_USE_FILTER), horizontal=True, key="bb_use_fi
                            "edge (+3% at the price) — some are too close to the number to chain into a parlay. 🔒 Most probable: "
                            "60%+ to hit with the projection 15%+ past the line, not held for a news check — the reads "
                            "that have hit most often so far, whatever the price (see Postgame Review). A line only a pick'em app posts "
-                           "is never a 🔒: no sportsbook price checks it. 💰 Money picks: NBA props the model prices 6-15% better than "
-                           "the sportsbook — the one group that has returned money in testing (+4.8% per $1 over "
-                           "1,499 reads). Being tested now: its record is on Postgame Review.")
+                           "is never a 🔒: no sportsbook price checks it. " + BBD_PE.MONEY_HELP)
              if _props_model else "All playable")
 # Nov 1: Over / Under only (other sides -- a team, "Yes" -- show under All Sides).
 _side_pick = C.side_filter(slot_plays, key="bb_side_filter")
@@ -380,6 +378,12 @@ if _props_model:
         p["_use"] = (("💰 " if BBD_PE.play_is_money(_active.key, p) else "") + ("🔒 " if BBD_PE.play_is_lock(p) else "")
                      + str(p.get("Use") or ""))                 # Nov 19: 💰 Money pick / 🔒 Most probable icons
     _cols.insert(_cols.index("_display_line") + 1, "_cushion")
+    # Nov 20 (weekend audit): how often he cleared tonight's line for this side, last 5 / last 10 games
+    for p in view:
+        p.setdefault("L5", None)
+        p.setdefault("L10", None)
+    _cols.insert(_cols.index("_cushion"), "L5")
+    _cols.insert(_cols.index("_cushion"), "L10")
     _cols.insert(_cols.index("_cushion") + 1, "_use")
     _rename["_use"] = "Use"
     _cols.append("_warn")
@@ -395,7 +399,8 @@ st.dataframe(df.style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×", "Pr
 if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
                "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "
-               "brackets is the best price elsewhere — your book doesn't post that player.")
+               "brackets is the best price elsewhere — your book doesn't post that player. **L5 / L10**: how many of "
+               "his last 5 / 10 games cleared tonight's line on the pick's side.")
     if _held:
         with st.expander(f"⚠️ Model vs the books — check the news before betting ({len(_held)})"):
             st.caption("The book's line is far from the projection — usually minutes, a role change or an injury the "

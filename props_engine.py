@@ -1113,29 +1113,64 @@ def is_lock(chance, cushion, gap=None, book=None, pickem: bool = False) -> bool:
 # edges lost (0-3%: -5.5%), bigger ones lost too (15%+: -2.9%, the model's big disagreements with the books). NHL lost
 # at every edge (-12% at 6-15%); NFL and college didn't have enough to tell. 19 days is short: this flag is the test.
 MONEY_PICK = "💰 Money pick"
-MONEY_BAND = (0.06, 0.15)                    # min / max edge at the sportsbook price
-MONEY_DEFAULT = ("NBA",)                     # Nov 19's evidence; money_review.py re-decides every week (KEY money:rules)
+MONEY_BAND = (0.03, 0.20)                    # min / max edge at the sportsbook price (Nov 20 rule)
+# Nov 20 (owner: "I really want to capture money picks ... run that concept live this weekend across sports").
+# research/weekend_audit2.py rescored every graded read since Oct 6 under today's model. The old 6-15% band had gone
+# to -3.8% (121 NBA reads). What held up adds two checks the old band didn't have:
+#   * MONEY_MIN_CHANCE: the model gives the side 40%+ -- NHL's "edges" were long-shot Overs at ~31% that hit 23%
+#     (-34.5% over 44); with the floor NHL went 5-3. Long shots are where the model fights the books and loses.
+#   * MONEY_MIN_MEV: the sportsbook's price is no more than 3% worse than the books' own no-vig consensus -- a heavily
+#     juiced price eats the edge (NBA reads priced 4%+ under consensus lost 4.9% whatever the model said).
+# NBA: 107 reads, hit 46.7% vs 44.5% needed, +6.0% per $1, both halves up (+4.1% / +7.7%), ~7 a night. NHL 8, NFL 7,
+# college too few to say. So this weekend is a LIVE TEST in every props sport (MONEY_TEST), graded every morning.
+MONEY_MIN_CHANCE = 0.40
+MONEY_MIN_MEV = -0.03
+MONEY_DEFAULT = ("NBA",)                     # money_review.py re-decides every week (KEY money:rules)
 MONEY_RULES = {sp: MONEY_BAND for sp in MONEY_DEFAULT}    # kept for older callers: the starting rule
+# The weekend live test: these sports show 💰 for slates from..to (ET dates) whatever the weekly review says.
+MONEY_TEST = {"from": "2026-11-20", "to": "2026-11-23", "sports": ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB")}
 _MONEY_CACHE: Dict[str, object] = {}
+MONEY_HELP = ("💰 Money picks (live test, Nov 20–23, every props sport): the model prices the pick 3–20% better than "
+              "the sportsbook, gives it at least a 40% chance, and the sportsbook's price is within 3% of the books' "
+              "own fair price. In testing, NBA picks like these returned +6% per $1 over 107 graded picks; the other "
+              "sports had too few to judge, which is what this weekend is for. Graded every morning — the running "
+              "record is on Today.")
 
 
-def money_sports(now: Optional[float] = None) -> Tuple[str, ...]:
-    """Sports where 💰 is on: money_review.py's latest weekly verdict (cached 10 minutes), else MONEY_DEFAULT."""
+def _et_today() -> str:
+    from datetime import datetime as _dt
+    try:
+        import pytz
+        return _dt.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+    except Exception:                                           # noqa: BLE001
+        return _dt.now().strftime("%Y-%m-%d")
+
+
+def money_test_on(sport: str, day: Optional[str] = None) -> bool:
+    """True when `sport`'s slate on `day` (ET, default today) is in the 💰 live test."""
+    d = str(day or _et_today())[:10]
+    return str(sport or "") in MONEY_TEST["sports"] and MONEY_TEST["from"] <= d <= MONEY_TEST["to"]
+
+
+def money_sports(now: Optional[float] = None, day: Optional[str] = None) -> Tuple[str, ...]:
+    """Sports where 💰 is on: money_review.py's latest weekly verdict (cached 10 minutes), else MONEY_DEFAULT -- plus
+    every sport in the live test (MONEY_TEST) on its dates."""
     import time as _t
     now = _t.time() if now is None else now
     hit = _MONEY_CACHE.get("v")
     if hit and now - hit[0] < 600:
-        return hit[1]
-    on = MONEY_DEFAULT
-    try:
-        import model_store as MS
-        saved = MS.get_setting("money:rules", None) or {}
-        if saved.get("sports"):
-            on = tuple(sp for sp, v in saved["sports"].items() if v.get("on"))
-    except Exception:                                           # noqa: BLE001
-        pass
-    _MONEY_CACHE["v"] = (now, on)
-    return on
+        on = hit[1]
+    else:
+        on = MONEY_DEFAULT
+        try:
+            import model_store as MS
+            saved = MS.get_setting("money:rules", None) or {}
+            if saved.get("sports"):
+                on = tuple(sp for sp, v in saved["sports"].items() if v.get("on"))
+        except Exception:                                       # noqa: BLE001
+            pass
+        _MONEY_CACHE["v"] = (now, on)
+    return tuple(on) + tuple(sp for sp in MONEY_TEST["sports"] if sp not in on and money_test_on(sp, day))
 
 
 def money_record_text(sport: str) -> Optional[str]:
@@ -1154,24 +1189,51 @@ def money_record_text(sport: str) -> Optional[str]:
     return f"💰 {h}–{n - h} ({hit:.0%}, {v['roi']:+.1%}/$1)" if v.get("roi") is not None else f"💰 {h}–{n - h} ({hit:.0%})"
 
 
-def in_money_band(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
-    """The money band for any sport, on or off: what money_review.py scores each week."""
-    e = maybe(ev)
-    return bool(e is not None and MONEY_BAND[0] <= e < MONEY_BAND[1] and not pickem
+def market_edge(p_market_side, price) -> Optional[float]:
+    """The sportsbook price against the books' own no-vig chance of the side: + means the price beats the market's
+    fair, -3% means it's 3% worse (juiced)."""
+    p, dec = maybe(p_market_side), decimal(price) if price is not None else None
+    return None if p is None or not dec else p * dec - 1.0
+
+
+def in_money_band(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None,
+                  chance=None, mev=None) -> bool:
+    """The 💰 rule for any sport, on or off (what money_review.py scores each week): edge MONEY_BAND at the price,
+    chance MONEY_MIN_CHANCE+, the price no more than MONEY_MIN_MEV off the books' fair, a sportsbook line, and a market
+    with a record of its own. A read without its chance or market check (older rows) never qualifies."""
+    e, c, m = maybe(ev), maybe(chance), maybe(mev)
+    return bool(e is not None and MONEY_BAND[0] <= e < MONEY_BAND[1] and c is not None and c >= MONEY_MIN_CHANCE
+                and m is not None and m > MONEY_MIN_MEV and not pickem
                 and (book or "") not in PICKEM_BOOKS and market not in MONEY_SKIP.get(str(sport or ""), ()))
 # Markets that weren't in the test: NBA steals / blocks props were only read from Nov 18 (watch.PROBATION) -- and the
 # first morning's 💰 list was half steals unders at +150 to +180. Not a money pick until they have a record of their own.
 MONEY_SKIP = {"NBA": ("Steals", "Blocks", "Blocks+Steals")}
 
 
-def is_money(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None) -> bool:
-    """A 💰 Money pick: a sportsbook-priced prop in the money band, in a sport where 💰 is on (money_sports)."""
-    return str(sport or "") in money_sports() and in_money_band(sport, ev, book, pickem, market)
+def is_money(sport: str, ev, book=None, pickem: bool = False, market: Optional[str] = None, chance=None, mev=None,
+             day: Optional[str] = None) -> bool:
+    """A 💰 Money pick: in_money_band, in a sport where 💰 is on (money_sports) for that slate day."""
+    return str(sport or "") in money_sports(day=day) and in_money_band(sport, ev, book, pickem, market, chance, mev)
 
 
 def play_is_money(sport: str, p: Dict) -> bool:
-    return p.get("RealPrice") is not None and is_money(sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")),
-                                                       p.get("Market"))
+    """is_money for a board play: its chance is ModelProb, the books' no-vig chance of the side is 1 / _ceiling."""
+    ceil = maybe(p.get("_ceiling"))
+    pm = maybe(p.get("MarketProb")) if p.get("MarketProb") is not None else ((1.0 / ceil) if ceil else None)
+    return p.get("RealPrice") is not None and is_money(
+        sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")), p.get("Market"), chance=p.get("ModelProb"),
+        mev=market_edge(pm, p.get("RealPrice")))                  # a board is today's slate
+
+
+def snapshot_is_money(sport: str, s: Dict) -> bool:
+    """is_money for a saved prop read (model_store snapshot / graded row): its side's chance, the books' no-vig chance
+    from p_market (P over), and the price it carried."""
+    pm = maybe(s.get("p_market"))
+    side = s.get("side")
+    pms = None if pm is None or side not in ("Over", "Under") else (pm if side == "Over" else 1 - pm)
+    return s.get("price") is not None and is_money(
+        sport or s.get("sport"), s.get("ev"), s.get("book"), market=s.get("market"), chance=s.get("chance"),
+        mev=market_edge(pms, s.get("price")), day=str(s.get("slate_date") or "")[:10] or None)
 
 
 def play_is_lock(p: Dict) -> bool:

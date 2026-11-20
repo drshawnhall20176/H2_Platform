@@ -1,0 +1,65 @@
+# The H2 Discord bot (community_post.py), Nov 20.
+#
+# picks:   the day's 💰 Money picks and strongest 🔒 Most probable picks -> the PUBLIC community channel. Weekdays
+#          after 3:30 PM New York, weekends after 10:30 AM. Once a day.
+# results: the next morning, the same picks marked ✅ / ❌ with the day's record. Once a day, when they're graded.
+# Only model picks go out -- never the owner's bets (those stay in the private morning brief).
+#
+# SECRET (repo Settings -> Secrets and variables -> Actions -> New repository secret):
+#   H2_COMMUNITY_WEBHOOK   the community channel's webhook link (Discord: channel -> Edit Channel -> Integrations ->
+#                          Webhooks -> New Webhook -> Copy Webhook URL). Without it the job only prints the post.
+# TRY IT: Actions -> community-post -> Run workflow, dry_run = 1 prints the post in the log and sends nothing.
+
+name: community-post
+
+on:
+  schedule:
+    - cron: "40 15,17 * * *"     # ~10:40 AM / 12:40 PM ET: morning results; weekend picks
+    - cron: "40 20,22 * * *"     # ~3:40 / 5:40 PM ET: weekday picks (and anything missed)
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "auto, picks, results, or test (posts a one-line 'bot connected' message)"
+        required: true
+        default: "auto"
+      dry_run:
+        description: "1 = print only, send nothing"
+        required: false
+        default: ""
+      force:
+        description: "1 = post again even if already posted today"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: community-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Post
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          H2_COMMUNITY_WEBHOOK: ${{ secrets.H2_COMMUNITY_WEBHOOK }}
+          KIND: ${{ github.event.inputs.kind || 'auto' }}
+          DRY: ${{ github.event.inputs.dry_run }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          args="$KIND"
+          if [ "$DRY" = "1" ]; then args="$args --dry-run"; fi
+          if [ "$FORCE" = "1" ]; then args="$args --force"; fi
+          python community_post.py $args

@@ -559,7 +559,7 @@ def build_mlb_board(date_str: str, fip_constant: float, odds_api_key: Optional[s
     return rows, meta, plays, available_books
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
 def load_mlb_best_bets_board(date_str: str, fip_constant: float,
                              preferred_book: str = O.DEFAULT_BOOK,
                              venue_split: Optional[str] = None,
@@ -654,7 +654,7 @@ def generic_fetch_info(sport_key: str, date_str: str) -> Optional[Dict]:
     return _FETCH_INFO.get((sport_key, date_str))
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
 def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
     """The ONE real-offers fetch for every non-MLB sport (MLB has fetch_mlb_real_lines): cached, so
     load_generic_best_bets_board and Slip Lab — which needs the raw per-book offers, not just the
@@ -671,7 +671,7 @@ def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Di
     return offers
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False, max_entries=32)
 def fetch_pickem_extra_offers(sport_key: str, date_str: str, api_key: str,
                               event_ids: Optional[Tuple[str, ...]] = None) -> List[Dict]:
     """Nov 18: the Pick'em Board's own fetch -- Underdog, Dabble, ParlayPlay and the Novig / ProphetX exchanges
@@ -955,8 +955,7 @@ def compose_board(sport_key: str, reads: Optional[Dict], rows: List[Dict], legac
     return SP.plays(reads, rows, sport_key) + rest
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=32)
 def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> Optional[Dict]:
     """slate_reads_for with its own slate + offers fetch (both shared with Best Bets through their caches), for
     pages that build their own board (Edge Board).
@@ -1013,7 +1012,7 @@ def _big_slate_props_games(sport, sport_key: str, date_str: str, api_key: Option
         date_str, keep=lambda g: bool(PL.match_event(posted, g.get("home_name"), g.get("away_name"))))
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
 def load_generic_best_bets_board(sport_key: str, date_str: str,
                                  preferred_book: str = O.DEFAULT_BOOK) -> tuple:
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend

@@ -72,7 +72,7 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "line": line, "market_key": p.get("MarketKey"),
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
                     "pickem_only": bool(p.get("Pickem")),
-                    "money": money, "edge": p.get("EV")})
+                    "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5")})
     out.sort(key=_order)
     # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags. Nov 19: the 💰 Money picks
     # are kept too, the MONEY_TOP biggest edges (the full list is on Best Bets under "💰 Money picks")
@@ -119,7 +119,7 @@ def props_from_snapshots(sport: str, date_str: str, snaps=None) -> List[Dict]:
         line = s.get("bet_line") if s.get("bet_line") is not None else s.get("line")
         chance = s.get("bet_chance") if s.get("bet_chance") is not None else s.get("chance")
         lock = PE.is_lock(s.get("chance"), s.get("cushion"), s.get("gap"), s.get("book"))
-        money = PE.is_money(sport, s.get("ev"), s.get("book"), market=s.get("market")) and s.get("price") is not None
+        money = PE.snapshot_is_money(sport, s)
         if tag not in PLAYABLE and not lock and not money:
             continue
         out.append({"sport": sport, "kind": "Prop", "time": _et_time(s.get("kickoff")) or "",
