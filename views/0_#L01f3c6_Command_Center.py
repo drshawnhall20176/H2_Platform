@@ -565,10 +565,16 @@ else:
                "the game — real, direct proof the model's own pre-game confidence lined up "
                "with what actually happened. Surfaced by recent form, not name recognition. "
                "(Exploratory; see Retrospective.)")
-try:
-    catches, misses, rows_by_pid, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
-except Exception:
-    catches, misses, rows_by_pid = {}, {}, {}
+# Nov 20 (owner: Command Center crashing the app): this section rebuilt yesterday's whole board -- a second full build
+# on every load, on top of today's. It now builds only when asked.
+catches, misses, rows_by_pid = {}, {}, {}
+if st.toggle("Show yesterday's confirmed picks", value=False, key=f"cc_yest_{_active.key}",
+             help="Rebuilds yesterday's board to check it against the results — it takes a while and a lot of the "
+                  "app's memory, so it only runs when you turn it on."):
+    try:
+        catches, misses, rows_by_pid, _ = yesterday_catches(_active.key, yest, tuple(_active.market_map.keys()))
+    except Exception:
+        catches, misses, rows_by_pid = {}, {}, {}
 
 _caught_markets = list(_active.market_map.keys())
 _TOP_PICKS_ITEMS = [(f"{_MARKET_ICONS.get(m, '🔹')} {m}", m) for m in _caught_markets]
