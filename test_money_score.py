@@ -46,6 +46,7 @@ def test_score_label_result_and_money_band(monkeypatch):
     assert MSC.is_money("NCAAMB", best) == (MSC.BAND[0] <= best["score"] < MSC.BAND[1])
     assert not MSC.is_money("NBA", best) and not MSC.is_money("NCAAMB", dict(best, score=0.20))
     assert not MSC.is_money("NCAAMB", dict(best, mkt="TOT"))
+    assert not MSC.is_money("NCAAMB", dict(best, score=0.08, chance=0.04))           # a long shot
     assert MSC.score_record(_rec(), "NCAAMB", w_by={})["best"] is None                # no fit: no score
 
 

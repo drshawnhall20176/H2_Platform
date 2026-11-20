@@ -18,7 +18,7 @@ research/money_score_games.py, walk-forward (each day scored by a fit on earlier
   moneyline + spread scoring +4% to +12%: 323 picks, hit 56.0% vs 52.1% needed, +10.9% per $1 (halves +7.5% / +14.3%);
   college basketball alone 262, +17.9% (+10.6% / +25.1%). NBA (26) and NHL (24) lost; totals lost in every version;
   scores over +12% lost (the model's biggest disagreements). So 💰 on a game line = college basketball, moneyline or
-  spread, score +4% to +12% (MONEY_LEAGUES, BAND) -- in the live test (props_engine.MONEY_TEST). Every other league
+  spread, score +4% to +12%, chance 40%+ (MONEY_LEAGUES, BAND, MIN_CHANCE) -- in the live test (props_engine.MONEY_TEST). Every other league
   shows its score as information only.
 """
 from __future__ import annotations
@@ -35,6 +35,8 @@ MARKET_NAME = {"ML": "Moneyline", "SP": "Spread", "TOT": "Total"}
 BAND = (0.04, 0.12)
 MONEY_LEAGUES = ("NCAAMB",)
 MONEY_MARKETS = ("ML", "SP")
+MIN_CHANCE = 0.40                # Nov 20: no long shots (the first live slate flagged Oakland +2800 at 4%); with this
+                                 # floor the walk-forward test kept +12.4% in college basketball (239, halves +6.4/+18.3)
 MIN_FIT = 80                     # graded games a league x market needs before its own fit is used
 RIDGE = 1.0
 _CACHE: Dict[str, object] = {}
@@ -266,7 +268,8 @@ def is_money(lg: str, s: Optional[Dict], day: Optional[str] = None) -> bool:
     import props_engine as PE
     if not s or lg not in MONEY_LEAGUES or s.get("mkt") not in MONEY_MARKETS:
         return False
-    return BAND[0] <= s["score"] < BAND[1] and lg in PE.money_sports(day=day)
+    return (BAND[0] <= s["score"] < BAND[1] and (s.get("chance") or 0) >= MIN_CHANCE
+            and lg in PE.money_sports(day=day))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

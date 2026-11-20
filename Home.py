@@ -496,7 +496,7 @@ if True:
                                             format="percent", help="What the price pays: expected return per $1 at "
                                             "the best price, from a chance that trusts the model only as far as its "
                                             "record against the books has earned. 💰 = college basketball, +4% to "
-                                            "+12% (the range that made money in testing)."),
+                                            "+12% with a 40%+ chance (what made money in testing)."),
                                         "Backtest cover": st.column_config.NumberColumn(format="percent")}))
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})
