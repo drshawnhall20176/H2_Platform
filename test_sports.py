@@ -2733,3 +2733,38 @@ runpy.run_path({page!r})
     assert df.loc[nba, "Board saved"] == "2:05 PM" and df.loc[nhl, "Board saved"] == "not built yet"
     assert df.loc[nhl, "Games today"] == 1
     assert any(p.startswith("🔒") for p in at.dataframe[1].value["Pick"])
+
+
+def test_command_center_all_view_strongest_picks_past_day_results(monkeypatch):
+    """Nov 20 (owner): a date on the strongest picks, results + pies on past days; tick-to-log today."""
+    from datetime import datetime, timedelta
+    from streamlit.testing.v1 import AppTest
+    import best_bets_data as BBD
+    import betlog as B
+    import todays_best as TB
+
+    def row(sp, i, res):
+        return dict(sport=sp, kind="Prop", time="7:30 PM", pick=f"{sp} Guy {i} Points Over 20.5", game=f"A{i} @ B{i}",
+                    price=-110, book="draftkings", chance=0.6 + i / 100, lock=False, result=res)
+    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(TB, "load_props", lambda sp, d: {"at": "2026-11-19T19:05:00+00:00",
+                                                         "rows": [row(sp, 1, None)]} if sp == "NBA" else None)
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": [row("NBA", 1, "win"), row("NBA", 2, "loss")]})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [])
+    monkeypatch.setattr(B, "list_bets", lambda **kw: [])
+    monkeypatch.setattr(S, "in_season", lambda k, day=None: k in ("NBA", "NHL"))
+    page = str(_HERE / "views" / "0_#L01f3c6_Command_Center.py")
+    at = AppTest.from_string(f"""
+import runpy, streamlit as st
+st.session_state["cc_all"] = True
+runpy.run_path({page!r})
+""", default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
+    strong = [d.value for d in at.dataframe if "Best price" in d.value.columns]
+    assert strong and "Result" not in strong[0].columns
+    yesterday = (datetime.now() - timedelta(days=1)).date()
+    at.date_input(key="cc_all_strong_date").set_value(yesterday).run()
+    assert not at.exception, at.exception
+    strong = [d.value for d in at.dataframe if "Best price" in d.value.columns]
+    assert strong and set(strong[0]["Result"]) == {"✅ won", "❌ lost"}
