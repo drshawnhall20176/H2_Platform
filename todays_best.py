@@ -406,7 +406,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
                            bet_line=(float(p["home_spread"]) if home else -float(p["home_spread"]))
                            if p.get("home_spread") is not None else None, bet_price=price)
             out.update(best=label, best_chance=ch, best_price=price, best_tested=True,
-                       best_value=(ch * d - 1) if (ch is not None and d) else None, use=t.get("use"))
+                       best_value=(ch * d - 1) if (ch is not None and d) else None, use=t.get("use"),
+                       lock=bool(t.get("lock")))
             return out
     leans = []
     hs, mm = p.get("home_spread"), p.get("model_margin")
