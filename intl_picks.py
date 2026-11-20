@@ -110,6 +110,30 @@ def use_tag(chance: Optional[float]) -> Dict:
 #   🎟️ Parlay + Single = 60%+ and a price that pays (+3% or better)      🎯 Single only = 55-60% at a price that pays
 #   ⚪ No edge            = a coin flip, a price that doesn't pay, or no tested edge for this league / market
 # Where there's no price yet (lower-tier tennis, EuroCup) the tag says the price it needs ("at -150 or better").
+SPREAD_OVERROUND = 1.045      # a typical two-way spread market's total implied chance
+
+
+def other_side_price(price) -> Optional[int]:
+    """Nov 20: an estimate of the OTHER side's price from one side's, at a typical 4.5% overround (-110 -> -109,
+    a puck line's -1.5 at +207 -> +1.5 at about -256). For records saved before both sides were kept."""
+    d = _dec(price)
+    if not d:
+        return None
+    other = SPREAD_OVERROUND - 1.0 / d
+    return american(1.0 / other) if 0.02 < other < 0.98 else None
+
+
+def spread_price_for(p: dict, side: str):
+    """Nov 20 (owner's NHL check): the price of `side`'s spread. Records kept only the HOME side's price
+    ("spread_price"), and every away pick was booked at it -- an away puck line +1.5 at the home -1.5's +207 instead
+    of about -250, which made NHL spread picks look +35% when they weren't. Away: its own saved price, else the estimate."""
+    if side == "home":
+        return p.get("spread_price")
+    if p.get("spread_away_price") is not None:
+        return p["spread_away_price"]
+    return other_side_price(p.get("spread_price"))
+
+
 def american(dec: Optional[float]) -> Optional[int]:
     if dec is None or dec <= 1:
         return None
@@ -246,7 +270,7 @@ def _dec(a) -> Optional[float]:
 def market(ev: Dict, home: str, away: str) -> Dict:
     """Consensus no-vig home chance, best prices by side (with the book), median spread / total lines and prices."""
     fair, best_h, best_a = [], (None, None), (None, None)
-    sp, sp_price, tot, tot_o, tot_u = [], [], [], [], []
+    sp, sp_price, sp_away, tot, tot_o, tot_u = [], [], [], [], [], []
     for b in ev.get("bookmakers") or []:
         for m in b.get("markets") or []:
             oc = m.get("outcomes") or []
@@ -265,6 +289,8 @@ def market(ev: Dict, home: str, away: str) -> Dict:
                     if o.get("name") == home and o.get("point") is not None:
                         sp.append(float(o["point"]))
                         sp_price.append(float(o.get("price") or -110))
+                    elif o.get("name") == away and o.get("point") is not None:
+                        sp_away.append(float(o.get("price") or -110))
             elif m.get("key") == "totals":
                 for o in oc:
                     if o.get("point") is None:
@@ -278,6 +304,7 @@ def market(ev: Dict, home: str, away: str) -> Dict:
             "best_home": best_h[0], "best_home_book": best_h[1], "best_away": best_a[0], "best_away_book": best_a[1],
             "home_spread": statistics.median(sp) if sp else None,
             "spread_price": statistics.median(sp_price) if sp_price else None,
+            "spread_away_price": statistics.median(sp_away) if sp_away else None,
             "total": statistics.median(tot) if tot else None,
             "over_price": statistics.median(tot_o) if tot_o else None,
             "under_price": statistics.median(tot_u) if tot_u else None}
@@ -341,7 +368,7 @@ def tennis_build(elo: T.Elo, fit: Dict, key: str, events: Sequence[Dict], now: d
                     "line": round(mk["fair_home"], 4),
                     "edge": round(edge, 4), "line_total": mk["total"], "home_spread": mk["home_spread"],
                     "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
-                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
+                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"], "spread_away_price": mk.get("spread_away_price"),
                     "over_price": mk["over_price"], "under_price": mk["under_price"], "books": mk["books"],
                     "model_total": round(g["total"], 1) if g else None, "model_margin": round(g["margin"], 1) if g else None,
                     "p_cover": None if p_cover is None else round(p_cover, 3),
@@ -526,7 +553,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
                     "model_p": round(p, 3), "model_p_raw": round(p_raw, 3), "fair_home": mk["fair_home"],
                     "ml_edge": None if ml_edge is None else round(ml_edge, 3),
                     "best_home": mk["best_home"], "best_home_book": mk["best_home_book"], "best_away": mk["best_away"],
-                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"],
+                    "best_away_book": mk["best_away_book"], "spread_price": mk["spread_price"], "spread_away_price": mk.get("spread_away_price"),
                     "over_price": mk["over_price"], "under_price": mk["under_price"],
                     "pick": ("home" if edge > 0 else "away") if se is not None and abs(edge) >= se else None,
                     "total_pick": (("over" if tot_edge > 0 else "under")
@@ -752,7 +779,8 @@ def grade_markets(p: Dict) -> Dict:
             out["ml"] = _outcome(p["pick"] == res.replace("_ret", ""), p["best_home"] if p["pick"] == "home" else p["best_away"])
         if p.get("spread_pick") and p.get("home_spread") is not None and res in ("home", "away"):
             d = margin + p["home_spread"]
-            out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["spread_pick"] == "home"), p.get("spread_price"))
+            out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["spread_pick"] == "home"),
+                                     spread_price_for(p, p["spread_pick"]))
         if p.get("total_pick") and p.get("line_total") is not None and res in ("home", "away"):
             d = total - p["line_total"]
             out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),
@@ -761,7 +789,7 @@ def grade_markets(p: Dict) -> Dict:
     line = p.get("close_line") if p.get("close_line") is not None else p.get("line")
     if p.get("pick") and line is not None:
         d = margin - line
-        out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["pick"] == "home"), p.get("spread_price"))
+        out["spread"] = _outcome(None if d == 0 else (d > 0) == (p["pick"] == "home"), spread_price_for(p, p["pick"]))
     if p.get("total_pick") and p.get("line_total") is not None:
         d = total - p["line_total"]
         out["total"] = _outcome(None if d == 0 else (d > 0) == (p["total_pick"] == "over"),

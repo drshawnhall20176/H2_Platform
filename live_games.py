@@ -287,7 +287,8 @@ def read_game(g: Dict, pre: Optional[Dict], market: Optional[Dict] = None) -> Op
     bets = []
     hs = market.get("home_spread")
     if hs is not None:
-        for side, line, price in (("home", hs, market.get("spread_price")), ("away", -hs, market.get("spread_price"))):
+        import intl_picks as _IP
+        for side, line, price in (("home", hs, market.get("spread_price")), ("away", -hs, _IP.spread_price_for(market, "away"))):
             ch = LM.cover_chance(rd, hs, side)
             team = g["home"] if side == "home" else g["away"]
             bets.append({"bet": f"{team} {line:+g}", "market": "Spread", "chance": ch, "price": price or -110,
