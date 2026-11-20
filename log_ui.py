@@ -42,7 +42,7 @@ def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> Lis
         st.dataframe(df.drop(columns=cols), **kw)
         return []
     cfg = dict(kw.pop("column_config", None) or {})
-    cfg.update({c: st.column_config.CheckboxColumn(c, default=False, width="small") for c in cols})
+    cfg.update({c: st.column_config.CheckboxColumn(c, default=False) for c in cols})   # sized to the header
     ed = st.data_editor(df, key=key, disabled=[c for c in df.columns if c not in cols], column_config=cfg, **kw)
     out = []
     try:

@@ -252,6 +252,14 @@ try:
                                                  "real, long before wins and losses can."),
                                         "Today": st.column_config.NumberColumn(help="💰 picks on today's boards")})
             st.caption(_PEM.MONEY_HELP + " Every 💰 pick counts, at the price it showed — not only the ones bet.")
+            try:                                                # Nov 20: the day's stake budget
+                import stakes as _STK
+                _sf = _STK.factor(_mday)
+                if _sf < 1:
+                    st.caption(f"🧮 Today's 💰 picks would add up to more than {_STK.DAILY_CAP:g}u at full size, so every "
+                               f"stake is scaled to {_sf:.0%} of its quarter-Kelly size to fit {_STK.DAILY_CAP:g}u.")
+            except Exception:                                   # noqa: BLE001
+                pass
 except Exception:                                               # noqa: BLE001 -- the scoreboard never breaks the page
     pass
 
