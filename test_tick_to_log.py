@@ -84,21 +84,29 @@ def test_book_tick_columns_sit_next_to_what_they_bet():
     assert df.loc[0, "Book ML"] == "Real Madrid -250 / +200"
 
 
-def test_home_game_lines_log_pick_winner_or_money_from_their_own_tick_boxes():
-    """Nov 20 (owner): the Home game-lines table had a tick for the Pick only."""
-    import ast
+def test_game_lines_board_logs_pick_winner_or_money_from_their_own_tick_boxes():
+    """Nov 20 (owner): the game-lines board (sport desk and every Game Lab) had a tick for the Pick only."""
+    import game_lines_table as GLT
     src = open("Home.py").read()
-    assert '"✓ Pick"' in src and '"✓ Winner"' in src and '"✓ Money"' in src
-    tree = ast.parse(src)
-    fn = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_line_items"][0]
-    ns = {}
-    import pick_records as _PR                                     # noqa: F401
-    exec(compile(ast.Module(body=[fn], type_ignores=[]), "Home.py", "exec"), {"_PR": __import__("pick_records")}, ns)
+    assert '"✓ Pick"' in src and '"✓ Winner"' in src and '"✓ Money"' in src and "GLT.line_items" in src
     full = {"sport": "NCAAMB", "home": "Duke", "away": "Army", "home_spread": -8.5, "spread_price": -110,
             "best_home": -400, "best_away": 320, "model_p": 0.8, "model_margin": 9.0}
     row = {"winner": "Duke", "price": -400, "_full": full, "money_market": "Spread", "money_side": "away",
            "money_line": 8.5, "money_price": -108, "money_pick": "Army +8.5", "money": True}
-    items = ns["_line_items"]([row], [(0, "✓ Winner"), (0, "✓ Money")])
+    items = GLT.line_items([row], [(0, "✓ Winner"), (0, "✓ Money")])
     assert items[0]["pick"] == "Duke moneyline" and items[0]["price"] == -400 and items[0]["bet_market"] == "Moneyline"
     assert items[1]["pick"] == "Army +8.5" and items[1]["bet_line"] == 8.5 and items[1]["price"] == -108
     assert items[1]["bet_side"] == "away" and items[1]["note"] == "💰 Money pick"
+
+
+def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
+    import game_lines_table as GLT
+    rows = [{"time": "7:00 PM", "sport": "NCAAMB", "game": "Army @ Duke", "winner": "Duke", "chance": 0.8, "price": -400,
+             "best": "Army +8.5", "money_pick": "Duke -8.5", "money_price": -105, "money_score": 0.07, "money": False,
+             "final": "Army 60 – Duke 75", "money_result": "win", "best_result": "loss", "winner_result": "win",
+             "league": "NCAAMB"}]
+    today = list(GLT.frame(rows, past=False).columns)
+    assert today[:6] == ["Time", "Game", "✓ Money", "Money pick", "Money score", "✓ Pick"]
+    assert "Final" not in today and "Sport" not in today
+    past = list(GLT.frame(rows, past=True, show_sport=True).columns)
+    assert past[:7] == ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result"]

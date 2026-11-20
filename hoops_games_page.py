@@ -351,7 +351,9 @@ def render(league: str, search: bool = False) -> None:
     rules = IP.HOOPS_RULES.get(league, {})
     ev = getattr(IP, "HOOPS_EVIDENCE", {}).get(league) or EVIDENCE.get(league)
     if not _commercial():
-        st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else ""))
+        st.warning("Tracking only — not recommendations yet." + (f" {ev}" if ev else "")
+                   + (" The exception is the board's 💰 Money picks (the Money Score), in a live test this weekend."
+                      if league == "NCAAMB" else ""))
     elif any(rules.get(k) is not None for k in ("spread", "total", "ml")):
         st.warning("Tracking only: this league's record is not proven yet.")
     picks = MS.load_game_picks(league)
@@ -388,6 +390,11 @@ def render(league: str, search: bool = False) -> None:
         lean_recs = {}
     cust = _commercial()
     no_rule = not any(rules.get(k) is not None for k in ("spread", "total", "ml"))
+    # Nov 20 (owner: "enhance the game lab based on how we are trending the site ... no logging capability"): the
+    # sport desk's Money · Pick · Winner board for this date, tick boxes on the left (game_lines_table.py)
+    if league in ("NCAAMB", "NBA", "NHL", "NFL"):
+        import game_lines_table as GLT
+        GLT.lab_section(league, key=f"hg_board_{league}", day=day)
     with st.expander("How the model's spread leans have done by size of gap (last 30 days)"):
         st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
                                for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))

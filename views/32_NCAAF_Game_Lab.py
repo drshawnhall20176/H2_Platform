@@ -63,6 +63,10 @@ st.warning("**Nothing on this page is a proven game-line edge.** The win probabi
 if not sports.require_sport(["NCAAF"], "NCAAF Game Lab"):
     st.stop()
 
+# Nov 20 (owner: the Game Labs "based on how we are trending the site" -- and logging): the board first
+import game_lines_table as _GLT
+_GLT.lab_section("NCAAF", key="ncaaf_board")
+
 # Nov 2: college spreads, ratings model v2 (game_picks.py) -- shown first, whatever the date picker says.
 with st.expander("📐 Ratings model v2 — college spreads (tracking)", expanded=True):
     st.caption("Opponent-adjusted offense/defense ratings + home field, fitted on this season's FBS results.")
