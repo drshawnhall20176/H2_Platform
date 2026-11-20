@@ -45,3 +45,20 @@ def test_watchdog_clears_over_the_limit_at_most_once_a_minute(monkeypatch):
     assert CG.watchdog(now=1100, rss=1300, clear=lambda: cleared.append(1)) and cleared == [1, 1]
     assert CG.rss_mb() is None or CG.rss_mb() > 0
     CG._STATE["last"] = 0.0
+
+
+def test_reload_race_is_recognised_and_import_retried(monkeypatch):
+    import importlib
+    assert CG.is_reload_race(AttributeError("'NoneType' object has no attribute '__dict__'"))
+    assert CG.is_reload_race(ImportError("cannot import name 'x' from partially initialized module 'y'"))
+    assert not CG.is_reload_race(AttributeError("'Foo' object has no attribute 'bar'"))
+    calls = []
+    real = importlib.import_module
+
+    def flaky(name):
+        calls.append(name)
+        if len(calls) == 1:
+            raise AttributeError("'NoneType' object has no attribute '__dict__'")
+        return real(name)
+    monkeypatch.setattr(importlib, "import_module", flaky)
+    assert CG.safe_import("json").__name__ == "json" and len(calls) == 2
