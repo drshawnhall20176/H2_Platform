@@ -143,3 +143,20 @@ def table(board: Dict, live: Optional[Dict[str, int]] = None) -> List[Dict]:
                      "Beat the close": (f"{r['clv']:.0%} of {r['clv_n']}" if r.get("clv") is not None else "—"),
                      "Today": (live or {}).get(r["sport"], 0)})
     return rows
+
+
+TESTED = {"NBA": "💰 tested: 50–57 (47%, needed 45%), +6.0% per $1"}     # research/weekend_audit2.py, the Nov 20 rule
+
+
+def record_text(sport: str, board: Optional[Dict] = None) -> str:
+    """Nov 20 (owner: "I thought the record column was cleaned up"): what a 💰 pick's Record column says -- the live
+    test's record for that sport's 💰 props once there is one, else the rule's tested record, else that it's new."""
+    try:
+        b = board or scoreboard()
+        r = next((x for x in b["sports"] if x["sport"] == sport), None)
+        if r and r["n"]:
+            return (f"💰 live: {r['hits']}–{r['misses']} ({r['hit_rate']:.0%}, needed {r['needed']:.0%}), "
+                    f"{r['units']:+.2f}u")
+    except Exception:                                           # noqa: BLE001
+        pass
+    return TESTED.get(sport, "💰 new rule — no record yet (live test)")
