@@ -491,6 +491,17 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                 best = {"best": None, "best_chance": None, "best_price": None, "best_value": None, "best_tested": False}
             sport = lg if lg in WINNER_LEAGUES else "INTL"
             title = H.LEAGUES.get(lg, {}).get("title", lg) if sport == "INTL" else (p.get("tournament") or lg)
+            try:                                                # Nov 20: the Money Score (money_score.py)
+                import money_score as MSC
+                _ms = MSC.score_record(p, lg, hp, day=date_str).get("best")
+            except Exception:                                   # noqa: BLE001
+                _ms = None
+            if _ms:
+                best.update(money_score=_ms["score"], money_pick=MSC.label(p, _ms), money_price=_ms["price"],
+                            money_chance=_ms["chance"], money_market=MSC.MARKET_NAME[_ms["mkt"]],
+                            money=MSC.is_money(lg, _ms, date_str))
+                if past:
+                    best["money_result"] = MSC.result(_ms)
             if past:                                            # Nov 7: how it went
                 fh, fa = p.get("final_home"), p.get("final_away")
                 best["final"] = None if fh is None or fa is None else f"{p.get('away')} {fa:g} – {p.get('home')} {fh:g}"
