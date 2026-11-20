@@ -4,6 +4,7 @@ import components as C
 import schedule_board as SB
 from datetime import datetime as _dt
 import pytz as _pytz
+import props_engine as _PE_H
 
 _ET = _pytz.timezone("US/Eastern")
 
@@ -88,9 +89,7 @@ if True:
                        label_visibility="collapsed")
     _show = _c2.radio("Show", ["🔒 Locks only", "💰 Money picks", "All playable"], horizontal=True,
                       key="home_best_show", label_visibility="collapsed",
-                      help="💰 Money picks (Nov 19): NBA props the model prices 6-15% better than the sportsbook — the "
-                           "one group that has returned money in testing (+4.8% per $1 over 1,499 graded reads). "
-                           "Being tested now; the record is on Postgame Review and in the morning brief.")
+                      help=_PE_H.MONEY_HELP)
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
         import best_bets_data as _BBD

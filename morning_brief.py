@@ -111,6 +111,24 @@ def learned(reports: Dict[str, Dict]) -> List[str]:
     return out
 
 
+def money_test_line(yday: str, board=None) -> List[str]:
+    """Nov 20: during the 💰 live test, its running record across every sport (money_scoreboard)."""
+    try:
+        import money_scoreboard as MSB
+        import props_engine as PE
+        if not (PE.MONEY_TEST["from"] <= yday <= PE.MONEY_TEST["to"]):
+            return []
+        b = board or MSB.scoreboard()
+        t = b["total"]
+        if not t["n"]:
+            return []
+        per = ", ".join(f"{r['sport']} {r['hits']}–{r['misses']} ({r['units']:+.2f}u)" for r in b["sports"] if r["n"])
+        return [f"💰 **Live test so far**: {t['hits']}–{t['misses']} ({t['hit_rate']:.0%}, needed {t['needed']:.0%}), "
+                f"{t['units']:+.2f} units at $1 a pick — {per}"]
+    except Exception:                                           # noqa: BLE001 -- the brief always sends
+        return []
+
+
 def scorecard(reports: Dict[str, Dict], yday: str) -> List[str]:
     """Per sport: the model's side record and its 'most probable' picks, from the morning review's own notes."""
     out = []
@@ -199,7 +217,7 @@ def morning(day: str, reports: Dict[str, Dict], bets: Sequence[Dict], health: Se
     lines += [f"**Your bets ({datetime.strptime(yday, '%Y-%m-%d'):%a})**", *bets_yesterday(bets, yday), ""]
     sc = scorecard(reports, yday) + lines_yesterday(line_reads)
     if sc:
-        lines += ["**How the model did**", *sc, ""]
+        lines += ["**How the model did**", *sc, *money_test_line(yday), ""]
     lines += ["Picks for today come this afternoon, once the books post lines."]
     return "\n".join(lines).strip()
 
