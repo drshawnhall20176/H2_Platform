@@ -25,7 +25,12 @@ def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
     if not C.is_owner():
         st.dataframe(df, **kw)
         return []
+    # Nov 20 (owner: "can we add a select all tick box?"): every ticked-row table on the site gets one
+    everything = len(df) > 1 and st.checkbox(f"Select all {len(df)}", key=f"{key}__all")
     ev = st.dataframe(df, on_select="rerun", selection_mode="multi-row", key=key, **kw)
+    if everything:
+        st.caption(f"☑️ All {len(df)} rows are selected — untick **Select all** to pick rows one by one.")
+        return list(range(len(df)))
     try:
         return sorted(int(i) for i in (ev.selection.rows or []))
     except Exception:                                           # noqa: BLE001 -- older Streamlit / tests

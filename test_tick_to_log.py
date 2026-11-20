@@ -110,3 +110,17 @@ def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
     assert "Final" not in today and "Sport" not in today
     past = list(GLT.frame(rows, past=True, show_sport=True).columns)
     assert past[:7] == ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result"]
+
+
+def test_select_all_ticks_every_row():
+    """Nov 20 (owner): a select-all box on every ticked-row table."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string("""
+import pandas as pd, streamlit as st, log_ui as LU, components as C
+C.is_owner = lambda: True
+rows = LU.selectable(pd.DataFrame({"Pick": ["a", "b", "c"]}), "t_sel")
+st.write(f"picked={rows}")
+""").run()
+    assert "picked=[]" in " ".join(m.value for m in at.markdown)
+    at.checkbox(key="t_sel__all").check().run()
+    assert "picked=[0, 1, 2]" in " ".join(m.value for m in at.markdown)
