@@ -406,7 +406,8 @@ def best_line(p: Dict, lg: str, home_p: float) -> Dict:
                            bet_line=(float(p["home_spread"]) if home else -float(p["home_spread"]))
                            if p.get("home_spread") is not None else None, bet_price=price)
             out.update(best=label, best_chance=ch, best_price=price, best_tested=True,
-                       best_value=(ch * d - 1) if (ch is not None and d) else None, use=t.get("use"))
+                       best_value=(ch * d - 1) if (ch is not None and d) else None, use=t.get("use"),
+                       lock=bool(t.get("lock")))
             return out
     leans = []
     hs, mm = p.get("home_spread"), p.get("model_margin")
@@ -499,6 +500,10 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
             if _ms:
                 best.update(money_score=_ms["score"], money_pick=MSC.label(p, _ms), money_price=_ms["price"],
                             money_chance=_ms["chance"], money_market=MSC.MARKET_NAME[_ms["mkt"]],
+                            money_side=_ms["side"],
+                            money_line=(None if _ms.get("line") is None else
+                                        (_ms["line"] if _ms["side"] in ("home", "over") or _ms["mkt"] == "TOT"
+                                         else -_ms["line"])),
                             money=MSC.is_money(lg, _ms, date_str))
                 if past:
                     best["money_result"] = MSC.result(_ms)
@@ -515,7 +520,8 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                         "value": value, "use": ml_tag, **best,
                         "_gaps": _lean_gaps(p, lg), **_line_text(p), **spread_move(p, lg),
                         "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
-                                 "kickoff": p.get("kickoff")}})
+                                 "kickoff": p.get("kickoff")},
+                        "_full": dict(p, sport=p.get("sport") or lg)})        # Nov 20: to log any side (Home ticks)
     out.sort(key=lambda r: -r["chance"])
     return out
 

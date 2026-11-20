@@ -483,8 +483,12 @@ def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
     priced = [r for r in g if PE.decimal(r.get("price")) is not None]
     prof = (sum((PE.decimal(r["price"]) - 1) if r["result"] == "hit" else -1 for r in priced) / len(priced)
             if priced else None)
+    import clv as _CLV                                          # Nov 20: the report card's needed + CLV
+    cl = [_CLV.pick_clv(r) for r in g]
     return {"Use": PE.MOST_PROBABLE, "Graded": len(g), "Hits": hits, "Hit rate": hits / len(g),
-            "Model said": (sum(ch) / len(ch)) if ch else None, "Profit per $1": prof, "Priced": len(priced)}
+            "Model said": (sum(ch) / len(ch)) if ch else None, "Profit per $1": prof, "Priced": len(priced),
+            "Needed": (sum(1 / PE.decimal(r["price"]) for r in priced) / len(priced)) if priced else None,
+            "CLV beat": cl.count("beat"), "CLV lost": cl.count("lost")}
 
 
 def money_record(graded: Sequence[Dict]) -> Optional[Dict]:

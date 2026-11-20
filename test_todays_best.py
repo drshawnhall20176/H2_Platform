@@ -162,6 +162,7 @@ def test_home_tables_sorted_earliest_first(monkeypatch):
     monkeypatch.setattr(TB, "winner_record", lambda leagues=None: {})
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
     at.session_state["sport"] = "NBA"
+    at.session_state["home_best_show"] = "All playable"       # Nov 20: the Show choice filters game lines too
     at.run()
     assert list(at.dataframe[0].value["Time"]) == ["7:00 PM", "8:30 PM", "10:00 PM"]
     assert list(at.dataframe[1].value["Time"]) == ["7:30 PM", "9:00 PM"]
@@ -327,3 +328,25 @@ def test_away_spread_picks_use_the_away_price_not_the_homes():
     assert IP.spread_price_for({"spread_price": 207, "spread_away_price": -260}, "away") == -260
     assert abs(IP.other_side_price(-110) + 109) <= 1
     assert IP.spread_price_for({"spread_price": None}, "away") is None
+
+
+
+def test_home_game_lines_follow_the_show_choice(monkeypatch):
+    """Nov 20 (owner): 💰 Money picks shows only 💰 game lines, 🔒 Locks only only 🔒 ones, All playable everything."""
+    from pathlib import Path
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    lines = [{"sport": "NBA", "time": t, "game": f"G{i}", "best": f"Team{i} +3", "best_tested": False, "lean_detail": "",
+              "backtest": None, "lean_z": 1, "winner": "X", "chance": 0.6, "league": "NBA", "money": i == 0,
+              "lock": i == 1, "money_pick": f"Team{i} ML", "money_score": 0.06}
+             for i, t in enumerate(["7:00 PM", "8:00 PM", "9:00 PM"])]
+    monkeypatch.setattr(TB, "collect", lambda d, sp, past=False: {"rows": [], "props": {"NBA": None}})
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: lines)
+    monkeypatch.setattr(TB, "winner_record", lambda leagues=None: {})
+    for show, want in (("💰 Money picks", ["G0"]), ("🔒 Locks only", ["G1"]), ("All playable", ["G0", "G1", "G2"])):
+        at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=30)
+        at.session_state["sport"] = "NBA"
+        at.session_state["home_best_show"] = show
+        at.run()
+        games = [list(d.value["Game"]) for d in at.dataframe if "Game" in d.value.columns]
+        assert games and games[0] == want, (show, games)

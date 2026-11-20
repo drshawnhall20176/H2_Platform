@@ -83,3 +83,16 @@ def test_pick_clv_follows_the_picks_own_side():
     assert clv.pick_clv(row) == "beat"           # Under 21.5 taken, closed 20.5: the market moved toward the pick
     assert clv.pick_clv(dict(row, line=22.5)) == "lost"
     assert clv.pick_clv(dict(row, side=None)) is None
+
+
+def test_daily_stake_budget_scales_every_money_stake(monkeypatch):
+    import props_engine as PE
+    import stakes
+    rows = [{"kind": "Prop", "money": True, "chance": 0.55, "price": 100}] * 4         # 2u each raw
+    games = [{"money": True, "money_chance": 0.58, "money_price": -105}] * 6           # 2u each raw
+    assert stakes.raw_total("2026-11-20", rows, games) == 20.0
+    monkeypatch.setattr(stakes, "raw_total", lambda d, rows=None, games=None: 20.0)
+    stakes._CACHE.clear()
+    assert stakes.factor("2026-11-20") == 0.5
+    assert PE.stake_units(0.55, 100, day="2026-11-20") == 1.0 and PE.stake_units(0.55, 100, capped=False) == 2.0
+    stakes._CACHE.clear()

@@ -141,7 +141,7 @@ def test_most_probable_record_in_the_slate_summary():
              "actual": 25, "side": "Over", "line": 15.5}]
     s = D.summarize_slate(rows)
     assert s["most_probable"] == {"hits": 1, "misses": 1, "hit_rate": 0.5, "chance": 0.635, "profit": None,
-                                  "priced": 0}
+                                  "priced": 0, "needed": None, "clv_beat": 0, "clv_lost": 0}
     assert any(PE.MOST_PROBABLE in n and "1-1" in n for n in D.notes({"2026-11-01": s}))
     assert PE.most_probable(0.6, 0.15) and not PE.most_probable(0.6, 0.15, "big") and not PE.most_probable(None, 0.3)
 
