@@ -215,31 +215,8 @@ if True:
     _cap = len(_rows) if _show.startswith("🔒") else 250
     _sel_props, _sel_lines = [], []                             # Nov 8: ticked rows, logged by the box below the lists
 
-    def _line_items(rows, ticks):
-        """Nov 20 (owner: "no tick box for me to select anything other than the pick"): the game-lines table's three
-        tick columns -> log items: the Pick (as before), the Likely winner's moneyline, or the Money pick."""
-        import hoops_games_page as _HG
-        out = []
-        for i, col in ticks:
-            if not 0 <= i < len(rows):
-                continue
-            r = rows[i]
-            full = r.get("_full") or {}
-            if col == "✓ Pick" and r.get("bet_market") and r.get("best"):
-                out.append(dict(r, price=r.get("bet_price"), pick=r["best"],
-                                grade=("tracking only" if r.get("status") else _PR.grade(r))))
-            elif col == "✓ Winner" and full:
-                it = _HG.side_item(full, "Moneyline", "home" if r.get("winner") == full.get("home") else "away",
-                                   price=r.get("price"))
-                if it:
-                    out.append(it)
-            elif col == "✓ Money" and full and r.get("money_market"):
-                it = _HG.side_item(full, r["money_market"], r.get("money_side"), line=r.get("money_line"),
-                                   price=r.get("money_price"))
-                if it:
-                    out.append(dict(it, pick=r.get("money_pick") or it["pick"],
-                                    note="💰 Money pick" if r.get("money") else "Money Score pick"))
-        return out
+    import game_lines_table as _GLT                             # Nov 20: the shared game-lines board's log items
+    _line_items = _GLT.line_items                              # (GLT.line_items)
     if _past and _rows:                                         # Nov 19: looking back -- the split, by chance range
         C.hit_miss_breakdown(_rows, "result", "chance", key="home_best_hm", title="Picks that hit and missed")
         _rows = C.show_filter(_rows, "result", key="home_best_hm_show")
