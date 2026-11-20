@@ -3,6 +3,8 @@
 # picks:   the day's 💰 Money picks and strongest 🔒 Most probable picks -> the PUBLIC community channel. Weekdays
 #          after 3:30 PM New York, weekends after 10:30 AM. Once a day.
 # results: the next morning, the same picks marked ✅ / ❌ with the day's record. Once a day, when they're graded.
+# alerts:  hourly, a posted 💰 pick whose number got better (line half a point its way, or 15+ cents), or that is no
+#          longer a 💰 at the current number. Once per pick per alert.
 # Only model picks go out -- never the owner's bets (those stay in the private morning brief).
 #
 # SECRET (repo Settings -> Secrets and variables -> Actions -> New repository secret):
@@ -16,10 +18,11 @@ on:
   schedule:
     - cron: "40 15,17 * * *"     # ~10:40 AM / 12:40 PM ET: morning results; weekend picks
     - cron: "40 20,22 * * *"     # ~3:40 / 5:40 PM ET: weekday picks (and anything missed)
+    - cron: "10 16-23,0-2 * * *" # hourly ~11 AM-9 PM ET: line-move alerts on the posted 💰 picks
   workflow_dispatch:
     inputs:
       kind:
-        description: "auto, picks, results, or test (posts a one-line 'bot connected' message)"
+        description: "auto, picks, results, alerts, or test (posts a one-line 'bot connected' message)"
         required: true
         default: "auto"
       dry_run:

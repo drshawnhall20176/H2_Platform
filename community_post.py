@@ -76,7 +76,8 @@ def choose(rows: Sequence[Dict], day: str, now: Optional[datetime] = None) -> Li
         seen.add(who)
         out.append({"sport": r.get("sport"), "pick": r.get("pick"), "time": r.get("time") or "", "price": r.get("price"),
                     "book": r.get("book") or "", "chance": r.get("chance"), "money": why == "money",
-                    "lock": bool(r.get("lock")), "game": r.get("game") or ""})
+                    "lock": bool(r.get("lock")), "game": r.get("game") or "", "player": r.get("player"),
+                    "market": r.get("market"), "side": r.get("side"), "line": r.get("line"), "kind": "prop"})
         return True
     n = 0
     for r in sorted((r for r in live if r.get("money")), key=lambda r: -(r.get("edge") or 0)):
@@ -202,6 +203,107 @@ def game_money(day: str, now: datetime, games=None) -> List[Dict]:
         return []
 
 
+# --------------------------------------------------------------------------- line-move alerts (Nov 20)
+# A posted 💰 pick whose number got BETTER before the game (the line moved the pick's way by half a point or more, or
+# the price improved by 15+ cents at the same line), or that is no longer a 💰 (the edge is gone at the new number).
+# Each alert goes once per pick. Only picks the bot posted today, only games not started.
+MOVE_LINE = 0.5
+MOVE_CENTS = 15
+
+
+def _cents(a, b) -> Optional[float]:
+    """How many cents better American price b is than a (+120 vs +105: 15; -105 vs -120: 15)."""
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return None
+
+    def norm(x):
+        return x - 100 if x >= 100 else x + 100              # +105 -> 5, -120 -> -20: a continuous scale
+    return norm(b) - norm(a)
+
+
+def alerts(day: str, posted: Sequence[Dict], rows: Sequence[Dict], games: Sequence[Dict], now: datetime,
+           sent: Dict[str, List[str]]) -> List[Dict]:
+    """[{key, type ("better" / "gone"), text}] not sent before."""
+    out = []
+    props = {(r.get("sport"), r.get("player"), r.get("market"), r.get("side")): r for r in rows or []
+             if r.get("kind") == "Prop"}
+    gm = {(g.get("sport"), g.get("game")): g for g in games or []}
+    for p in posted:
+        if not p.get("money"):
+            continue
+        st = _start(day, p.get("time") or "")
+        if st is not None and st <= now:
+            continue
+        key = f"{p['sport']}|{p['pick']}"
+        done = sent.get(key, [])
+        if p.get("kind") == "game":
+            cur = gm.get((p["sport"], p.get("game")))
+            now_money = bool(cur and cur.get("money") and cur.get("money_pick") == p["pick"])
+            better = None
+            if cur and cur.get("money_pick") == p["pick"]:
+                c = _cents(p.get("price"), cur.get("money_price"))
+                if c is not None and c >= MOVE_CENTS:
+                    better = f"{_price(cur.get('money_price'))} (was {_price(p.get('price'))})"
+        else:
+            cur = props.get((p["sport"], p.get("player"), p.get("market"), p.get("side")))
+            now_money = bool(cur and cur.get("money"))
+            better = None
+            if cur and p.get("line") is not None and cur.get("line") is not None:
+                mv = (float(p["line"]) - float(cur["line"])) * (1 if p.get("side") == "Over" else -1)
+                if mv >= MOVE_LINE:
+                    better = f"{cur.get('pick')} {_price(cur.get('price'))} (was {p['pick']})"
+                elif mv == 0:
+                    c = _cents(p.get("price"), cur.get("price"))
+                    if c is not None and c >= MOVE_CENTS:
+                        better = f"{_price(cur.get('price'))} (was {_price(p.get('price'))})"
+        if better and now_money and "better" not in done:
+            out.append({"key": key, "type": "better",
+                        "text": f"📈 **Better number** · {ICON.get(p['sport'], '')} {p['pick']} → now {better}"})
+        elif not now_money and "gone" not in done:
+            now_txt = ""
+            if cur is not None:
+                now_txt = (f" — now {cur.get('money_pick') or ''} {_price(cur.get('money_price'))}".rstrip()
+                           if p.get("kind") == "game" else f" — now {cur.get('pick')} {_price(cur.get('price'))}")
+            out.append({"key": key, "type": "gone",
+                        "text": f"⚠️ **No longer a 💰** · {ICON.get(p['sport'], '')} {p['pick']}{now_txt}. The edge is "
+                                "gone at the current number — we'd pass if you haven't bet it."})
+    return out
+
+
+def run_alerts(now: datetime, dry_run: bool, get, save, collect, webhook, post, games=None) -> int:
+    day = now.strftime("%Y-%m-%d")
+    posted = (get(KEY.format(date=day, kind="picks")) or {}).get("picks")
+    if not posted:
+        print("alerts: no picks posted today")
+        return 0
+    key = KEY.format(date=day, kind="alerts")
+    sent = (get(key) or {}).get("sent") or {}
+    if games is None:
+        try:
+            import money_score as MSC
+            import todays_best as TB
+            games = TB.winner_rows(day, leagues=list(MSC.MONEY_LEAGUES))
+        except Exception:                                       # noqa: BLE001
+            games = []
+    new = alerts(day, posted, collect(day, PROPS_SPORTS)["rows"], games, now, sent)
+    if not new:
+        print("alerts: nothing new")
+        return 0
+    text = "\n".join(a["text"] for a in new)
+    print(text)
+    if dry_run:
+        return 0
+    if not deliver(text, webhook, post):
+        print("H2_COMMUNITY_WEBHOOK not set — nothing posted")
+        return 0
+    for a in new:
+        sent.setdefault(a["key"], []).append(a["type"])
+    save(key, {"at": datetime.now(timezone.utc).isoformat(), "sent": sent})
+    return 0
+
+
 def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force: bool = False, get=None, save=None,
         collect=None, webhook: Optional[str] = None, post=None, games=None, past_games=None) -> int:
     import model_store as MS
@@ -222,7 +324,9 @@ def run(kind: str, now: Optional[datetime] = None, dry_run: bool = False, force:
         return 0 if ok else 1
     if kind == "auto":
         return max(run(k, now, dry_run, force, get, save, collect, webhook, post, games, past_games)
-                   for k in ("results", "picks"))
+                   for k in ("results", "picks", "alerts"))
+    if kind == "alerts":
+        return run_alerts(now, dry_run, get, save, collect, webhook, post, games)
     if kind == "picks":
         day = now.strftime("%Y-%m-%d")
         key = KEY.format(date=day, kind="picks")
