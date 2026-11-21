@@ -26,7 +26,7 @@ WINDOW = 60
 DAYS = 90
 PATHS = 5000
 BANK = 100.0
-DAILY_CAP = 10.0
+DAILY_CAP = 5.0
 DROP = 25.0
 
 
@@ -57,7 +57,7 @@ def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = (), 
         if u and d:
             days.setdefault(str(r.get("date") or r.get("slate") or r.get("_day") or ""), []).append(
                 (u, d, r["money_result"] == "win"))
-    for k, ps in days.items():                                  # the 10u daily cap
+    for k, ps in days.items():                                  # the daily cap
         tot = sum(u for u, _, _ in ps)
         if tot > DAILY_CAP:
             days[k] = [(u * DAILY_CAP / tot, d, h) for u, d, h in ps]

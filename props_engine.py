@@ -1145,7 +1145,7 @@ MONEY_HELP = ("💰 Money picks (live test, Nov 20–23, every props sport): the
               "own fair price. In testing, NBA picks like these returned +6% per $1 over 107 graded picks; the other "
               "sports had too few to judge, which is what this weekend is for. Graded every morning — the running "
               "record is on Today. Stake: a flat 1 unit a pick (since Nov 21, until the edge is proven), in units "
-              "(1u = 1% of your bankroll), 0.25u to 2u — scaled down so the whole day's 💰 picks total 10u at most.")
+              "(1u = 1% of your bankroll), a flat 1u a pick — scaled down so the whole day's 💰 picks total 5u at most.")
 
 
 def _et_today() -> str:
