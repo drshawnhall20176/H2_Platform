@@ -126,7 +126,15 @@ def _all_sports_saved(day, keys):
 
 @st.cache_data(ttl=900, show_spinner="Grading that day's picks…")
 def _strong_past(day, keys):
-    """Nov 20: a past day's saved best picks, each graded (todays_best.collect, past=True)."""
+    """Nov 20: a past day's saved best picks, each graded (todays_best.collect, past=True). Nov 21: from the shown-picks
+    ledger when the day has one -- every pick that was on this list before its game, graded at the price it showed."""
+    try:
+        import pick_ledger as PL
+        led = PL.rows("strong", "ALL", day) if day >= PL.SINCE else []
+        if led:
+            return [dict(r, _ledger=True) for r in led]
+    except Exception:                                           # noqa: BLE001
+        pass
     try:
         return [dict(r) for r in TB.collect(day, list(keys), past=True)["rows"] if r.get("kind") == "Prop"]
     except Exception:                                           # noqa: BLE001
@@ -202,7 +210,8 @@ def _all_sports_view():
         spast = sday < _now_d
         sdate = sday.strftime("%Y-%m-%d")
         spicks = _strong_past(sdate, tuple(keys)) if spast else picks
-        top = sorted(spicks, key=lambda r: -(r.get("chance") or 0))[:15]
+        _ledger = spast and bool(spicks) and spicks[0].get("_ledger")
+        top = sorted(spicks, key=lambda r: -(r.get("chance") or 0))[:None if _ledger else 15]
         top.sort(key=lambda r: CT._tkey(r.get("time"), C._kick_dt))                # earliest game first
         if top and spast:
             C.hit_miss_breakdown(top, "result", "chance", key="cc_all_strong_hm",
@@ -217,6 +226,7 @@ def _all_sports_view():
                                                  if r.get("price") is not None and not r.get("pickem_only")
                                                  else "pick'em line, no book price"),
                                   "Game": r.get("game") or "",
+                                  **({"First shown": _et_clock(r.get("first_seen")) or ""} if _ledger else {}),
                                   **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {})}
                                  for r in top])
             _cfg = {"Chance": st.column_config.NumberColumn(format="percent")}
@@ -227,6 +237,10 @@ def _all_sports_view():
                 _sel = LU.picked(top, LU.selectable(_sdf, "cc_all_strong_sel", hide_index=True, width="stretch",
                                                     column_config=_cfg))
                 LU.panel(_sel, "cc_all_strong_log", sdate)
+            if _ledger:
+                st.caption(f"Every pick that was on this list before its game started ({len(top)} — the list changes "
+                           "through the day as boards rebuild), at the line and price it showed the first time, "
+                           "graded on final box scores.")
             st.caption("The 15 likeliest of the day's saved best picks across every sport, earliest game first. "
                        "**Pick'em line, no book price** = only a pick'em app posts it (most college props): no "
                        "sportsbook price checks the model there, and those chances have run optimistic. Pick an "

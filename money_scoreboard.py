@@ -24,6 +24,14 @@ def _days(a: str, b: str) -> List[str]:
 
 def slate_record(sport: str, slate: str, load: Callable, today: Optional[str] = None) -> Optional[Dict]:
     """The latest stored 💰 record of one slate: {"hits", "misses", "units", "needed"} or None (not graded yet)."""
+    try:                                                        # Nov 21: the picks as shown, when the slate has a ledger
+        import pick_ledger as PL
+        led = PL.record("money", sport, slate)
+        if led:
+            return {"hits": led["hits"], "misses": led["misses"], "units": led["units"], "needed": led["needed"],
+                    "clv_beat": 0, "clv_lost": 0}
+    except Exception:                                           # noqa: BLE001
+        pass
     best = None
     d = date.fromisoformat(slate)
     for k in range(1, CATCH_UP + 1):
@@ -46,6 +54,17 @@ def slate_record(sport: str, slate: str, load: Callable, today: Optional[str] = 
 def game_record(day: str, games: Callable) -> Dict[str, Dict]:
     """Nov 20: the day's game-line 💰 (money_score.py), graded: {"games:<sport>": {hits, misses, units, needed}}."""
     out: Dict[str, Dict] = {}
+    try:                                                        # Nov 21: the game-line 💰 as shown, when there's a ledger
+        import pick_ledger as PL
+        for lg in ("NCAAMB", "NBA", "NHL", "NFL", "NCAAF"):
+            led = PL.record("games", lg, day)
+            if led:
+                out[f"games:{lg}"] = {"hits": led["hits"], "misses": led["misses"], "units": led["units"],
+                                      "need_sum": (led["needed"] or 0) * led["n"]}
+        if out:
+            return out
+    except Exception:                                           # noqa: BLE001
+        pass
     for r in games(day) or []:
         res = r.get("money_result")
         if not r.get("money") or res not in ("win", "loss"):

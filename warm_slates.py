@@ -71,6 +71,12 @@ def boards(day: str) -> None:
             print(f"{key} board: {len(plays)} plays, {len(saved)} on Today's best, {time.time() - t0:.0f}s")
         except Exception as exc:                                # noqa: BLE001
             print(f"{key} board failed ({type(exc).__name__}: {exc})")
+    try:                                                        # Nov 21: the game-line 💰 as shown (pick_ledger.py)
+        import money_score as MSC
+        import pick_ledger as PL
+        print(f"game 💰 ledger: {PL.record_games(day, TB.winner_rows(day, leagues=list(MSC.MONEY_LEAGUES)))} new")
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"game 💰 ledger failed ({type(exc).__name__}: {exc})")
 
 
 if __name__ == "__main__":
