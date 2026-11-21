@@ -39,6 +39,7 @@ on:
 
 permissions:
   contents: read                 # writes go to the database, not the repo
+  actions: read                  # Nov 21: the morning health check reads the night's workflow runs
 
 concurrency:
   group: daily-review
@@ -95,3 +96,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python data_checks.py || true
+      - name: Morning health check (health_check.py, Nov 21)
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python health_check.py || true
