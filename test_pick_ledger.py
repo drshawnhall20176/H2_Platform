@@ -97,3 +97,9 @@ def test_strongest_takes_at_most_five_from_one_sport():
     picks += [{"kind": "Prop", "sport": "NBA", "pick": "n", "earned": 0.55, "price": -110}]
     got = PL.strongest(picks)
     assert sum(r["sport"] == "NCAAF" for r in got) == 5 and got[-1]["pick"] == "n"
+
+
+def test_a_dropped_pick_on_a_game_still_on_the_board_is_not_kept():
+    import todays_best as TB
+    old = [{"game": "A @ B", "pick": "x"}, {"game": "E @ F", "pick": "z"}]
+    assert TB.keep_started([], old, on_board={"A @ B"}) == [{"game": "E @ F", "pick": "z"}]
