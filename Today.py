@@ -26,6 +26,12 @@ try:
     _owner = st.secrets.get("AUDIENCE", "owner") == "owner"
 except Exception:                                               # noqa: BLE001
     _owner = True
+if _owner:                                                      # Nov 21: the morning health check, one line
+    try:
+        import health_check as _HC
+        _HC.render(_dt.now(_ET).strftime("%Y-%m-%d"))
+    except Exception:                                           # noqa: BLE001
+        pass
 
 import customer_today as _CT
 import todays_best as _TB0

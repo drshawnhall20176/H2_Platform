@@ -33,6 +33,15 @@ C.hero_banner("🏆", "H2 Sports — Command Center",
              f"discipline, and proves itself with closing-line value and calibration. — "
              + ("🌐 All sports" if st.session_state.get("cc_all") else f"{_active.icon} {_active.label}"))
 
+# Nov 21 (A+ plan item 7): the morning health check, one line (owner build)
+try:
+    if st.secrets.get("AUDIENCE", "owner") == "owner":
+        import health_check as _HC
+        import pytz as _pz
+        _HC.render(datetime.now(_pz.timezone("US/Eastern")).strftime("%Y-%m-%d"))
+except Exception:                                               # noqa: BLE001
+    pass
+
 # Nov 21 (owner: UFC, Tennis and International Hoops showed nothing here): a sport with no props model gets its own
 # desk -- the day's slate, the model's read where it has one, the Bet Log record, and the way to the full page
 import lab_desk as _LD
