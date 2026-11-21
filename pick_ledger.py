@@ -409,7 +409,7 @@ def game_close(r: Dict, full: Dict) -> Optional[Dict]:
         return None
     if r["money_market"] == "Moneyline":
         return close_mark("ml", None, None, r.get("price"), None, it.get("price"))
-    return close_mark("spread", None, r.get("money_line"), r.get("price"), it.get("line"), it.get("price"))
+    return close_mark("spread", None, r.get("money_line"), r.get("price"), it.get("bet_line"), it.get("price"))
 
 
 def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=None, save=None) -> Dict[str, str]:
