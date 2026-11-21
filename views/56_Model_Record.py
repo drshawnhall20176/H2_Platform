@@ -64,8 +64,8 @@ with st.expander("🏦 Bankroll risk — the 💰 staking plan over a 90-day sea
         st.dataframe(pd.DataFrame(_BS.rows(_bs)), hide_index=True, width="stretch")
         st.caption(f"From a 100u bankroll (1u = 1%), replaying {_bs['picks']} graded 💰 picks over {_bs['days']} slates "
                    f"(hit {_bs['hit_rate']:.0%}, the prices needed {_bs['needed']:.0%}; about "
-                   f"{_bs['avg_day_units']:.1f}u staked a day) — quarter-Kelly stakes, 2u a pick at most, 10u a day at "
-                   "most. 5,000 seasons drawn a whole day at a time. **With no edge** replays the same stakes with every "
+                   f"{_bs['avg_day_units']:.1f}u staked a day) — flat 1u a pick (the plan since Nov 21), 10u a day at "
+                   "most; the old plan (quarter Kelly on the model's chance) beside it for comparison. 5,000 seasons drawn a whole day at a time. **With no edge** replays the same stakes with every "
                    "pick winning only as often as its price needs: what the plan risks if the edge isn't real yet.")
     else:
         st.caption("The simulation runs with the morning review; it appears after the next one.")
