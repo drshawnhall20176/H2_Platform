@@ -33,6 +33,15 @@ C.hero_banner("🏆", "H2 Sports — Command Center",
              f"discipline, and proves itself with closing-line value and calibration. — "
              + ("🌐 All sports" if st.session_state.get("cc_all") else f"{_active.icon} {_active.label}"))
 
+# Nov 21 (owner: UFC, Tennis and International Hoops showed nothing here): a sport with no props model gets its own
+# desk -- the day's slate, the model's read where it has one, the Bet Log record, and the way to the full page
+import lab_desk as _LD
+if not st.session_state.get("cc_all") and _LD.is_lab(_active):
+    C.base_css()
+    import pytz as _pytz
+    _LD.render(_active, datetime.now(_pytz.timezone("US/Eastern")).strftime("%Y-%m-%d"))
+    st.stop()
+
 if not sports.require_live_engine("Command Center"):
     st.stop()
 
