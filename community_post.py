@@ -134,7 +134,7 @@ def picks_text(day: str, chosen: Sequence[Dict], board: Optional[str] = None) ->
     if board:
         lines += [board, ""]
     if money:
-        lines += ["_Stakes in units (1u = 1% of bankroll), sized so all of today's 💰 picks total 10u at most._", ""]
+        lines += ["_Stakes in units (1u = 1% of bankroll), sized so all of today's 💰 picks total 5u at most._", ""]
     lines += [FOOTER]
     return "\n".join(lines)
 

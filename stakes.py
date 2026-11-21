@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from typing import Dict, Optional
 
-DAILY_CAP = 10.0
+DAILY_CAP = 5.0          # Nov 21 (owner: "you make the call"): 5u a day while the edge is unproven (was 10u)
 _CACHE: Dict[str, tuple] = {}
 
 

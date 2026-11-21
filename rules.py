@@ -52,8 +52,8 @@ RULES: Dict[str, List[Dict]] = {
     "stakes": [
         {"v": 1, "from": "2026-11-20", "what": "a quarter of the Kelly stake on the model's chance, 2u a pick at most, "
                                               "the day's 💰 picks scaled to 10u at most"},
-        {"v": 2, "from": "2026-11-21", "what": "a flat 1u a 💰 pick, the day scaled to 10u at most -- until ~300 shown "
-                                              "💰 picks prove the earned chances and beat the close", "fp": "dacc981825"},
+        {"v": 2, "from": "2026-11-21", "what": "a flat 1u a 💰 pick, the day scaled to 5u at most -- until ~300 shown "
+                                              "💰 picks prove the earned chances and beat the close", "fp": "8aef71dde6"},
     ],
     "shutoff": [
         {"v": 1, "from": "2026-11-21", "what": "a sport x market loses its 💰 / 🔒 / strongest-list place after 150+ "
