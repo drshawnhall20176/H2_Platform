@@ -38,8 +38,10 @@ RULES: Dict[str, List[Dict]] = {
     "earned": [
         {"v": 1, "from": "2026-11-21", "what": "books' chance + the earned share of the model's disagreement (ridge "
                                               "logistic per sport x market, last 45 days, refit nightly); pick'em "
-                                              "lines: the model's chance pulled toward 50% by its record",
-         "fp": "21e4bbbefb"},
+                                              "lines: the model's chance pulled toward 50% by its record"},
+        {"v": 2, "from": "2026-11-22", "what": "v1, then a second stage fit on SHOWN picks only (sportsbook and pick'em "
+                                              "separately), pulled toward 50% -- shown picks hit about 51% whatever "
+                                              "their v1 chance", "fp": "8f64ae14f8"},
     ],
     "strong": [
         {"v": 1, "from": "2026-11-20", "what": "the 15 likeliest saved props by the model's chance"},
@@ -73,7 +75,8 @@ def params() -> Dict[str, Dict]:
         "money_games": {"band": list(MSC.BAND), "min_chance": MSC.MIN_CHANCE, "leagues": list(MSC.MONEY_LEAGUES),
                         "markets": list(MSC.MONEY_MARKETS)},
         "lock": {"min_ev": PE.LOCK_MIN_EV, "pickem_books": sorted(PE.PICKEM_BOOKS)},
-        "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED},
+        "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED,
+                   "post_from": PM.POST_FROM, "post_min": PM.POST_MIN},
         "strong": {"n": PL.STRONG_N, "per_sport": PL.PER_SPORT},
         "shutoff": {"window": SO.WINDOW, "min_n": SO.MIN_N, "min_clv_n": SO.MIN_CLV_N, "min_beat": SO.MIN_BEAT,
                     "watch_n": SO.WATCH_N, "watch_roi": SO.WATCH_ROI},
