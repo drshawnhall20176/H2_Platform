@@ -186,6 +186,14 @@ def capture_updates(open_bets: List[Dict], offers: List[Dict], market_map: Optio
             continue
         price = game_close_price(b, game_offers or []) if b.get("market") in GAME_KEYS else \
             bet_close_price(b, offers, market_map=market_map, single_line_markets=single_line_markets)
+        if price is not None and b.get("entry_odds") is not None:
+            import betlog as _B                                 # Nov 21: a "close" 20+ points away is another line
+            try:
+                if not _B.close_is_same_line(_B.american_to_decimal(b["entry_odds"]), _B.american_to_decimal(price)):
+                    no_match.append(b.get("id"))
+                    continue
+            except Exception:                                   # noqa: BLE001
+                pass
         if price is not None:
             updates[b["id"]] = price
         else:

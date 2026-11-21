@@ -27,7 +27,7 @@ KEY = "LEDGER:{kind}:{sport}:{day}"
 SINCE = "2026-11-21"                     # the first slate with a ledger
 STRONG_N = 15
 KEEP = ("sport", "kind", "pick", "player", "pid", "market", "side", "line", "price", "book", "chance", "money", "lock",
-        "game", "time", "pickem_only", "edge", "use", "stake",
+        "game", "time", "pickem_only", "edge", "use", "stake", "raw_chance", "earned", "earned_edge",
         # game lines
         "league", "game_id", "money_market", "money_side", "money_line", "money_score", "kickoff")
 
@@ -131,7 +131,8 @@ def record_props(sport: str, day: str, money_rows: Sequence[Dict], now: Optional
     for r in money_rows or []:
         if not r.get("money") or started(day, r, now):
             continue
-        out.append(dict(r, stake=PE.stake_units(r.get("chance"), r.get("price"), day=day)
+        ch = r.get("raw_chance") if r.get("raw_chance") is not None else r.get("chance")   # the 💰 rule's own chance
+        out.append(dict(r, stake=PE.stake_units(ch, r.get("price"), day=day)
                         if r.get("price") is not None else None))
     return add("money", sport, day, out, now)
 
@@ -143,9 +144,26 @@ def strong_keys() -> List[str]:
             if s.has_projections and s.key not in sports.LAB_SPORTS and sports.in_season(s.key)]
 
 
+def earned_edge(r: Dict) -> Optional[float]:
+    """Nov 21: how far the earned chance clears what the price needs (a pick'em line: its break-even), in points."""
+    import props_money as PM
+    e = r.get("earned")
+    if e is None:
+        return None
+    need = PM.needed(r.get("price"), bool(r.get("pickem_only")) or r.get("price") is None)
+    return None if need is None else float(e) - need
+
+
 def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
-    """The Command Center's list: the n likeliest saved props."""
-    return sorted([r for r in picks if r.get("kind", "Prop") == "Prop"], key=lambda r: -(r.get("chance") or 0))[:n]
+    """The Command Center's list. Nov 21 (owner: "proven edge A+"): ranked by EARNED edge -- the earned chance less
+    what the price needs -- and only picks that clear it. Ranking by the model's raw chance picked out its biggest
+    misses: Nov 20's top 15 averaged a 65% chance and went 7-8. Saved picks without an earned chance (before Nov 21)
+    rank by chance, as before."""
+    props = [r for r in picks if r.get("kind", "Prop") == "Prop"]
+    scored = [dict(r, earned_edge=earned_edge(r)) for r in props]
+    if any(r["earned_edge"] is not None for r in scored):
+        return sorted([r for r in scored if (r["earned_edge"] or 0) > 0], key=lambda r: -r["earned_edge"])[:n]
+    return sorted(props, key=lambda r: -(r.get("chance") or 0))[:n]
 
 
 def record_strong(day: str, now: Optional[datetime] = None, keys: Optional[Sequence[str]] = None, load_props=None) -> int:

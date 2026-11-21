@@ -568,7 +568,26 @@ def clv_pct(entry_odds, close_odds) -> Optional[float]:
     so this specific leak only ever happened on the DataFrame-based Ledger/export path."""
     if _missing(entry_odds) or _missing(close_odds):
         return None
-    return round((american_to_decimal(entry_odds) / american_to_decimal(close_odds) - 1) * 100, 2)
+    de, dc = american_to_decimal(entry_odds), american_to_decimal(close_odds)
+    if not close_is_same_line(de, dc):
+        return None
+    return round((de / dc - 1) * 100, 2)
+
+
+# Nov 21 (owner, on "The proof" chart: "how would you rate the build"): ten bets carried a "closing line" that was a
+# different line from the one bet -- an MLB strikeouts Over logged at -791 that "closed" at -123, a -354 at +100, a +195
+# that "closed" at -265 (+114% CLV). They made a 40-bet stretch average -12% and put a fake +0.8 jump in the running
+# average. A same-line close moves the implied chance a few points, rarely more than ten; a move over CLOSE_MAX_MOVE
+# is a mismatched line (an alternate's price against the main line's, or a re-posted market), not closing-line value,
+# and is left out of every CLV figure.
+CLOSE_MAX_MOVE = 0.20
+
+
+def close_is_same_line(dec_entry, dec_close) -> bool:
+    try:
+        return abs(1 / float(dec_entry) - 1 / float(dec_close)) <= CLOSE_MAX_MOVE
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
 
  
 def _result(bet) -> str:
