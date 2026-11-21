@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 KEY = "LEDGER:{kind}:{sport}:{day}"
 SINCE = "2026-11-21"                     # the first slate with a ledger
 STRONG_N = 15
+PER_SPORT = 5                            # Nov 21: no one sport fills the list (the first earned list was 15 NCAAF Unders)
 KEEP = ("sport", "kind", "pick", "player", "pid", "market", "side", "line", "price", "book", "chance", "money", "lock",
         "game", "time", "pickem_only", "edge", "use", "stake", "raw_chance", "earned", "earned_edge",
         # game lines
@@ -162,7 +163,14 @@ def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     props = [r for r in picks if r.get("kind", "Prop") == "Prop"]
     scored = [dict(r, earned_edge=earned_edge(r)) for r in props]
     if any(r["earned_edge"] is not None for r in scored):
-        return sorted([r for r in scored if (r["earned_edge"] or 0) > 0], key=lambda r: -r["earned_edge"])[:n]
+        out, per = [], {}
+        for r in sorted([r for r in scored if (r["earned_edge"] or 0) > 0], key=lambda r: -r["earned_edge"]):
+            sp = r.get("sport")
+            if per.get(sp, 0) >= PER_SPORT:
+                continue
+            per[sp] = per.get(sp, 0) + 1
+            out.append(r)
+        return out[:n]
     return sorted(props, key=lambda r: -(r.get("chance") or 0))[:n]
 
 
