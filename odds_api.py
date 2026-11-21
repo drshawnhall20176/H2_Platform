@@ -592,6 +592,16 @@ def real_moneyline_devig(moneylines: Dict[str, Dict[str, float]], team_a: str, t
                 prices_a = prices
             elif t == target_b:
                 prices_b = prices
+        # Nov 21 (owner: the de-vigged table was empty all morning): college football schedules name a school
+        # ("Utah State"), the odds feed adds the mascot ("Utah State Aggies") -- so nothing ever matched exactly.
+        # A name the feed extends is matched when exactly ONE team starts with it ("Texas" stays unmatched:
+        # Longhorns, Tech, State, A&M).
+        def _extend(target):
+            hits = [pr for tm, pr in (moneylines or {}).items() if isinstance(pr, dict)
+                    and (tm or "").strip().lower().startswith(target + " ")]
+            return hits[0] if len(hits) == 1 else None
+        prices_a = prices_a or _extend(target_a)
+        prices_b = prices_b or _extend(target_b)
         if not prices_a or not prices_b:
             return None
         # Prefer a book that genuinely posted both sides; try preferred_book first, then any
