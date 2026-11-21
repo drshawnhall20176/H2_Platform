@@ -529,7 +529,9 @@ def run():
         # future page whose number isn't added to SECTION_OF yet -- never silently disappears,
         # never crashes, just lands somewhere reasonable until explicitly categorized.
         sections.setdefault(section, []).append(st.Page(str(f), title=NL.label(title) if commercial else title,
-                                                        icon=icon, url_path=slug))
+                                                        icon=icon, url_path=slug,
+                                                        visibility="hidden" if (key in sports.DESK_PAGES
+                                                                                and not commercial) else "visible"))
         page_of[slug] = (key, title)
 
     # Nov 18 (owner): League Schedules right under Today, the Owner Office at the bottom of START HERE
