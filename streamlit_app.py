@@ -485,6 +485,9 @@ def run():
     if office_on:
         sections["🏠 START HERE"].append(st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐",
                                                 url_path="owner_office"))
+    if not commercial:                                          # Nov 21: the restart button (its own password)
+        sections["🏠 START HERE"].append(st.Page(str(here / "Maintenance.py"), title="Restart the site", icon="🛠️",
+                                                url_path="maintenance"))
     page_of: dict = {}                                          # Nov 19: url_path -> (lead, title), for the sport bar
 
     def page_ok(key: str, title: str, sp: str) -> bool:
@@ -535,7 +538,7 @@ def run():
         page_of[slug] = (key, title)
 
     # Nov 18 (owner): League Schedules right under Today, the Owner Office at the bottom of START HERE
-    _rank = {"today": 0, "league_schedules": 1, "home": 2, "owner_office": 99}
+    _rank = {"today": 0, "league_schedules": 1, "home": 2, "owner_office": 98, "maintenance": 99}
     if "🏠 START HERE" in sections and not commercial:
         sections["🏠 START HERE"] = sorted(sections["🏠 START HERE"],
                                           key=lambda p: _rank.get(getattr(p, "url_path", "") or "today", 50))
