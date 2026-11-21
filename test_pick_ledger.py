@@ -77,3 +77,16 @@ def test_grade_games_uses_the_final_score():
     rows = [{"game_id": "g", "money_market": "Spread", "money_side": "away", "money_line": 4.5}]
     PL.grade_games("2026-11-21", rows, recs={"g": {"final_home": 70, "final_away": 68}})
     assert rows[0]["result"] == "win"
+
+
+def test_strongest_ranks_by_earned_edge_and_drops_negative_edges():
+    picks = [{"kind": "Prop", "pick": "a", "chance": 0.80, "earned": 0.55, "price": -150},     # needs 60%: -5
+             {"kind": "Prop", "pick": "b", "chance": 0.62, "earned": 0.57, "price": -110},     # needs 52.4%: +4.6
+             {"kind": "Prop", "pick": "c", "chance": 0.66, "earned": 0.56, "price": None, "pickem_only": True}]  # +1.75
+    got = PL.strongest(picks)
+    assert [r["pick"] for r in got] == ["b", "c"]
+
+
+def test_strongest_falls_back_to_chance_without_earned():
+    picks = [{"kind": "Prop", "pick": "a", "chance": 0.6}, {"kind": "Prop", "pick": "b", "chance": 0.7}]
+    assert [r["pick"] for r in PL.strongest(picks)] == ["b", "a"]

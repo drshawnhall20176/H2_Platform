@@ -56,7 +56,22 @@ def rows_from_graded(graded: Sequence[Dict]) -> List[Dict]:
     return out
 
 
-def fit_sport(rows: Sequence[Dict]) -> Dict[str, List[float]]:
+def rows_model_only(graded: Sequence[Dict]) -> List[Dict]:
+    """Nov 21: [{market, pm: 0.5, pmod, y}] from EVERY graded read, pick'em lines included -- for the earned chance of
+    a pick no sportsbook prices (logit P = a + c * logit(model), pulled toward 50%)."""
+    import props_engine as PE
+    out = []
+    for r in graded:
+        if r.get("actual") is None or r.get("p_model") is None or r.get("line") is None:
+            continue
+        thr = PE.threshold(float(r["line"]))
+        if r["actual"] == thr:
+            continue
+        out.append({"market": r.get("market"), "pm": 0.5, "pmod": float(r["p_model"]), "y": float(r["actual"] > thr)})
+    return out
+
+
+def fit_sport(rows: Sequence[Dict], model_rows: Sequence[Dict] = ()) -> Dict[str, List[float]]:
     """{"_all": [a, b, c, n], market: [a, b, c, n]} -- per market where it has MIN_FIT reads."""
     import money_score as MSC
     out: Dict[str, List[float]] = {}
@@ -72,6 +87,19 @@ def fit_sport(rows: Sequence[Dict]) -> Dict[str, List[float]]:
             w = MSC.fit(rs, lam=3.0)
             if w:
                 out[m] = w + [len(rs)]
+    # Nov 21: the model-only fit (pick'em lines), "<market>|model" and "_all|model"
+    if len(model_rows) >= MIN_FIT:
+        w = MSC.fit(model_rows, lam=3.0)
+        if w:
+            out["_all|model"] = w + [len(model_rows)]
+    byk: Dict[str, List[Dict]] = {}
+    for r in model_rows:
+        byk.setdefault(r["market"], []).append(r)
+    for m, rs in byk.items():
+        if len(rs) >= MIN_FIT:
+            w = MSC.fit(rs, lam=3.0)
+            if w:
+                out[f"{m}|model"] = w + [len(rs)]
     return out
 
 
@@ -88,7 +116,8 @@ def refit(save=None, grade=None) -> Dict:
     coefs = {}
     for sp in SPORTS:
         try:
-            c = fit_sport(rows_from_graded(grade(sp)))
+            g = grade(sp)
+            c = fit_sport(rows_from_graded(g), rows_model_only(g))
         except Exception as exc:                                # noqa: BLE001 -- one sport never stops the rest
             print(f"{sp}: props money fit failed ({type(exc).__name__}: {exc})")
             continue
@@ -139,6 +168,49 @@ def score(sport: str, market: str, side: str, p_model_side, p_market_side, price
     pmod = float(p_model_side) if side == "Over" else 1 - float(p_model_side)
     po = _sig(w[0] + w[1] * _logit(pm) + w[2] * (_logit(pmod) - _logit(pm)))
     return (po if side == "Over" else 1 - po) * d - 1
+
+
+def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None, w_by=None) -> Optional[float]:
+    """Nov 21 (owner: "I need ... the proven edge A+"): the chance a pick has EARNED -- the model's chance corrected to
+    its track record. With a sportsbook price: the books' no-vig chance plus the share of the model's disagreement its
+    record has earned (the Money Score fit). Without one (pick'em lines): the model's chance pulled toward 50% by its
+    own record. research/earned_study.py, walk-forward over 60 days of shown picks (a playable tag, 🔒 or 💰):
+        model said 60-70% -> hit 54.5%, earned said 54.6%  (343 picks)
+        model said 70-80% -> hit 55.3%, earned said 56.8%  (349)
+        model said 80%+   -> hit 50.0%, earned said 62.0%  (110: still optimistic, much less so)
+    None without a fit or a chance."""
+    if side not in ("Over", "Under") or p_model_side is None:
+        return None
+    cf = (w_by if w_by is not None else coefs()).get(sport) or {}
+    pmod = float(p_model_side) if side == "Over" else 1 - float(p_model_side)
+    if p_market_side is not None and (cf.get(market) or cf.get("_all")):
+        w = cf.get(market) or cf.get("_all")
+        pm = float(p_market_side) if side == "Over" else 1 - float(p_market_side)
+    else:
+        w = cf.get(f"{market}|model") or cf.get("_all|model")
+        pm = 0.5
+        if not w:
+            return None
+    po = _sig(w[0] + w[1] * _logit(pm) + w[2] * (_logit(pmod) - _logit(pm)))
+    return po if side == "Over" else 1 - po
+
+
+PICKEM_NEED = 0.5425       # a pick'em entry's break-even per pick (5-pick flex / 2-pick power, roughly)
+
+
+def play_earned(sport: str, p: Dict, w_by=None) -> Optional[float]:
+    """earned() for a board play."""
+    return earned(sport, p.get("Market"), p.get("Side"), p.get("ModelRaw") if p.get("ModelRaw") is not None
+                  else p.get("ModelProb"), None if p.get("Pickem") else p.get("MarketProb"), w_by)
+
+
+def needed(price, pickem: bool = False) -> Optional[float]:
+    """The chance a pick needs to break even at its price (a pick'em line: PICKEM_NEED)."""
+    import props_engine as PE
+    if pickem or price is None:
+        return PICKEM_NEED if pickem else None
+    d = PE.decimal(price)
+    return 1 / d if d else None
 
 
 def play_score(sport: str, p: Dict, w_by=None) -> Optional[float]:

@@ -63,10 +63,18 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
         if p.get("Use") == PE.USE_PASS and not money:
             continue
         line = p.get("Line")
+        try:                                                    # Nov 21: the chance the record has earned
+            import props_money as _PMS
+            earned = _PMS.play_earned(sport, p)
+        except Exception:                                       # noqa: BLE001
+            earned = None
         out.append({"sport": sport, "kind": "Prop", "time": p.get("Time") or "",
                     "pick": f"{p.get('Player')} {p.get('Market')} {p.get('Side')}" + ("" if line is None else f" {line:g}"),
                     "game": p.get("Game") or "", "price": p.get("RealPrice"), "book": p.get("RealPriceBook") or "",
-                    "chance": p.get("ModelProb"), "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
+                    # Nov 21 (owner: "proven edge A+"): "chance" is the EARNED chance where there's a fit -- the model's
+                    # 60-80% picks hit ~55%, and the earned chance says so; the model's own stays in raw_chance
+                    "chance": earned if earned is not None else p.get("ModelProb"), "raw_chance": p.get("ModelProb"),
+                    "earned": earned, "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
                     # Nov 7: what the Home panel needs to log the pick
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
                     "line": line, "market_key": p.get("MarketKey"),

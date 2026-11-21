@@ -105,6 +105,8 @@ def closing_line(bets: Sequence[Dict], since: Optional[str] = CLV_ERA) -> Dict:
     for b in pairs:
         c = B.clv_pct(b.get("entry_odds"), b.get("close_odds"))
         if c is None:
+            if not B._missing(b.get("entry_odds")) and not B._missing(b.get("close_odds")):
+                dropped += 1                                    # Nov 21: a different line's close (betlog.clv_pct)
             continue
         if abs(float(b["entry_odds"])) > MAX_ODDS or abs(float(b["close_odds"])) > MAX_ODDS:
             dropped += 1
