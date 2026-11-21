@@ -562,6 +562,11 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     nothing rather than erroring — no separate "is this game final" check needed)."""
     results: Dict[int, Dict[str, float]] = {}
     for g in get_schedule(date_str):
+        # Nov 21 (owner: "your 14-1 record is overstated"): a game still in progress has a partial box score, and
+        # an Under looks like a win at halftime -- settle-results runs from 7 PM ET and graded 11 Nov 20 bets as
+        # wins that lost at the final whistle. Only finished games count (NHL's engine already did this).
+        if g.get("status_state") and g["status_state"] != "post":
+            continue
         box = get_game_boxscore(g["gameId"])
         for pid, rec in box.items():
             results.setdefault(pid, {}).update(rec)

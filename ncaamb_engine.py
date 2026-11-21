@@ -160,6 +160,9 @@ def get_schedule(date_str: str) -> List[Dict[str, Any]]:
                 "away_id": int(away["team"]["id"]),
                 "away_name": away["team"].get("displayName", "Unknown"),
                 "away_abbr": away["team"].get("abbreviation"),
+                # Nov 21: pre / in / post -- results are only taken from finished games (get_player_results)
+                "status_state": ((((event.get("competitions") or [{}])[0].get("status") or {}).get("type") or {})
+                                 .get("state")),
             })
         except (KeyError, TypeError, ValueError):
             logger.exception("NCAAMB scoreboard event had an unexpected shape: %s", event.get("id"))
@@ -412,6 +415,11 @@ def get_player_results(date_str: str) -> Dict[int, Dict[str, float]]:
     mlb_engine.get_player_results, so retro.py's grading logic works identically for either sport."""
     results: Dict[int, Dict[str, float]] = {}
     for g in get_schedule(date_str):
+        # Nov 21 (owner: "your 14-1 record is overstated"): a game still in progress has a partial box score, and
+        # an Under looks like a win at halftime -- settle-results runs from 7 PM ET and graded 11 Nov 20 bets as
+        # wins that lost at the final whistle. Only finished games count (NHL's engine already did this).
+        if g.get("status_state") and g["status_state"] != "post":
+            continue
         box = get_game_boxscore(g["gameId"])
         for pid, rec in box.items():
             results.setdefault(pid, {}).update(rec)
