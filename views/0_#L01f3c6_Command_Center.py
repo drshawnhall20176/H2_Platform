@@ -423,8 +423,8 @@ if _show_game_devig:
             st.caption("Only games where a single real book posted both real prices are shown — "
                       "never a guessed or cross-book-mixed number.")
         else:
-            st.info("No real, same-book, two-sided moneyline found for today's games yet — "
-                   "check back closer to first pitch.")
+            st.info("No real, same-book, two-sided moneyline found for today's games yet — check back closer to "
+                    + ("first pitch." if _active.key == "MLB" else "game time."))
 
 st.divider()
 left, right = st.columns([3, 2])
@@ -479,6 +479,18 @@ with left:
                 subset = [p for p in grading.build_top_leans(plays, per_market=8)
                          if p["Market"] == _mkt][:8]
             if subset:
+                # Nov 21 (owner: "need the game times in the top leans"): the start time, earliest first, and the
+                # earned chance beside the model's (props_money.earned)
+                for p in subset:
+                    _dt = sports.game_dt(p.get("GameDate"))
+                    p["_time"] = _dt.strftime("%-I:%M %p") if _dt else (p.get("Time") or "")
+                    p["_tsort"] = _dt.isoformat() if _dt else "9"
+                    try:
+                        import props_money as _PMS
+                        p["_earned"] = _PMS.play_earned(_active.key, p)
+                    except Exception:                           # noqa: BLE001
+                        p["_earned"] = None
+                subset = sorted(subset, key=lambda p: p["_tsort"])
                 for p in subset:
                     p["Grade"] = p["_grade"]["letter"]
                     p["_display_line"] = (f"📊 {p['Line']:g}" if p.get("LineSource") == "book"
@@ -501,14 +513,17 @@ with left:
                         p["_baseline"] = f"{marker}{baseline:.0%}"
                     else:
                         p["_baseline"] = "—"
-                tdf = pd.DataFrame(subset)[["Grade", "ModelProb", "Player", "Team", "TeamTrend",
-                                            "Market", "Side", "_display_line", "Conviction",
-                                            "_baseline", "Why"]]
+                _tcols = ["_time", "Grade", "ModelProb", "_earned", "Player", "Team", "TeamTrend",
+                          "Market", "Side", "_display_line", "Conviction", "_baseline", "Why"]
+                if all(p.get("_earned") is None for p in subset):
+                    _tcols.remove("_earned")
+                tdf = pd.DataFrame(subset)[_tcols]
                 st.dataframe(
-                    tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning",
+                    tdf.rename(columns={"ModelProb": "Model %", "Why": "Reasoning", "_time": "Time",
+                                        "_earned": "Earned %",
                                         "_display_line": "Line", "_baseline": "Baseline",
                                         "TeamTrend": "Team Trend"})
-                    .style.format({"Model %": "{:.0%}", "Conviction": "{:.2f}×"})
+                    .style.format({"Model %": "{:.0%}", "Earned %": "{:.0%}", "Conviction": "{:.2f}×"}, na_rep="—")
                     .theme_gradient(cmap="Greens", subset=["Model %"]),
                     column_config={"Reasoning": st.column_config.TextColumn(width="large")},
                     hide_index=True, width="stretch", height=330)
