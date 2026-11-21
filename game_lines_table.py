@@ -123,6 +123,12 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
         PR.annotate_leans(rows, lambda lg: PR.lean_records(lg))
     except Exception:                                           # noqa: BLE001
         pass
+    if not past:                                                # Nov 21: the game-line 💰 as shown (pick_ledger.py)
+        try:
+            import pick_ledger as PL
+            PL.record_games(date_str, rows)
+        except Exception:                                       # noqa: BLE001
+            pass
     show = st.radio("Show", ["💰 Money picks", "🔒 Locks only", "All games"], index=2, horizontal=True,
                     key=f"{key}_show", label_visibility="collapsed")
     if show.startswith("💰"):
