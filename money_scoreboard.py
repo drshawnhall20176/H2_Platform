@@ -29,7 +29,7 @@ def slate_record(sport: str, slate: str, load: Callable, today: Optional[str] = 
         led = PL.record("money", sport, slate)
         if led:
             return {"hits": led["hits"], "misses": led["misses"], "units": led["units"], "needed": led["needed"],
-                    "clv_beat": 0, "clv_lost": 0}
+                    "clv_beat": led.get("clv_beat") or 0, "clv_lost": led.get("clv_lost") or 0}
     except Exception:                                           # noqa: BLE001
         pass
     best = None

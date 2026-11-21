@@ -73,7 +73,8 @@ def card(sports_: Sequence[str], load: Optional[Callable] = None, today: Optiona
                     led = ledger(sp, d)
                     if led:
                         rec = {"hits": led["hits"], "misses": led["misses"], "needed": led["needed"],
-                               "profit": led["units"] / led["n"] if led["priced"] == led["n"] else None}
+                               "profit": led["units"] / led["n"] if led["priced"] == led["n"] else None,
+                               "clv_beat": led.get("clv_beat") or 0, "clv_lost": led.get("clv_lost") or 0}
                 _add(acc, rec, kind)
             n = acc["hits"] + acc["misses"]
             if not n:

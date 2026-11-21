@@ -68,7 +68,9 @@ with st.expander("📐 The rules in force, and each one's record since it began"
             "Picks": _names[r["kind"]] + ("" if r["sport"] == "ALL" else f" · {r['sport']}"),
             "Rule": f"v{r['v']} since {r['since']}", "Record": f"{r['hits']}–{r['misses']}",
             "Hit rate": f"{r['hit_rate']:.0%}", "Needed": f"{r['needed']:.0%}" if r.get("needed") else "—",
-            "Return per $1": f"{r['roi']:+.1%}" if r.get("roi") is not None else "—", "Slates": r["slates"]}
+            "Return per $1": f"{r['roi']:+.1%}" if r.get("roi") is not None else "—",
+            "Beat the close": (f"{r['beat_rate']:.0%} of {r['clv_moved']}" if r.get("beat_rate") is not None else "—"),
+            "Avg CLV": f"{r['clv_avg']:+.1f}%" if r.get("clv_avg") is not None else "—", "Slates": r["slates"]}
             for r in _rr]), hide_index=True, width="stretch")
     else:
         st.caption("The first slate graded under the current rules is Nov 21 — its record appears the morning after.")
