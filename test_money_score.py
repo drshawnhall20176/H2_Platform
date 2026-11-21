@@ -93,9 +93,9 @@ def test_daily_stake_budget_scales_every_money_stake(monkeypatch):
     assert stakes.raw_total("2026-11-20", rows, games) == 10.0                         # Nov 21: flat 1u each
     monkeypatch.setattr(stakes, "raw_total", lambda d, rows=None, games=None: 20.0)
     stakes._CACHE.clear()
-    assert stakes.factor("2026-11-20") == 0.5
-    assert PE.stake_units(0.55, 100, day="2026-11-20") == 0.5 and PE.stake_units(0.55, 100, capped=False) == 1.0
-    assert PE.stake_units(0.55, 100, day="2026-11-20", mode="kelly") == 1.0
+    assert stakes.factor("2026-11-20") == 0.25                                         # Nov 21: 5u a day
+    assert PE.stake_units(0.55, 100, day="2026-11-20") == 0.25 and PE.stake_units(0.55, 100, capped=False) == 1.0
+    assert PE.stake_units(0.55, 100, day="2026-11-20", mode="kelly") == 0.5
     stakes._CACHE.clear()
 
 
