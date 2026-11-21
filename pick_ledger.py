@@ -167,6 +167,13 @@ def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     misses: Nov 20's top 15 averaged a 65% chance and went 7-8. Saved picks without an earned chance (before Nov 21)
     rank by chance, as before."""
     props = [r for r in picks if r.get("kind", "Prop") in ("Prop", "Game")]     # Nov 21: game-line 💰 too
+    try:                                                        # Nov 21: markets switched off by their record
+        import shutoff as _SO
+        props = [r for r in props if r.get("kind") == "Game"
+                 or not (_SO.is_off(r.get("sport"), r.get("market"), "money")
+                         or _SO.is_off(r.get("sport"), r.get("market"), "lock"))]
+    except Exception:                                           # noqa: BLE001
+        pass
     scored = [dict(r, earned_edge=earned_edge(r)) for r in props]
     if any(r["earned_edge"] is not None for r in scored):
         out, per = [], {}

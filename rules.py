@@ -47,10 +47,17 @@ RULES: Dict[str, List[Dict]] = {
                                               "less what the price needs), positive only, 5 per sport at most",
          "fp": "323240ef9c"},
     ],
+    "shutoff": [
+        {"v": 1, "from": "2026-11-21", "what": "a sport x market loses its 💰 / 🔒 / strongest-list place after 150+ "
+                                              "graded picks losing even at the top of their 90% range, or the market "
+                                              "moving against them 55%+ of 100+ moves (last 60 days, re-scored daily)",
+         "fp": "ccf3c43786"},
+    ],
 }
 
 NAMES = {"money_props": "💰 Money picks (props)", "money_games": "💰 Money picks (game lines)",
-         "lock": "🔒 Most probable", "earned": "Earned chance", "strong": "Strongest picks list"}
+         "lock": "🔒 Most probable", "earned": "Earned chance", "strong": "Strongest picks list",
+         "shutoff": "Automatic shut-off"}
 
 
 def params() -> Dict[str, Dict]:
@@ -59,6 +66,7 @@ def params() -> Dict[str, Dict]:
     import pick_ledger as PL
     import props_engine as PE
     import props_money as PM
+    import shutoff as SO
     return {
         "money_props": {"band": list(PE.MONEY_BAND), "min_chance": PE.MONEY_MIN_CHANCE, "min_mev": PE.MONEY_MIN_MEV,
                         "skip": {k: list(v) for k, v in sorted(PE.MONEY_SKIP.items())}},
@@ -67,6 +75,8 @@ def params() -> Dict[str, Dict]:
         "lock": {"min_ev": PE.LOCK_MIN_EV, "pickem_books": sorted(PE.PICKEM_BOOKS)},
         "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED},
         "strong": {"n": PL.STRONG_N, "per_sport": PL.PER_SPORT},
+        "shutoff": {"window": SO.WINDOW, "min_n": SO.MIN_N, "min_clv_n": SO.MIN_CLV_N, "min_beat": SO.MIN_BEAT,
+                    "watch_n": SO.WATCH_N, "watch_roi": SO.WATCH_ROI},
     }
 
 
