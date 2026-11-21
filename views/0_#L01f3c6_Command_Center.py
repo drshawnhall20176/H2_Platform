@@ -211,7 +211,9 @@ def _all_sports_view():
         sdate = sday.strftime("%Y-%m-%d")
         spicks = _strong_past(sdate, tuple(keys)) if spast else picks
         _ledger = spast and bool(spicks) and spicks[0].get("_ledger")
-        top = sorted(spicks, key=lambda r: -(r.get("chance") or 0))[:None if _ledger else 15]
+        import pick_ledger as _PL
+        top = (sorted(spicks, key=lambda r: -(r.get("earned_edge") or r.get("chance") or 0)) if _ledger
+               else _PL.strongest(spicks))                     # Nov 21: ranked by earned edge
         top.sort(key=lambda r: CT._tkey(r.get("time"), C._kick_dt))                # earliest game first
         if top and spast:
             C.hit_miss_breakdown(top, "result", "chance", key="cc_all_strong_hm",
@@ -222,6 +224,9 @@ def _all_sports_view():
                                   "Pick": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
                                           + (r.get("pick") or ""),
                                   "Chance": r.get("chance"),
+                                  "Edge": r.get("earned_edge") if r.get("earned_edge") is not None
+                                  else _PL.earned_edge(r),
+                                  "Model said": r.get("raw_chance"),
                                   "Best price": (f"{int(float(r['price'])):+d} · {r.get('book') or ''}"
                                                  if r.get("price") is not None and not r.get("pickem_only")
                                                  else "pick'em line, no book price"),
@@ -229,7 +234,13 @@ def _all_sports_view():
                                   **({"First shown": _et_clock(r.get("first_seen")) or ""} if _ledger else {}),
                                   **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {})}
                                  for r in top])
-            _cfg = {"Chance": st.column_config.NumberColumn(format="percent")}
+            _cfg = {"Chance": st.column_config.NumberColumn(format="percent", help="Earned chance: the model's chance "
+                                                            "corrected to its track record."),
+                    "Edge": st.column_config.NumberColumn(format="percent", help="Earned chance less what the price "
+                                                          "needs to break even (a pick'em line: about 54%)."),
+                    "Model said": st.column_config.NumberColumn(format="percent", help="The model's own chance, "
+                                                                "before the correction.")}
+            _sdf = _sdf.drop(columns=[c for c in ("Edge", "Model said") if c in _sdf and _sdf[c].isna().all()])
             if spast:
                 st.dataframe(_sdf, hide_index=True, width="stretch", column_config=_cfg)
             else:
@@ -241,7 +252,9 @@ def _all_sports_view():
                 st.caption(f"Every pick that was on this list before its game started ({len(top)} — the list changes "
                            "through the day as boards rebuild), at the line and price it showed the first time, "
                            "graded on final box scores.")
-            st.caption("The 15 likeliest of the day's saved best picks across every sport, earliest game first. "
+            st.caption("The day's best picks across every sport, earliest game first: up to 15, ranked by **Edge** — the "
+                       "**earned** chance (the model's chance corrected to its track record) less what the price needs. "
+                       "Only picks with a positive edge are listed. Before Nov 21: the 15 likeliest by the model's chance. "
                        "**Pick'em line, no book price** = only a pick'em app posts it (most college props): no "
                        "sportsbook price checks the model there, and those chances have run optimistic. Pick an "
                        "earlier date to see how a day's list did.")
@@ -251,7 +264,7 @@ def _all_sports_view():
     with st.container():
         with st.container(border=True):
             C.section_header("🧾", "The proof, every sport")
-            clv_bets = sorted([b for b in every_bet if b.get("close_odds") is not None and b.get("entry_odds") is not None],
+            clv_bets = sorted([b for b in every_bet if B.clv_pct(b.get("entry_odds"), b.get("close_odds")) is not None],
                               key=lambda b: b.get("ts_placed", ""))
             if clv_bets:
                 running, tot = [], 0.0
@@ -263,7 +276,11 @@ def _all_sports_view():
                 fig.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
                                   title="Average CLV over time (%), all sports", template="plotly_white")
                 st.plotly_chart(fig, width="stretch")
-                st.caption(f"{len(clv_bets)} bets with closing lines, across every sport.")
+                _odd = sum(1 for b in every_bet if b.get("close_odds") is not None and b.get("entry_odds") is not None
+                           and B.clv_pct(b["entry_odds"], b["close_odds"]) is None)
+                st.caption(f"{len(clv_bets)} bets with a same-line closing price, across every sport."
+                           + (f" {_odd} left out: their 'close' moved the chance 20+ points — a different line's price, "
+                              "not closing-line value." if _odd else ""))
             else:
                 st.info("CLV fills in as bets are logged with a closing line.", icon="🧭")
             cal = B.calibration(every_bet, n_bins=5) if every_bet else []
@@ -535,7 +552,7 @@ with left:
 with right:
     with st.container(border=True):
         C.section_header("🧾", "The proof")
-        clv_bets = [b for b in bets if b.get("close_odds") is not None and b.get("entry_odds") is not None]
+        clv_bets = [b for b in bets if B.clv_pct(b.get("entry_odds"), b.get("close_odds")) is not None]
         if clv_bets:
             clv_bets = sorted(clv_bets, key=lambda b: b.get("ts_placed", ""))
             running, tot = [], 0.0
