@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+import os
 import streamlit as st
 
 import mlb_engine as E
@@ -1012,9 +1013,107 @@ def _big_slate_props_games(sport, sport_key: str, date_str: str, api_key: Option
         date_str, keep=lambda g: bool(PL.match_event(posted, g.get("home_name"), g.get("away_name"))))
 
 
+# --------------------------------------------------------------------------- saved boards (Nov 20)
+# Owner: the app kept crashing Streamlit's memory -- the last time on college football's Command Center. One college
+# football board build measured ~1 GB and 31 minutes (research/board_memory.py: 70 games, every player's logs), on an
+# app whose whole allowance is a few GB. The warm-slates job already builds every props board hourly on GitHub's
+# machines and kept only Today's-best rows. Now it keeps the whole finished board (plays + games + books + offers,
+# compressed: a few hundred KB) and the app loads that instead of building -- seconds, a few MB. The app still builds
+# live when no saved board is fresh enough (a new day before the first warm run, another book).
+BOARD_FRESH_S = 4500                     # 75 minutes: the warm job runs hourly
+HEAVY_BOARDS = ("NCAAF", "NCAAMB")       # too big to build in the app: an older same-day board beats a crash
+HEAVY_STALE_OK_S = 6 * 3600
+
+
+def _board_key(sport_key: str, book: str) -> str:
+    return f"BOARD:{sport_key}:{book}"
+
+
+def saved_board(sport_key: str, date_str: str, book: str, now: Optional[float] = None):
+    """(plays, meta, books, offers, diag) from the last warm build, or None."""
+    import base64
+    import time as _t
+    from datetime import datetime as _dt, timezone as _tz
+    import slate_store as SS
+    if SS._off() or os.environ.get("H2_BOARD_LIVE"):
+        return None
+    try:
+        import model_store as MS
+        row = MS.load_slate(_board_key(sport_key, book), date_str)
+        if not row:
+            return None
+        ts = _dt.fromisoformat(str(row["ts"]))
+        age = (now or _t.time()) - (ts if ts.tzinfo else ts.replace(tzinfo=_tz.utc)).timestamp()
+        past = date_str < SS._today_et()
+        if not (past or age < BOARD_FRESH_S or (sport_key in HEAVY_BOARDS and age < HEAVY_STALE_OK_S)):
+            return None
+        out = SS.decode(base64.b64decode(row["payload"]))
+        try:
+            st.session_state[f"_board_saved_at_{sport_key}_{date_str}"] = str(row["ts"])
+        except Exception:                                       # noqa: BLE001
+            pass
+        return out
+    except Exception:                                           # noqa: BLE001 -- a bad copy: build instead
+        return None
+
+
+def save_board(sport_key: str, date_str: str, book: str, value) -> None:
+    import base64
+    import slate_store as SS
+    if SS._off():
+        return
+    try:
+        import model_store as MS
+        MS.save_slate(_board_key(sport_key, book), date_str, base64.b64encode(SS.encode(value)).decode())
+    except Exception:                                           # noqa: BLE001 -- saving is a bonus
+        pass
+
+
 @st.cache_data(ttl=300, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
 def load_generic_best_bets_board(sport_key: str, date_str: str,
                                  preferred_book: str = O.DEFAULT_BOOK) -> tuple:
+    """The board: the warm job's saved copy when fresh (saved_board), else built here (build_generic_board)."""
+    saved = saved_board(sport_key, date_str, preferred_book)
+    if saved is not None:
+        plays, meta, books, offers, diag = saved
+        try:
+            st.session_state[f"_real_lines_diag_{sport_key}_{date_str}"] = diag
+            st.session_state[f"_real_offers_{sport_key}_{date_str}"] = offers
+        except Exception:                                       # noqa: BLE001
+            pass
+        return plays, meta, books
+    # Nov 20 (owner: the app crashed again opening college basketball, then college football, before the first saved
+    # board existed): inside the app, the two heavy sports are never built live -- the page says the board is on its
+    # way instead. Scripts (no Streamlit runtime) still build.
+    if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
+        try:
+            st.session_state[f"_board_pending_{sport_key}"] = True
+        except Exception:                                       # noqa: BLE001
+            pass
+        return [], [], list(O.US_BOOKS.keys())
+    return build_generic_board(sport_key, date_str, preferred_book)
+
+
+def _in_app() -> bool:
+    try:
+        from streamlit import runtime
+        return runtime.exists()
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def board_pending_note(sport_key: str, date_str: str, book: str = O.DEFAULT_BOOK) -> None:
+    """The message a page shows when a heavy sport's board hasn't been saved yet."""
+    try:
+        if sport_key in HEAVY_BOARDS and _in_app() and saved_board(sport_key, date_str, book) is None:
+            st.info(f"⏳ Today's {sport_key} board is built on the server every hour (it's too big to build here "
+                    "without crashing the app). The first one of the day lands shortly after the hourly run — check "
+                    "back in a few minutes.")
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def build_generic_board(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> tuple:
     """Any sport whose engine/projections don't need MLB's statcast/weather/bullpen-blend
     enrichment path — currently NFL, WNBA, and any future sport built the same way.
 
@@ -1120,4 +1219,6 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
             TB.save_props(sport_key, date_str, plays, meta)
         except Exception:                                       # noqa: BLE001
             pass
+    if plays:                                                   # Nov 20: the whole board, for the app to load
+        save_board(sport_key, date_str, preferred_book, (plays, meta, available_books, real_offers, diag))
     return plays, meta, available_books

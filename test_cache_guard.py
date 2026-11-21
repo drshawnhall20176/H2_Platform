@@ -62,3 +62,48 @@ def test_reload_race_is_recognised_and_import_retried(monkeypatch):
         return real(name)
     monkeypatch.setattr(importlib, "import_module", flaky)
     assert CG.safe_import("json").__name__ == "json" and len(calls) == 2
+
+
+def test_app_loads_the_saved_board_instead_of_building(monkeypatch):
+    """Nov 20: a college football board build measured ~1 GB; the app loads the warm job's saved copy."""
+    import time
+    import base64
+    import best_bets_data as BBD
+    import model_store as MS
+    import slate_store as SS
+    store = {}
+    monkeypatch.setattr(SS, "_off", lambda: False)
+    monkeypatch.setattr(MS, "save_slate", lambda sp, d, payload, db_path=None: store.__setitem__((sp, d), payload))
+    from datetime import datetime, timezone, timedelta
+
+    def load(sp, d, db_path=None, age_h=0.5):
+        if (sp, d) not in store:
+            return None
+        return {"ts": (datetime.now(timezone.utc) - timedelta(hours=load.age)).isoformat(), "payload": store[(sp, d)]}
+    load.age = 0.5
+    monkeypatch.setattr(MS, "load_slate", load)
+    day = SS._today_et()
+    BBD.save_board("NBA", day, "draftkings", ([{"Player": "A"}], [{"g": 1}], ["draftkings"], [], {}))
+    got = BBD.saved_board("NBA", day, "draftkings")
+    assert got[0] == [{"Player": "A"}]
+    load.age = 2                                                 # older than 75 minutes: NBA rebuilds
+    assert BBD.saved_board("NBA", day, "draftkings") is None
+    BBD.save_board("NCAAF", day, "draftkings", ([{"Player": "B"}], [], [], [], {}))
+    assert BBD.saved_board("NCAAF", day, "draftkings")[0] == [{"Player": "B"}]   # heavy: 2h old is still used
+    load.age = 7
+    assert BBD.saved_board("NCAAF", day, "draftkings") is None
+    monkeypatch.setenv("H2_BOARD_LIVE", "1")
+    load.age = 0.1
+    assert BBD.saved_board("NCAAF", day, "draftkings") is None                      # the warm job always builds
+
+
+def test_heavy_sports_are_never_built_inside_the_app(monkeypatch):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "saved_board", lambda *a, **k: None)
+    monkeypatch.setattr(BBD, "_in_app", lambda: True)
+    monkeypatch.setattr(BBD, "build_generic_board", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built")))
+    BBD.load_generic_best_bets_board.clear()
+    assert BBD.load_generic_best_bets_board("NCAAF", "2026-11-21", "draftkings")[0] == []
+    monkeypatch.setattr(BBD, "build_generic_board", lambda *a, **k: (["p"], [], []))
+    assert BBD.load_generic_best_bets_board("NBA", "2026-11-21", "draftkings")[0] == ["p"]      # light sports build
+    BBD.load_generic_best_bets_board.clear()

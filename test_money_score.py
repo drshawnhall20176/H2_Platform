@@ -96,3 +96,12 @@ def test_daily_stake_budget_scales_every_money_stake(monkeypatch):
     assert stakes.factor("2026-11-20") == 0.5
     assert PE.stake_units(0.55, 100, day="2026-11-20") == 1.0 and PE.stake_units(0.55, 100, capped=False) == 2.0
     stakes._CACHE.clear()
+
+
+def test_money_record_text_live_then_tested_then_new():
+    import money_scoreboard as MSB
+    b = {"sports": [{"sport": "NBA", "n": 5, "hits": 3, "misses": 2, "hit_rate": 0.6, "needed": 0.45, "units": 1.1},
+                    {"sport": "NHL", "n": 0}]}
+    assert MSB.record_text("NBA", b).startswith("💰 live: 3–2 (60%")
+    assert MSB.record_text("NBA", {"sports": []}).startswith("💰 tested: 50–57")
+    assert MSB.record_text("NHL", b).startswith("💰 new rule")

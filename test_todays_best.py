@@ -62,7 +62,7 @@ def test_warm_slates_builds_in_season_boards(monkeypatch):
     import warm_slates as W
     built = []
     monkeypatch.setattr(sports, "in_season", lambda k, day=None: k in ("NBA", "NHL"))
-    monkeypatch.setattr(BBD, "load_generic_best_bets_board", lambda k, d, b: built.append(k) or ([], [], []))
+    monkeypatch.setattr(BBD, "build_generic_board", lambda k, d, b: built.append(k) or ([], [], []))   # Nov 20: build + save
     monkeypatch.setattr(TB, "load_props", lambda k, d: {"rows": []})
     W.boards("2026-11-06")
     assert built == ["NBA", "NHL"]

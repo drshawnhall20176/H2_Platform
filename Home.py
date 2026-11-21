@@ -92,7 +92,9 @@ if True:
                       key="home_best_show", label_visibility="collapsed",
                       help=_PE_H.MONEY_HELP)
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
-                  help="Builds today's Best Bets board for each props sport (the same Odds API use as opening it)."):
+                  help="Reloads each props sport's board. Boards are rebuilt every hour on the server (Nov 20: "
+                       "building them here ran the app out of memory); this picks up the newest one."):
+        _BBD_r = __import__("best_bets_data"); _BBD_r.load_generic_best_bets_board.clear()
         import best_bets_data as _BBD
         with st.spinner("Building today's boards…"):
             for _k in _props_sports:
@@ -181,10 +183,11 @@ if True:
 
     @st.cache_data(ttl=1800, show_spinner=False)
     def _money_rec(sp):
-        return _PE.money_record_text(sp)
+        import money_scoreboard as _MSB                         # Nov 20: the new 💰 rule's record, not the old one's
+        return _MSB.record_text(sp)
     for _r in _rows:                                            # Nov 19: a 💰 pick shows the 💰 record, not its tag's
-        if _r.get("money") and _money_rec(_r.get("sport")):
-            _r["record"] = _money_rec(_r["sport"])
+        if _r.get("money"):
+            _r["record"] = _money_rec(_r.get("sport"))
     _hidden = [r for r in _rows if r.get("verdict") in _PR.HIDE]
     _show_losing = st.toggle(f"Show losing pick types ({len(_hidden)} hidden)", value=False, key="home_best_losing",
                              disabled=not _hidden,
