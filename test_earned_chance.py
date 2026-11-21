@@ -30,3 +30,20 @@ def test_clv_leaves_out_a_different_lines_close():
 def test_a_priced_pick_without_a_priced_fit_uses_the_model_fit():
     w = {"NCAAMB": {"_all|model": [0.0, 1.0, 0.4, 900]}}
     assert PM.earned("NCAAMB", "Points", "Under", 0.70, 0.55, w_by=w) is not None
+
+
+def test_the_second_stage_lowers_a_high_earned_chance_from_nov_22():
+    w = dict(W, _post={"priced": [0.0, 1.0, 0.3, 500]})
+    v1 = PM.earned("NBA", "Points", "Over", 0.85, 0.55, w_by=w, post=False)
+    v2 = PM.earned("NBA", "Points", "Over", 0.85, 0.55, w_by=w, day="2026-11-22")
+    assert v2 < v1 and v2 > 0.5
+    assert PM.earned("NBA", "Points", "Over", 0.85, 0.55, w_by=w, day="2026-11-21") == v1
+
+
+def test_fit_post_needs_enough_shown_picks(monkeypatch):
+    monkeypatch.setattr(PM, "shown", lambda sp, r: True)
+    g = {"NBA": [{"actual": 12, "p_model": 0.7, "line": 10.5, "p_market": 0.5, "book": "fanduel", "market": "Points"}]
+             * 250 + [{"actual": 8, "p_model": 0.7, "line": 10.5, "p_market": 0.5, "book": "fanduel",
+                       "market": "Points"}] * 250}
+    post = PM.fit_post(g, W)
+    assert "priced" in post and post["priced"][3] == 500

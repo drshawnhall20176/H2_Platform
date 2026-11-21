@@ -114,9 +114,11 @@ def refit(save=None, grade=None) -> Dict:
             g = DR.grade_dates(sp, [d for d in MS.snapshot_dates(sp) if d >= since])
             return [r for rs in g.values() for r in rs]
     coefs = {}
+    graded_by: Dict[str, List[Dict]] = {}
     for sp in SPORTS:
         try:
             g = grade(sp)
+            graded_by[sp] = g
             c = fit_sport(rows_from_graded(g), rows_model_only(g))
         except Exception as exc:                                # noqa: BLE001 -- one sport never stops the rest
             print(f"{sp}: props money fit failed ({type(exc).__name__}: {exc})")
@@ -129,6 +131,14 @@ def refit(save=None, grade=None) -> Dict:
                       f"{len(c) - 1} markets with their own fit")
         else:
             print(f"{sp} props: under {MIN_FIT} graded reads — no score yet")
+    try:                                                        # Nov 21: the second stage on shown picks
+        post = fit_post(graded_by, coefs)
+        if post:
+            coefs["_post"] = post
+            for k, w in post.items():
+                print(f"post-stage ({k}): a={w[0]:+.3f} slope={w[2]:+.3f} ({w[3]} shown picks)")
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"post-stage fit failed ({type(exc).__name__}: {exc})")
     rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "coefs": coefs}
     if save is None:
         import model_store as MS
@@ -137,6 +147,59 @@ def refit(save=None, grade=None) -> Dict:
     save(f"{KEY}:{PE._et_today()}", rec)
     _CACHE.clear()
     return rec
+
+
+POST_FROM = "2026-11-22"   # earned chance v2 (rules.py): the second stage applies from this slate
+POST_MIN = 200
+
+
+def shown(sport: str, r: Dict) -> bool:
+    """A graded read the boards showed as a pick: a playable tag, 🔒 or 💰."""
+    import props_engine as PE
+    import todays_best as TB
+    tag = PE.norm_use(r.get("bet_use_tag") or r.get("use_tag"))
+    try:
+        return (tag in TB.PLAYABLE or PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"),
+                                                 ev=r.get("ev"))
+                or PE.snapshot_is_money(sport, r))
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def fit_post(graded_by: Dict[str, Sequence[Dict]], cf: Dict) -> Dict[str, List[float]]:
+    """Nov 21 (owner: the 80%+ picks still claim 62% and hit 50%): the earned chance's second stage, fit on SHOWN picks
+    only -- logit P(hit) = a + c * logit(earned), pulled toward a flat 50%, one fit for sportsbook picks and one for
+    pick'em lines. The first stage is fit on every read; the boards show the reads where the model disagrees most,
+    and there the earned chance still ran high. research/earned_study.py, walk-forward (each day from earlier days only),
+    408 shown picks: shown picks hit about 51% whatever their earned chance; the second stage lowers the high end
+    (earned 60-65% -> 57%) and improves the Brier score (0.2566 -> 0.2551) and log loss (0.7068 -> 0.7034)."""
+    import money_score as MSC
+    import props_engine as PE
+    rows: Dict[str, List[Dict]] = {"priced": [], "pk": []}
+    for sp, g in graded_by.items():
+        for r in g:
+            if r.get("actual") is None or r.get("p_model") is None or r.get("line") is None or not shown(sp, r):
+                continue
+            thr = PE.threshold(float(r["line"]))
+            if r["actual"] == thr:
+                continue
+            pmod = float(r["p_model"])
+            side = "Over" if pmod >= 0.5 else "Under"
+            pk = (r.get("book") or "") in PE.PICKEM_BOOKS or r.get("p_market") is None
+            pm_side = None if pk else (float(r["p_market"]) if side == "Over" else 1 - float(r["p_market"]))
+            e = earned(sp, r.get("market"), side, pmod if side == "Over" else 1 - pmod, pm_side, w_by=cf,
+                       post=False)
+            if e is None:
+                continue
+            hit = (r["actual"] > thr) == (side == "Over")
+            rows["pk" if pk else "priced"].append({"pm": 0.5, "pmod": min(max(e, 1e-4), 1 - 1e-4), "y": float(hit)})
+    out = {}
+    for k, rs in rows.items():
+        if len(rs) >= POST_MIN:
+            w = MSC.fit(rs, lam=3.0)
+            if w:
+                out[k] = w + [len(rs)]
+    return out
 
 
 def coefs(get=None) -> Dict[str, Dict[str, List[float]]]:
@@ -170,7 +233,8 @@ def score(sport: str, market: str, side: str, p_model_side, p_market_side, price
     return (po if side == "Over" else 1 - po) * d - 1
 
 
-def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None, w_by=None) -> Optional[float]:
+def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None, w_by=None, post=None,
+           day: Optional[str] = None) -> Optional[float]:
     """Nov 21 (owner: "I need ... the proven edge A+"): the chance a pick has EARNED -- the model's chance corrected to
     its track record. With a sportsbook price: the books' no-vig chance plus the share of the model's disagreement its
     record has earned (the Money Score fit). Without one (pick'em lines): the model's chance pulled toward 50% by its
@@ -192,7 +256,17 @@ def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None,
         if not w:
             return None
     po = _sig(w[0] + w[1] * _logit(pm) + w[2] * (_logit(pmod) - _logit(pm)))
-    return po if side == "Over" else 1 - po
+    e = po if side == "Over" else 1 - po
+    # Nov 21 (earned v2, from POST_FROM): the second stage fit on shown picks (fit_post)
+    if post is None:
+        import props_engine as PE
+        post = (day or PE._et_today()) >= POST_FROM
+    if post:
+        pw = ((w_by if w_by is not None else coefs()).get("_post") or {}).get(
+            "pk" if p_market_side is None else "priced")
+        if pw:
+            e = _sig(pw[0] + pw[1] * _logit(0.5) + pw[2] * (_logit(e) - _logit(0.5)))
+    return e
 
 
 PICKEM_NEED = 0.5425       # a pick'em entry's break-even per pick (5-pick flex / 2-pick power, roughly)
