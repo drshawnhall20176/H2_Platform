@@ -103,7 +103,8 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
             timed.append(dict(p, Time=p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else "")))
         MS.save_setting(KEY.format(sport=sport, date=date_str),
                         {"at": datetime.now(timezone.utc).isoformat(),
-                         "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"))})
+                         "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"),
+                                              on_board={p.get("Game") for p in timed if p.get("Game")})})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
         pass
     # Nov 21 (owner: "your 14-1 record is overstated"): the picks as SHOWN -- every 💰 prop the board shows and the
@@ -116,11 +117,18 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
         pass
 
 
-def keep_started(new_rows: List[Dict], old_rows: Optional[List[Dict]], game_key: str = "game") -> List[Dict]:
+def keep_started(new_rows: List[Dict], old_rows: Optional[List[Dict]], game_key: str = "game",
+                 on_board=None) -> List[Dict]:
     """Nov 19: a board rebuilt after tip-off leaves out the games that have started -- and the 11:25 PM rebuild on
     Nov 18 saved the NBA's picks as an empty list, so the day's picks (and their results) were gone by morning. The
     picks of any game no longer on the new board are kept as they were; games still on it take the new picks."""
     new_rows = list(new_rows or [])
+    # Nov 21: a game still ON the new board (not started) whose pick dropped off stays dropped -- the old pick was
+    # kept all day before (two college basketball picks the model had moved off, still on the strongest list)
+    if on_board:
+        new_rows = list(new_rows or [])
+        live = {r.get(game_key) for r in new_rows} | set(on_board)
+        return new_rows + [r for r in old_rows or [] if r.get(game_key) not in live]
     live = {r.get(game_key) for r in new_rows}
     return new_rows + [r for r in old_rows or [] if r.get(game_key) not in live]
 

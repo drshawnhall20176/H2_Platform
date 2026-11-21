@@ -25,3 +25,8 @@ def test_clv_leaves_out_a_different_lines_close():
     assert B.clv_pct(-791, -123) is None            # 89% -> 55%: not the same line
     assert B.clv_pct(195, -265) is None
     assert B.clv_pct(-110, -120) is not None and B.clv_pct(-110, -120) > 0
+
+
+def test_a_priced_pick_without_a_priced_fit_uses_the_model_fit():
+    w = {"NCAAMB": {"_all|model": [0.0, 1.0, 0.4, 900]}}
+    assert PM.earned("NCAAMB", "Points", "Under", 0.70, 0.55, w_by=w) is not None

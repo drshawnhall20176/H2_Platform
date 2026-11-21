@@ -186,7 +186,7 @@ def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None,
     if p_market_side is not None and (cf.get(market) or cf.get("_all")):
         w = cf.get(market) or cf.get("_all")
         pm = float(p_market_side) if side == "Over" else 1 - float(p_market_side)
-    else:
+    else:                       # no price, or (Nov 21: college basketball, NHL blocked shots) no priced fit yet
         w = cf.get(f"{market}|model") or cf.get("_all|model")
         pm = 0.5
         if not w:
