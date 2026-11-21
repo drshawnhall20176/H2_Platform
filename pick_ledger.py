@@ -160,7 +160,7 @@ def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     what the price needs -- and only picks that clear it. Ranking by the model's raw chance picked out its biggest
     misses: Nov 20's top 15 averaged a 65% chance and went 7-8. Saved picks without an earned chance (before Nov 21)
     rank by chance, as before."""
-    props = [r for r in picks if r.get("kind", "Prop") == "Prop"]
+    props = [r for r in picks if r.get("kind", "Prop") in ("Prop", "Game")]     # Nov 21: game-line 💰 too
     scored = [dict(r, earned_edge=earned_edge(r)) for r in props]
     if any(r["earned_edge"] is not None for r in scored):
         out, per = [], {}
@@ -174,7 +174,38 @@ def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     return sorted(props, key=lambda r: -(r.get("chance") or 0))[:n]
 
 
-def record_strong(day: str, now: Optional[datetime] = None, keys: Optional[Sequence[str]] = None, load_props=None) -> int:
+def game_candidates(day: str, rows_=None) -> List[Dict]:
+    """Nov 21 (owner: "will these pages pull into the top 15 if there are things identified?"): game-line 💰 picks as
+    strongest-list rows -- every league the Money Score has promoted to 💰 (money_score.MONEY_LEAGUES: college
+    basketball today; International Hoops, Tennis and the rest join the day their record earns it). Their earned chance
+    is the Money Score's chance; each row carries what the Bet Log needs to log it."""
+    import hoops_games_page as HG
+    if rows_ is None:
+        import money_score as MSC
+        import todays_best as TB
+        rows_ = TB.winner_rows(day, leagues=list(MSC.MONEY_LEAGUES))
+    out = []
+    for r in rows_ or []:
+        if not r.get("money") or not r.get("money_market") or r.get("money_price") is None:
+            continue
+        rec = r.get("_rec") or {}
+        try:
+            it = HG.side_item(r.get("_full") or {}, r["money_market"], r.get("money_side"), line=r.get("money_line"),
+                              price=r.get("money_price")) or {}
+        except Exception:                                       # noqa: BLE001
+            it = {}
+        out.append(dict(it, kind="Game", sport=r.get("sport"), pick=r.get("money_pick"), price=r.get("money_price"),
+                        book=r.get("price_book") or "", chance=r.get("money_chance"), earned=r.get("money_chance"),
+                        raw_chance=r.get("chance") if r.get("winner") and r.get("money_pick", "").startswith(
+                            str(r.get("winner"))) else None,
+                        money=True, game=r.get("game"), time=r.get("time"), game_id=rec.get("game_id"),
+                        kickoff=rec.get("kickoff"), money_market=r["money_market"], money_side=r.get("money_side"),
+                        money_line=r.get("money_line"), money_score=r.get("money_score")))
+    return out
+
+
+def record_strong(day: str, now: Optional[datetime] = None, keys: Optional[Sequence[str]] = None, load_props=None,
+                  games=None) -> int:
     """The strongest-15 list as it stands now, every pick whose game is still to start."""
     if load_props is None:
         import todays_best as TB
@@ -182,6 +213,10 @@ def record_strong(day: str, now: Optional[datetime] = None, keys: Optional[Seque
     picks = []
     for k in keys if keys is not None else strong_keys():
         picks += [dict(r, sport=r.get("sport") or k) for r in (load_props(k, day) or {}).get("rows") or []]
+    try:
+        picks += game_candidates(day) if games is None else list(games)
+    except Exception:                                           # noqa: BLE001 -- props still record
+        pass
     return add("strong", "ALL", day, [r for r in strongest(picks) if not started(day, r, now)], now)
 
 
@@ -299,7 +334,12 @@ def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=No
         if kind == "games":
             grade_games(day, list(rs.values()))
         else:
+            gm = [r for r in rs.values() if r.get("money_market")]          # Nov 21: game lines on the strong list
+            if gm:
+                grade_games(day, gm)
             for r in rs.values():
+                if r.get("money_market"):
+                    continue
                 res, act = _sport_results(r.get("sport") or sp, day, cache)
                 g = grade_prop(r, res, act)
                 if g:

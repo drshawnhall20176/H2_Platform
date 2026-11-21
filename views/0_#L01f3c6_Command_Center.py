@@ -130,6 +130,11 @@ def _all_sports_saved(day, keys):
     for k in keys:                                              # no stored game picks: count the games on its picks
         if not games.get(k):
             games[k] = {r.get("game") for r in picks if r.get("sport") == k and r.get("game")}
+    try:                                                        # Nov 21: game-line 💰 picks join the strongest list
+        import pick_ledger as _PLg
+        picks += _PLg.game_candidates(day)
+    except Exception:                                           # noqa: BLE001
+        pass
     return saved, picks, {k: len(v) for k, v in games.items()}
 
 

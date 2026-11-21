@@ -103,3 +103,23 @@ def test_a_dropped_pick_on_a_game_still_on_the_board_is_not_kept():
     import todays_best as TB
     old = [{"game": "A @ B", "pick": "x"}, {"game": "E @ F", "pick": "z"}]
     assert TB.keep_started([], old, on_board={"A @ B"}) == [{"game": "E @ F", "pick": "z"}]
+
+
+def test_game_line_money_picks_join_the_strongest_list():
+    full = {"sport": "NCAAMB", "home": "Siena Saints", "away": "Rider Broncs", "home_spread": -6.5, "game_id": "g1",
+            "kickoff": "2026-11-21T16:00:00Z"}
+    rows = [{"sport": "NCAAMB", "money": True, "money_market": "Spread", "money_side": "home", "money_line": -6.5,
+             "money_price": -109, "money_chance": 0.56, "money_pick": "Siena Saints -6.5", "money_score": 0.07,
+             "game": "Rider Broncs @ Siena Saints", "time": "11:00 AM", "_rec": {"game_id": "g1"}, "_full": full},
+            {"sport": "NCAAMB", "money": False, "money_market": "Spread"}]
+    g = PL.game_candidates("2026-11-21", rows)
+    assert len(g) == 1 and g[0]["kind"] == "Game" and g[0]["bet_market"] == "Spread" and g[0]["earned"] == 0.56
+    props = [{"kind": "Prop", "sport": "NBA", "pick": "p", "earned": 0.55, "price": -110}]
+    got = PL.strongest(props + g)
+    assert [r["pick"] for r in got] == ["Siena Saints -6.5", "p"]           # +3.8 points beats +2.6
+
+
+def test_strong_ledger_grades_game_lines_on_the_final_score():
+    rows = [{"game_id": "g1", "money_market": "Spread", "money_side": "home", "money_line": -6.5}]
+    PL.grade_games("2026-11-21", rows, recs={"g1": {"final_home": 80, "final_away": 70}})
+    assert rows[0]["result"] == "win"
