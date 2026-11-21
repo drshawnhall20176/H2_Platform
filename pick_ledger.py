@@ -28,7 +28,7 @@ SINCE = "2026-11-21"                     # the first slate with a ledger
 STRONG_N = 15
 PER_SPORT = 5                            # Nov 21: no one sport fills the list (the first earned list was 15 NCAAF Unders)
 KEEP = ("sport", "kind", "pick", "player", "pid", "market", "side", "line", "price", "book", "chance", "money", "lock",
-        "game", "time", "pickem_only", "edge", "use", "stake", "raw_chance", "earned", "earned_edge",
+        "game", "time", "pickem_only", "edge", "use", "stake", "raw_chance", "earned", "earned_edge", "rule_v", "kind",
         # game lines
         "league", "game_id", "money_market", "money_side", "money_line", "money_score", "kickoff")
 
@@ -80,11 +80,17 @@ def add(kind: str, sport: str, day: str, new: Sequence[Dict], now: Optional[date
     cur = _get(key, get)
     have = dict(cur.get("rows") or {})
     n = 0
+    try:                                                        # Nov 21: the rule version in force (rules.py)
+        import rules as _RU
+        rv = _RU.version({"strong": "strong", "money": "money_props", "games": "money_games"}.get(kind, kind), day)
+    except Exception:                                           # noqa: BLE001
+        rv = None
     for r in new:
         k = row_key(r)
         if k in have:
             continue
-        have[k] = dict({f: r.get(f) for f in KEEP if r.get(f) is not None}, first_seen=now.isoformat(timespec="seconds"))
+        have[k] = dict({f: r.get(f) for f in KEEP if r.get(f) is not None}, first_seen=now.isoformat(timespec="seconds"),
+                       rule_v=rv)
         n += 1
     if n:
         _save(key, dict(cur, rows=have), save)
@@ -402,3 +408,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def since_record(kind: str, sport: str, start: str, end: str, get=None) -> Optional[Dict]:
+    """Nov 21 (rules.py): a ledger's record summed over slates start..end -- one rule version's own record."""
+    d0, d1 = date.fromisoformat(max(start, SINCE)), date.fromisoformat(end)
+    acc = {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "priced": 0, "slates": 0}
+    while d0 <= d1:
+        r = record(kind, sport, d0.isoformat(), get)
+        if r:
+            acc["hits"] += r["hits"]
+            acc["misses"] += r["misses"]
+            acc["units"] += r["units"]
+            acc["need_sum"] += (r["needed"] or 0) * r["priced"]
+            acc["priced"] += r["priced"]
+            acc["slates"] += 1
+        d0 += timedelta(days=1)
+    n = acc["hits"] + acc["misses"]
+    if not n:
+        return None
+    return dict(acc, n=n, hit_rate=acc["hits"] / n, needed=acc["need_sum"] / acc["priced"] if acc["priced"] else None,
+                roi=acc["units"] / acc["priced"] if acc["priced"] else None)
+
+
+def rule_records(end: str, sports_=("NBA", "NHL", "NFL", "NCAAF", "NCAAMB"), get=None) -> List[Dict]:
+    """Each current rule version's own record, from the day it started (rules.py): the strongest list, 💰 props and
+    💰 game lines per sport."""
+    import rules as RU
+    out = []
+    targets = [("strong", "ALL", "strong")] + [("money", s, "money_props") for s in sports_] + \
+              [("games", s, "money_games") for s in sports_]
+    for kind, sp, rule in targets:
+        cur = RU.current(rule)
+        r = since_record(kind, sp, cur["from"], end, get)
+        if r:
+            out.append(dict(r, kind=kind, sport=sp, rule=rule, v=cur["v"], since=cur["from"]))
+    return out
