@@ -169,7 +169,8 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
     st.caption("**Money** = what the price pays (the Money Score); **Pick** = the model's side of the line; **Winner** = "
                "who the model has winning. They can point at different sides of the same game — in college basketball "
                "the Money pick often takes the other side of a big model lean, because those leans have lost. Pick one "
-               "per game. Stakes are a quarter of the Kelly stake, scaled so the day's 💰 picks total 10u at most.")
+               "per game. Stakes are a flat 1u a 💰 pick (until the edge is proven), scaled so the day's 💰 picks total 10u "
+               "at most.")
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)

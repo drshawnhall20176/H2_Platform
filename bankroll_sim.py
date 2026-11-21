@@ -1,8 +1,9 @@
 """
 bankroll_sim.py — what the 💰 staking plan risks (Nov 21).
 
-Owner, Nov 21: yes to a bankroll simulation. The stakes are a quarter of the Kelly stake, at most 2u a pick, and the
-day's 💰 picks scaled to 10u at most (1u = 1% of the bankroll). This replays the last WINDOW days of graded 💰 picks
+Owner, Nov 21: yes to a bankroll simulation. The stakes are the platform's (flat 1u a 💰 pick since Nov 21; the old
+plan, a quarter of the Kelly stake on the model's chance, is simulated beside it), the day's 💰 picks scaled to 10u at
+most (1u = 1% of the bankroll). This replays the last WINDOW days of graded 💰 picks
 (props and game lines, today's rules, at the price each carried) with those stakes, then draws DAYS-day seasons by
 resampling whole days (a day's picks stay together, as they're bet together), PATHS times, from a 100u bankroll:
 
@@ -29,7 +30,7 @@ DAILY_CAP = 10.0
 DROP = 25.0
 
 
-def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = ()) -> Dict[str, List[tuple]]:
+def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = (), mode: str = "flat") -> Dict[str, List[tuple]]:
     """{slate: [(stake units, decimal price, hit)]} -- every graded 💰 pick, stakes as the platform sizes them."""
     import props_engine as PE
     days: Dict[str, List[tuple]] = {}
@@ -42,7 +43,7 @@ def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = ()) 
                     continue
             except Exception:                                   # noqa: BLE001
                 continue
-            u = PE.stake_units(r.get("chance"), r.get("price"), capped=False)
+            u = PE.stake_units(r.get("chance"), r.get("price"), capped=False, mode=mode)
             d = PE.decimal(r["price"])
             if u and d:
                 days.setdefault(str(r.get("slate_date")), []).append((u, d, r["result"] == "hit"))
@@ -51,7 +52,7 @@ def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = ()) 
         if (not (r.get("money") or MSC.row_in_band(r)) or r.get("money_result") not in ("win", "loss")
                 or r.get("money_price") is None):
             continue
-        u = PE.stake_units(r.get("money_chance"), r.get("money_price"), capped=False)
+        u = PE.stake_units(r.get("money_chance"), r.get("money_price"), capped=False, mode=mode)
         d = PE.decimal(r["money_price"])
         if u and d:
             days.setdefault(str(r.get("date") or r.get("slate") or r.get("_day") or ""), []).append(
@@ -100,9 +101,11 @@ def run(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = (), save=N
     if len(days) < 5:
         return None
     picks = [p for v in days.values() for p in v]
+    kelly = day_picks(graded_by, games, mode="kelly")           # Nov 21: the old plan, for comparison
     rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "days": len(days), "picks": len(picks),
            "avg_day_units": sum(u for u, _, _ in picks) / len(days),
            "record": simulate(days), "no_edge": simulate(days, no_edge=True),
+           "kelly_record": simulate(kelly) if len(kelly) >= 5 else None,
            "hit_rate": sum(h for _, _, h in picks) / len(picks),
            "needed": sum(1 / d for _, d, _ in picks) / len(picks)}
     if save is None:
@@ -125,7 +128,8 @@ def load() -> Optional[Dict]:
 
 def rows(rec: Dict) -> List[Dict]:
     out = []
-    for key, name in (("record", "At the record"), ("no_edge", "With no edge (break-even)")):
+    for key, name in (("record", "Flat 1u — at the record"), ("no_edge", "Flat 1u — with no edge (break-even)"),
+                      ("kelly_record", "Old plan (quarter Kelly on the model's chance) — at the record")):
         s = rec.get(key)
         if not s:
             continue

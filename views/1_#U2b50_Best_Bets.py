@@ -410,7 +410,7 @@ if _props_model:
     if any(p.get("_mscore") is not None for p in view):       # Nov 20: the Money Score, information beside 💰
         _cols.insert(_cols.index("_use") + 1, "_mscore")
         _rename["_mscore"] = "Money score"
-    if any(p.get("_stake") for p in view):                    # Nov 20: a stake on each 💰 (quarter Kelly, 1u = 1%)
+    if any(p.get("_stake") for p in view):                    # Nov 20: a stake on each 💰 (Nov 21: flat 1u, 1u = 1%)
         _cols.insert(_cols.index("_use") + 1, "_stake")
         _rename["_stake"] = "Stake"
     if any(p.get("_earned") is not None for p in view):      # Nov 21: earned chance beside the model's

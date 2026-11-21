@@ -49,6 +49,12 @@ RULES: Dict[str, List[Dict]] = {
                                               "less what the price needs), positive only, 5 per sport at most",
          "fp": "323240ef9c"},
     ],
+    "stakes": [
+        {"v": 1, "from": "2026-11-20", "what": "a quarter of the Kelly stake on the model's chance, 2u a pick at most, "
+                                              "the day's 💰 picks scaled to 10u at most"},
+        {"v": 2, "from": "2026-11-21", "what": "a flat 1u a 💰 pick, the day scaled to 10u at most -- until ~300 shown "
+                                              "💰 picks prove the earned chances and beat the close", "fp": "dacc981825"},
+    ],
     "shutoff": [
         {"v": 1, "from": "2026-11-21", "what": "a sport x market loses its 💰 / 🔒 / strongest-list place after 150+ "
                                               "graded picks losing even at the top of their 90% range, or the market "
@@ -59,7 +65,7 @@ RULES: Dict[str, List[Dict]] = {
 
 NAMES = {"money_props": "💰 Money picks (props)", "money_games": "💰 Money picks (game lines)",
          "lock": "🔒 Most probable", "earned": "Earned chance", "strong": "Strongest picks list",
-         "shutoff": "Automatic shut-off"}
+         "shutoff": "Automatic shut-off", "stakes": "Stake sizing"}
 
 
 def params() -> Dict[str, Dict]:
@@ -69,6 +75,7 @@ def params() -> Dict[str, Dict]:
     import props_engine as PE
     import props_money as PM
     import shutoff as SO
+    import stakes as ST
     return {
         "money_props": {"band": list(PE.MONEY_BAND), "min_chance": PE.MONEY_MIN_CHANCE, "min_mev": PE.MONEY_MIN_MEV,
                         "skip": {k: list(v) for k, v in sorted(PE.MONEY_SKIP.items())}},
@@ -78,6 +85,7 @@ def params() -> Dict[str, Dict]:
         "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED,
                    "post_from": PM.POST_FROM, "post_min": PM.POST_MIN},
         "strong": {"n": PL.STRONG_N, "per_sport": PL.PER_SPORT},
+        "stakes": {"mode": PE.STAKE_MODE, "flat": PE.FLAT_UNIT, "daily_cap": ST.DAILY_CAP},
         "shutoff": {"window": SO.WINDOW, "min_n": SO.MIN_N, "min_clv_n": SO.MIN_CLV_N, "min_beat": SO.MIN_BEAT,
                     "watch_n": SO.WATCH_N, "watch_roi": SO.WATCH_ROI},
     }

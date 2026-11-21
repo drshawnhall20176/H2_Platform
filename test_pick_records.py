@@ -175,5 +175,8 @@ def test_lock_needs_a_price_that_pays_and_stakes_are_quarter_kelly():
     assert PE.play_is_lock({"ModelProb": 0.65, "Cushion": 0.2, "EV": -0.05, "RealPrice": None})   # no price: no gate
     assert not PE.play_is_lock({"ModelProb": 0.65, "Cushion": 0.2, "EV": -0.05, "RealPrice": -200})
     # 55% at +100: Kelly 10% -> quarter 2.5% -> capped 2u; 50% at +110: Kelly 4.5% -> 1.25u (rounded to .25)
-    assert PE.stake_units(0.55, 100) == 2.0 and PE.stake_units(0.50, 110) == 1.25
-    assert PE.stake_units(0.45, -110) is None and PE.stake_units(None, 100) is None
+    assert PE.stake_units(0.55, 100, mode="kelly") == 2.0 and PE.stake_units(0.50, 110, mode="kelly") == 1.25
+    assert PE.stake_units(0.45, -110, mode="kelly") is None and PE.stake_units(None, 100, mode="kelly") is None
+    # Nov 21: flat 1u a 💰 pick (the default), whatever the chance; no price, no stake
+    assert PE.stake_units(0.55, 100, capped=False) == 1.0 and PE.stake_units(0.45, -110, capped=False) == 1.0
+    assert PE.stake_units(0.6, None) is None
