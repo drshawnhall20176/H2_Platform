@@ -50,13 +50,16 @@ def _add(acc: Dict, rec: Dict, kind: str) -> None:
 
 
 def card(sports_: Sequence[str], load: Optional[Callable] = None, today: Optional[str] = None,
-         days: int = DAYS) -> List[Dict]:
+         days: int = DAYS, ledger: Optional[Callable] = None) -> List[Dict]:
     """[{sport, kind ("money" / "lock"), hits, misses, hit_rate, needed, units, roi, clv, clv_n}] for every sport and
     kind with at least one graded pick."""
     import props_engine as PE
     if load is None:
         import model_store as MS
+        import pick_ledger as PL
         load = MS.load_daily_review
+        if ledger is None:
+            ledger = lambda sp, d: PL.record("money", sp, d)      # noqa: E731
     today = today or PE._et_today()
     out = []
     for sp in sports_:
@@ -64,8 +67,14 @@ def card(sports_: Sequence[str], load: Optional[Callable] = None, today: Optiona
         for kind, field in (("money", "money"), ("lock", "most_probable")):
             acc = {"hits": 0, "misses": 0, "units": 0.0, "priced": 0, "need_sum": 0.0, "need_n": 0, "clv_beat": 0,
                    "clv_lost": 0}
-            for s in ss.values():
-                _add(acc, s.get(field) or {}, kind)
+            for d, s in ss.items():
+                rec = s.get(field) or {}
+                if kind == "money" and ledger is not None:      # Nov 21: the 💰 picks as shown (pick_ledger.py)
+                    led = ledger(sp, d)
+                    if led:
+                        rec = {"hits": led["hits"], "misses": led["misses"], "needed": led["needed"],
+                               "profit": led["units"] / led["n"] if led["priced"] == led["n"] else None}
+                _add(acc, rec, kind)
             n = acc["hits"] + acc["misses"]
             if not n:
                 continue

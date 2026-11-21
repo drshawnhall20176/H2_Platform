@@ -53,7 +53,7 @@ def _et_time(iso) -> str:
 MONEY_TOP = 8
 
 
-def props_rows(sport: str, plays) -> List[Dict]:
+def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
     out = []
     for p in plays or []:
         lock = PE.play_is_lock(p)
@@ -74,6 +74,8 @@ def props_rows(sport: str, plays) -> List[Dict]:
                     "pickem_only": bool(p.get("Pickem")),
                     "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5")})
     out.sort(key=_order)
+    if not cap:                                                 # Nov 21: every pick, for the shown-picks ledger
+        return out
     # Nov 14: every 🔒 Most probable is kept; the cap only trims the other playable tags. Nov 19: the 💰 Money picks
     # are kept too, the MONEY_TOP biggest edges (the full list is on Best Bets under "💰 Money picks")
     money = sorted([r for r in out if r["money"] and not r["lock"]], key=lambda r: -(r.get("edge") or 0))[:MONEY_TOP]
@@ -95,6 +97,14 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
                         {"at": datetime.now(timezone.utc).isoformat(),
                          "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"))})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
+        pass
+    # Nov 21 (owner: "your 14-1 record is overstated"): the picks as SHOWN -- every 💰 prop the board shows and the
+    # Command Center's strongest-15 -- kept the first time they appear (pick_ledger.py)
+    try:
+        import pick_ledger as PL
+        PL.record_props(sport, date_str, [r for r in props_rows(sport, timed, cap=False) if r.get("money")])
+        PL.record_strong(date_str)
+    except Exception:                                           # noqa: BLE001
         pass
 
 
