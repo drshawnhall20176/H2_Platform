@@ -312,17 +312,11 @@ def _all_sports_view():
                               "not closing-line value." if _odd else ""))
             else:
                 st.info("CLV fills in as bets are logged with a closing line.", icon="🧭")
-            cal = B.calibration(every_bet, n_bins=5) if every_bet else []
-            if cal:
-                fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(dash="dash", color="#94a3b8"),
-                                          showlegend=False))
-                fig2.add_trace(go.Scatter(x=[c["predicted"] for c in cal], y=[c["actual"] for c in cal],
-                                          mode="markers", marker=dict(size=12, color="#7c3aed"), showlegend=False))
-                fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
-                                   title="Calibration, all sports", template="plotly_white",
-                                   xaxis_range=[0, 1], yaxis_range=[0, 1])
+            import calib_chart as _CAL                          # Nov 21: before / since the earned chance
+            fig2 = _CAL.figure(every_bet, "Calibration, all sports") if every_bet else None
+            if fig2 is not None:
                 st.plotly_chart(fig2, width="stretch")
+                st.caption(_CAL.caption(every_bet))
     st.divider()
     st.caption("⚖️ For analysis and entertainment. Not financial advice and not a guarantee.")
 
@@ -614,17 +608,11 @@ with right:
                     "and settled — this is the honest, forward-tested track record, not a backtest. "
                     "Log plays from the Edge Board to begin.", icon="🧭")
  
-        cal = B.calibration(bets, n_bins=5) if bets else []
-        if cal:
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines",
-                                      line=dict(dash="dash", color="#94a3b8"), showlegend=False))
-            fig2.add_trace(go.Scatter(x=[c["predicted"] for c in cal], y=[c["actual"] for c in cal],
-                                      mode="markers", marker=dict(size=12, color="#7c3aed"), showlegend=False))
-            fig2.update_layout(height=240, margin=dict(l=10, r=10, t=24, b=10),
-                               title="Calibration: predicted vs actual", template="plotly_white",
-                               xaxis_range=[0, 1], yaxis_range=[0, 1])
+        import calib_chart as _CAL                              # Nov 21: before / since the earned chance
+        fig2 = _CAL.figure(bets, "Calibration: predicted vs actual") if bets else None
+        if fig2 is not None:
             st.plotly_chart(fig2, width="stretch")
+            st.caption(_CAL.caption(bets))
  
 # ---------- model-caught highlight (yesterday) ----------
 st.divider()
