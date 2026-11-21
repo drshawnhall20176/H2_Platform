@@ -355,7 +355,10 @@ LAB_SPORTS = {
 LAB_SPORTS["SOCCER"] = Sport(key="SOCCER", label="Soccer — Europe, MLS, Liga MX", icon="⚽", odds_sport_key="soccer_epl",
                               markets=[], market_map={"Moneyline": "h2h", "Spread": "spreads", "Total": "totals"})
 LAB_PAGES = {"TENNIS": "43", "INTL": "44", "SOCCER": "55"}   # the views/ page number each lab opens (Soccer: Nov 13)
-LAB_COMMON_PAGES = ("18", "42", "48", "54", "59")       # Bet Log, Progression Plan, Reports, Live Games (Nov 12)
+LAB_COMMON_PAGES = ("0", "18", "42", "48", "54", "59")  # Command Center (Nov 21: its lab desk), Bet Log, Progression Plan, Reports, Live Games
+# Nov 21 (owner: yes to removing the Recommendations links): the full pages the Command Center's desk opens for the sports
+# without a props model stay reachable (the desk's link) but leave the sidebar
+DESK_PAGES = ("23", "43", "44", "55")
 
 
 def in_season(sport_key: str, day=None) -> bool:
