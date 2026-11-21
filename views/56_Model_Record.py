@@ -44,6 +44,36 @@ if _rc:
                "graded under the rule they were shown with (💰's rule and 🔒's price check changed on Nov 20).")
 else:
     st.info("No graded 💰 or 🔒 picks in the last 30 days yet.")
+
+# Nov 21 (owner: build and proven edge to A+): every rule has a version; each version keeps its own record from the day
+# it started (rules.py), graded on the picks as shown (pick_ledger.py)
+import rules as _RU
+import pick_ledger as _PLr
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _rule_recs(end):
+    return _PLr.rule_records(end)
+
+
+with st.expander("📐 The rules in force, and each one's record since it began", expanded=False):
+    st.dataframe(pd.DataFrame(_RU.table()), hide_index=True, width="stretch",
+                 column_config={"What it is": st.column_config.TextColumn(width="large")})
+    from datetime import date as _date, timedelta as _td
+    _yest = (_date.fromisoformat(PE._et_today()) - _td(days=1)).isoformat()
+    _rr = _rule_recs(_yest)
+    if _rr:
+        _names = {"strong": "⭐ Strongest picks", "money": "💰 props", "games": "💰 game lines"}
+        st.dataframe(pd.DataFrame([{
+            "Picks": _names[r["kind"]] + ("" if r["sport"] == "ALL" else f" · {r['sport']}"),
+            "Rule": f"v{r['v']} since {r['since']}", "Record": f"{r['hits']}–{r['misses']}",
+            "Hit rate": f"{r['hit_rate']:.0%}", "Needed": f"{r['needed']:.0%}" if r.get("needed") else "—",
+            "Return per $1": f"{r['roi']:+.1%}" if r.get("roi") is not None else "—", "Slates": r["slates"]}
+            for r in _rr]), hide_index=True, width="stretch")
+    else:
+        st.caption("The first slate graded under the current rules is Nov 21 — its record appears the morning after.")
+    st.caption("A rule's parameters are locked to its version: changing one starts a new version and a fresh record, "
+               "so no record is ever tuned after the fact.")
 try:                                                            # the 💰 live test, while it runs
     import money_scoreboard as MSB
     if PE.MONEY_TEST["from"] <= PE._et_today():
