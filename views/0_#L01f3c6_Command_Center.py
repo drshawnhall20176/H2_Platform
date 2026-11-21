@@ -117,8 +117,12 @@ def yesterday_catches(sport_key, date_str, markets):
             rows_by_pid, len(results))
 
 
-today = datetime.now().strftime("%Y-%m-%d")
-yest = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+# Nov 21: New York's date, not the server's -- the server runs on UTC, so from 7 PM ET the page showed (and logged
+# picks under) TOMORROW's slate
+import pytz as _pytz_cc
+_now_et = datetime.now(_pytz_cc.timezone("US/Eastern"))
+today = _now_et.strftime("%Y-%m-%d")
+yest = (_now_et - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 # ---------- 🌐 All sports (Nov 19, owner: an "All" button that represents the tool as a whole) ----------
