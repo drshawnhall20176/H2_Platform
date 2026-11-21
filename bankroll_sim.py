@@ -38,7 +38,7 @@ def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = ()) 
             if r.get("result") not in ("hit", "miss") or r.get("price") is None:
                 continue
             try:
-                if not PE.snapshot_is_money(sp, r):
+                if not PE.snapshot_in_band(sp, r):              # the 💰 rule on every day, not only test days
                     continue
             except Exception:                                   # noqa: BLE001
                 continue
@@ -46,8 +46,10 @@ def day_picks(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict] = ()) 
             d = PE.decimal(r["price"])
             if u and d:
                 days.setdefault(str(r.get("slate_date")), []).append((u, d, r["result"] == "hit"))
+    import money_score as MSC
     for r in games:
-        if not r.get("money") or r.get("money_result") not in ("win", "loss") or r.get("money_price") is None:
+        if (not (r.get("money") or MSC.row_in_band(r)) or r.get("money_result") not in ("win", "loss")
+                or r.get("money_price") is None):
             continue
         u = PE.stake_units(r.get("money_chance"), r.get("money_price"), capped=False)
         d = PE.decimal(r["money_price"])

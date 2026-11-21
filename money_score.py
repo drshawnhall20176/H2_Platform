@@ -290,3 +290,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def row_in_band(r: Dict) -> bool:
+    """Nov 21: the game-line 💰 rule on a winner_rows row WITHOUT the by-date switch (shutoff.py, bankroll_sim.py)."""
+    sc, ch = r.get("money_score"), r.get("money_chance")
+    return (sc is not None and ch is not None and BAND[0] <= sc < BAND[1] and ch >= MIN_CHANCE
+            and r.get("sport") in MONEY_LEAGUES and r.get("money_market") in [MARKET_NAME.get(m) for m in MONEY_MARKETS])

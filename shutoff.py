@@ -76,7 +76,7 @@ def score_props(sport: str, graded: Sequence[Dict]) -> Dict[str, Dict]:
             continue
         kinds = []
         try:
-            if PE.snapshot_is_money(sport, r):
+            if PE.snapshot_in_band(sport, r):                   # the rule itself, on every day (not only test days)
                 kinds.append("money")
             if PE.is_lock(r.get("chance"), r.get("cushion"), r.get("gap"), r.get("book"), ev=r.get("ev")):
                 kinds.append("lock")
@@ -96,7 +96,8 @@ def score_games(rows: Sequence[Dict]) -> Dict[str, Dict]:
     """{"<league>|<market>|games": verdict} from past winner_rows (money flag, money_result, money_price)."""
     groups: Dict[str, List[float]] = {}
     for r in rows:
-        if not r.get("money") or r.get("money_result") not in ("win", "loss"):
+        import money_score as MSC
+        if not (r.get("money") or MSC.row_in_band(r)) or r.get("money_result") not in ("win", "loss"):
             continue
         u = _unit(r.get("money_price"), r["money_result"] == "win")
         if u is not None:

@@ -1254,6 +1254,17 @@ def snapshot_is_money(sport: str, s: Dict) -> bool:
         mev=market_edge(pms, s.get("price")), day=str(s.get("slate_date") or "")[:10] or None)
 
 
+def snapshot_in_band(sport: str, s: Dict) -> bool:
+    """Nov 21: the 💰 rule on a saved read WITHOUT the on/off-by-date switch (money_sports) -- for judging the rule
+    over days it wasn't switched on (shutoff.py, bankroll_sim.py)."""
+    pm = maybe(s.get("p_market"))
+    side = s.get("side")
+    pms = None if pm is None or side not in ("Over", "Under") else (pm if side == "Over" else 1 - pm)
+    return s.get("price") is not None and in_money_band(
+        sport or s.get("sport"), s.get("ev"), s.get("book"), False, s.get("market"), s.get("chance"),
+        market_edge(pms, s.get("price")))
+
+
 def play_is_lock(p: Dict) -> bool:
     """is_lock for a board play (Best Bets / Today rows)."""
     return is_lock(p.get("ModelProb"), p.get("Cushion"), p.get("Gap"), p.get("PricedAt") if p.get("Pickem") else None,
