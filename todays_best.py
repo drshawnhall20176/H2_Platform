@@ -57,6 +57,12 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
     out = []
     for p in plays or []:
         lock = PE.play_is_lock(p)
+        if lock:                                                # Nov 21: a market switched off by its record
+            try:
+                import shutoff as _SO
+                lock = not _SO.is_off(sport, p.get("Market"), "lock")
+            except Exception:                                   # noqa: BLE001
+                pass
         money = PE.play_is_money(sport, p)                   # Nov 19: 💰 shown whatever its Use tag
         if p.get("Use") not in PLAYABLE and not lock and not money:
             continue

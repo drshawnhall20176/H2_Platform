@@ -268,8 +268,15 @@ def is_money(lg: str, s: Optional[Dict], day: Optional[str] = None) -> bool:
     import props_engine as PE
     if not s or lg not in MONEY_LEAGUES or s.get("mkt") not in MONEY_MARKETS:
         return False
-    return (BAND[0] <= s["score"] < BAND[1] and (s.get("chance") or 0) >= MIN_CHANCE
-            and lg in PE.money_sports(day=day))
+    ok = (BAND[0] <= s["score"] < BAND[1] and (s.get("chance") or 0) >= MIN_CHANCE
+          and lg in PE.money_sports(day=day))
+    if ok:                                                      # Nov 21: switched off by its record (shutoff.py)
+        try:
+            import shutoff as _SO
+            ok = not _SO.is_off(lg, MARKET_NAME.get(s.get("mkt")), "games", day)
+        except Exception:                                       # noqa: BLE001
+            pass
+    return ok
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

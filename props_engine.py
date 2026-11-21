@@ -1231,9 +1231,16 @@ def play_is_money(sport: str, p: Dict) -> bool:
     """is_money for a board play: its chance is ModelProb, the books' no-vig chance of the side is 1 / _ceiling."""
     ceil = maybe(p.get("_ceiling"))
     pm = maybe(p.get("MarketProb")) if p.get("MarketProb") is not None else ((1.0 / ceil) if ceil else None)
-    return p.get("RealPrice") is not None and is_money(
+    ok = p.get("RealPrice") is not None and is_money(
         sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")), p.get("Market"), chance=p.get("ModelProb"),
         mev=market_edge(pm, p.get("RealPrice")))                  # a board is today's slate
+    if ok:                                                      # Nov 21: a market switched off by its record (shutoff.py)
+        try:
+            import shutoff as _SO
+            ok = not _SO.is_off(sport, p.get("Market"), "money")
+        except Exception:                                       # noqa: BLE001
+            pass
+    return ok
 
 
 def snapshot_is_money(sport: str, s: Dict) -> bool:
