@@ -1144,7 +1144,7 @@ MONEY_HELP = ("💰 Money picks (live test, Nov 20–23, every props sport): the
               "the sportsbook, gives it at least a 40% chance, and the sportsbook's price is within 3% of the books' "
               "own fair price. In testing, NBA picks like these returned +6% per $1 over 107 graded picks; the other "
               "sports had too few to judge, which is what this weekend is for. Graded every morning — the running "
-              "record is on Today. Stake: a quarter of the Kelly stake for that chance and price, in units "
+              "record is on Today. Stake: a flat 1 unit a pick (since Nov 21, until the edge is proven), in units "
               "(1u = 1% of your bankroll), 0.25u to 2u — scaled down so the whole day's 💰 picks total 10u at most.")
 
 
@@ -1271,18 +1271,33 @@ def play_is_lock(p: Dict) -> bool:
                    bool(p.get("Pickem")), ev=p.get("EV") if p.get("RealPrice") is not None else None)
 
 
+# Nov 21 (owner: "do it now", on flat stakes until the edge is proven): the bankroll simulation showed quarter-Kelly
+# on the model's chance losing (90-day middle 70u from 100u, 10% chance of finishing up) though the picks hit break-even
+# -- the biggest stakes went on the picks the model was most wrongly sure of. Every 💰 pick is now FLAT_UNIT, the day
+# still capped at stakes.DAILY_CAP. Back to quarter Kelly on the EARNED chance once ~300 shown 💰 picks prove the
+# earned chances and beat the close (rules.py "stakes").
+STAKE_MODE = "flat"
+FLAT_UNIT = 1.0
+
+
 def stake_units(chance, price, kelly_frac: float = 0.25, cap: float = 2.0, capped: bool = True,
-                day: Optional[str] = None) -> Optional[float]:
+                day: Optional[str] = None, mode: Optional[str] = None) -> Optional[float]:
     """Nov 20: a suggested stake in units (1u = 1% of the bankroll): a quarter of the Kelly stake for this chance at this
     price, at most `cap`; then (capped) scaled so the day's 💰 picks fit the daily budget (stakes.DAILY_CAP, 10u),
     rounded to 0.25u, at least 0.25u. None when the price doesn't pay."""
-    p, d = maybe(chance), decimal(price) if price is not None else None
-    if p is None or not d or d <= 1:
-        return None
-    f = (p * d - 1) / (d - 1)
-    if f <= 0:
-        return None
-    u = min(cap, 100 * f * kelly_frac)
+    d = decimal(price) if price is not None else None
+    if (mode or STAKE_MODE) == "flat":
+        if not d or d <= 1:
+            return None
+        u = FLAT_UNIT
+    else:
+        p = maybe(chance)
+        if p is None or not d or d <= 1:
+            return None
+        f = (p * d - 1) / (d - 1)
+        if f <= 0:
+            return None
+        u = min(cap, 100 * f * kelly_frac)
     if capped:
         try:
             import stakes as _ST
