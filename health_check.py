@@ -24,6 +24,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 KEY = "health:morning"
 KEY_JOBS = ("warm-slates", "settle-results", "capture-closing-lines", "community-post", "capture-game-picks")
 LOW_CREDITS = 2000
+IGNORE = ("research", "inspect-day")    # analysis runs started by hand, not the platform's jobs
 
 
 def _item(area: str, level: str, text: str) -> Dict:
@@ -34,7 +35,8 @@ def check_jobs(runs: Sequence[Dict], now: datetime) -> List[Dict]:
     """runs: GitHub workflow runs ({"name", "conclusion", "created_at"}) from the last 24 hours."""
     out = []
     since = now - timedelta(hours=24)
-    recent = [r for r in runs if datetime.fromisoformat(str(r.get("created_at")).replace("Z", "+00:00")) >= since]
+    recent = [r for r in runs if datetime.fromisoformat(str(r.get("created_at")).replace("Z", "+00:00")) >= since
+              and r.get("name") not in IGNORE]
     failed: Dict[str, int] = {}
     for r in recent:
         if r.get("conclusion") in ("failure", "timed_out", "startup_failure"):
