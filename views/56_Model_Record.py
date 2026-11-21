@@ -56,6 +56,20 @@ def _rule_recs(end):
     return _PLr.rule_records(end)
 
 
+# Nov 21: what the 💰 staking plan risks (bankroll_sim.py)
+with st.expander("🏦 Bankroll risk — the 💰 staking plan over a 90-day season", expanded=False):
+    import bankroll_sim as _BS
+    _bs = _BS.load()
+    if _bs and (_bs.get("record") or _bs.get("no_edge")):
+        st.dataframe(pd.DataFrame(_BS.rows(_bs)), hide_index=True, width="stretch")
+        st.caption(f"From a 100u bankroll (1u = 1%), replaying {_bs['picks']} graded 💰 picks over {_bs['days']} slates "
+                   f"(hit {_bs['hit_rate']:.0%}, the prices needed {_bs['needed']:.0%}; about "
+                   f"{_bs['avg_day_units']:.1f}u staked a day) — quarter-Kelly stakes, 2u a pick at most, 10u a day at "
+                   "most. 5,000 seasons drawn a whole day at a time. **With no edge** replays the same stakes with every "
+                   "pick winning only as often as its price needs: what the plan risks if the edge isn't real yet.")
+    else:
+        st.caption("The simulation runs with the morning review; it appears after the next one.")
+
 with st.expander("📐 The rules in force, and each one's record since it began", expanded=False):
     st.dataframe(pd.DataFrame(_RU.table()), hide_index=True, width="stretch",
                  column_config={"What it is": st.column_config.TextColumn(width="large")})

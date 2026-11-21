@@ -116,9 +116,11 @@ def refit(today: Optional[str] = None, save=None, grade=None, games=None, now: O
             g = DR.grade_dates(sp, [d for d in MS.snapshot_dates(sp) if since <= d < today])
             return [r for rs in g.values() for r in rs]
     out: Dict[str, Dict] = {}
+    graded_by: Dict[str, List[Dict]] = {}
     for sp in SPORTS:
         try:
-            out.update(score_props(sp, grade(sp)))
+            graded_by[sp] = grade(sp)
+            out.update(score_props(sp, graded_by[sp]))
         except Exception as exc:                                # noqa: BLE001
             print(f"{sp}: shut-off scoring failed ({type(exc).__name__}: {exc})")
     try:
@@ -128,11 +130,18 @@ def refit(today: Optional[str] = None, save=None, grade=None, games=None, now: O
             d0, d1 = date.fromisoformat(since), date.fromisoformat(today)
             games = []
             while d0 < d1:
-                games += TB.winner_rows(d0.isoformat(), leagues=list(MSC.MONEY_LEAGUES), past=True)
+                games += [dict(r, _day=d0.isoformat())
+                          for r in TB.winner_rows(d0.isoformat(), leagues=list(MSC.MONEY_LEAGUES), past=True)]
                 d0 += timedelta(days=1)
         out.update(score_games(games))
     except Exception as exc:                                    # noqa: BLE001
         print(f"game lines: shut-off scoring failed ({type(exc).__name__}: {exc})")
+    if save is None:                                            # Nov 21: the bankroll simulation, same graded picks
+        try:
+            import bankroll_sim as BS
+            BS.run(graded_by, games or [])
+        except Exception as exc:                                # noqa: BLE001
+            print(f"bankroll simulation failed ({type(exc).__name__}: {exc})")
     prev = (_load() or {}).get("since") or {}
     # a switch takes effect before the day's games: today when refit before 11 AM New York, else tomorrow
     import pytz
