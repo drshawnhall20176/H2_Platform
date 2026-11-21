@@ -390,7 +390,13 @@ if _props_model:
         p["_stake"] = (f"{BBD_PE.stake_units(p.get('ModelProb'), p.get('RealPrice')):g}u"
                        if BBD_PE.play_is_money(_active.key, p)
                        and BBD_PE.stake_units(p.get("ModelProb"), p.get("RealPrice")) else "")
-        p["_use"] = (("💰 " if BBD_PE.play_is_money(_active.key, p) else "") + ("🔒 " if BBD_PE.play_is_lock(p) else "")
+        try:
+            import shutoff as _SO
+            _lock_off = _SO.is_off(_active.key, p.get("Market"), "lock")
+        except Exception:                                       # noqa: BLE001
+            _lock_off = False
+        p["_use"] = (("💰 " if BBD_PE.play_is_money(_active.key, p) else "")
+                     + ("🔒 " if BBD_PE.play_is_lock(p) and not _lock_off else "")
                      + str(p.get("Use") or ""))                 # Nov 19: 💰 Money pick / 🔒 Most probable icons
     _cols.insert(_cols.index("_display_line") + 1, "_cushion")
     # Nov 20 (weekend audit): how often he cleared tonight's line for this side, last 5 / last 10 games

@@ -74,6 +74,19 @@ with st.expander("📐 The rules in force, and each one's record since it began"
         st.caption("The first slate graded under the current rules is Nov 21 — its record appears the morning after.")
     st.caption("A rule's parameters are locked to its version: changing one starts a new version and a fresh record, "
                "so no record is ever tuned after the fact.")
+    try:                                                        # Nov 21: markets switched off by their record
+        import shutoff as _SO
+        _so = _SO.table()
+    except Exception:                                           # noqa: BLE001
+        _so = []
+    st.markdown("**Automatic shut-off** — re-scored every morning over the last 60 days")
+    if _so:
+        st.dataframe(pd.DataFrame(_so), hide_index=True, width="stretch")
+    else:
+        st.caption("No market is switched off or on watch.")
+    st.caption(f"⛔ Off: {150}+ graded picks losing even at the top of their 90% range, or the market moving against "
+               "them 55%+ of the time — the market keeps its picks on its pages but loses its 💰 / 🔒 flag and its "
+               "place on the strongest list until its record recovers. 👀 Watch: 75+ picks losing more than 5% per $1.")
 try:                                                            # the 💰 live test, while it runs
     import money_scoreboard as MSB
     if PE.MONEY_TEST["from"] <= PE._et_today():
