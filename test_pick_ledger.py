@@ -123,3 +123,26 @@ def test_strong_ledger_grades_game_lines_on_the_final_score():
     rows = [{"game_id": "g1", "money_market": "Spread", "money_side": "home", "money_line": -6.5}]
     PL.grade_games("2026-11-21", rows, recs={"g1": {"final_home": 80, "final_away": 70}})
     assert rows[0]["result"] == "win"
+
+
+def test_close_marks():
+    assert PL.close_mark("prop", "Under", 4.5, -110, 3.5, -110)["clv_mark"] == "beat"       # line fell: Under agreed
+    assert PL.close_mark("prop", "Over", 4.5, -110, 3.5, -110)["clv_mark"] == "lost"
+    m = PL.close_mark("prop", "Under", 4.5, -110, 4.5, -130)
+    assert m["clv_mark"] == "beat" and m["clv_pct"] > 0
+    assert PL.close_mark("spread", None, -6.5, -110, -8.5, -110)["clv_mark"] == "beat"
+    assert PL.close_mark("ml", None, None, -110, None, +300)["clv_mark"] is None              # another line's price
+
+
+def test_record_counts_closing_line_value():
+    from datetime import datetime, timezone
+    s = {}
+    get, save = (lambda k, d=None: s.get(k, d)), (lambda k, v: s.__setitem__(k, v))
+    PL.add("money", "NBA", "2026-11-21", [{"sport": "NBA", "pid": 1, "market": "Points", "side": "Under", "line": 9.5,
+                                           "price": -110}], datetime(2026, 11, 21, 15, tzinfo=timezone.utc), get, save)
+    k = PL.KEY.format(kind="money", sport="NBA", day="2026-11-21")
+    r = next(iter(s[k]["rows"].values()))
+    r.update(result="win", **PL.close_mark("prop", "Under", 9.5, -110, 8.5, -110))
+    s[k]["graded_at"] = "x"
+    rec = PL.record("money", "NBA", "2026-11-21", get)
+    assert rec["clv_beat"] == 1 and rec["clv_lost"] == 0

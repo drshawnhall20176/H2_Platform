@@ -259,7 +259,9 @@ def _all_sports_view():
                                                  else "pick'em line, no book price"),
                                   "Game": r.get("game") or "",
                                   **({"First shown": _et_clock(r.get("first_seen")) or ""} if _ledger else {}),
-                                  **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {})}
+                                  **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {}),
+                                  **({"vs close": {"beat": "✅ beat", "lost": "❌ lost", "same": "➖ same"}.get(
+                                      r.get("clv_mark"), "—")} if _ledger else {})}
                                  for r in top])
             _cfg = {"Chance": st.column_config.NumberColumn(format="percent", help="Earned chance: the model's chance "
                                                             "corrected to its track record."),

@@ -328,6 +328,88 @@ def grade_games(day: str, rows_: Sequence[Dict], recs: Optional[Dict] = None) ->
             res = TB.grade_line(p, r.get("money_market"), r.get("money_side"), r.get("money_line"))
             if res:
                 r["result"] = res
+            if not r.get("close_checked"):                      # Nov 21: the close, the record's last capture
+                try:
+                    c = game_close(r, p)
+                except Exception:                               # noqa: BLE001
+                    c = None
+                if c:
+                    r.update(c)
+                r["close_checked"] = True
+
+
+# --------------------------------------------------------------------------- closing-line value (Nov 21)
+# Owner, Nov 21: yes to measuring every SHOWN pick against the close -- the fast proof of an edge (2-3 weeks, not
+# months). No extra odds credits: a prop's close is its last pre-game read (the kickoff snapshot -- model_store saves
+# no read once a game starts), a game line's is the game record's last pre-game capture.
+CLV_STEP = 0.01
+
+
+def close_mark(kind: str, side: Optional[str], line0, price0, line1, price1) -> Dict:
+    """{"clv_mark": beat / lost / same, "clv_pct", "close_line", "close_price"} for one pick: a line that moved our way
+    is a beat, against us a loss; on the same line, the price (implied chance up 1+ point = beat). kind: "prop"
+    (side Over / Under), "spread" (our side's line), "ml"."""
+    import betlog as B
+    out = {"close_line": line1, "close_price": price1, "clv_mark": None, "clv_pct": None}
+    move = None
+    if kind in ("prop", "spread") and line0 is not None and line1 is not None:
+        l0, l1 = float(line0), float(line1)
+        if kind == "prop":
+            move = (l1 - l0) if side == "Over" else (l0 - l1)
+        else:
+            move = l0 - l1                                      # the market now asks more of our side
+    if move:
+        out["clv_mark"] = "beat" if move > 0 else "lost"
+        return out
+    if price0 is None or price1 is None:
+        return out
+    try:
+        d0, d1 = B.american_to_decimal(price0), B.american_to_decimal(price1)
+    except Exception:                                           # noqa: BLE001
+        return out
+    if not d0 or not d1 or not B.close_is_same_line(d0, d1):
+        return out
+    dp = 1 / d1 - 1 / d0
+    out["clv_mark"] = "beat" if dp >= CLV_STEP else "lost" if dp <= -CLV_STEP else "same"
+    out["clv_pct"] = round((d0 / d1 - 1) * 100, 2)
+    return out
+
+
+def _snap_closes(sport: str, day: str, cache: Dict) -> Dict:
+    k = ("snap", sport)
+    if k not in cache:
+        import model_store as MS
+        import props_engine as PE
+        try:
+            cache[k] = {(PE.norm_name(s.get("player") or ""), s.get("market")): s
+                        for s in MS.load_snapshots(sport, [day])}
+        except Exception:                                       # noqa: BLE001
+            cache[k] = {}
+    return cache[k]
+
+
+def prop_close(r: Dict, snaps: Dict) -> Optional[Dict]:
+    import pick_records as PRK
+    import props_engine as PE
+    nm = PE.norm_name(r.get("player") or "")
+    s = snaps.get((nm, r.get("market"))) or snaps.get((nm, PRK.COMBO_KEY.get(r.get("market"), r.get("market"))))
+    if not s or r.get("side") not in ("Over", "Under"):
+        return None
+    p1 = s.get("over_price") if r["side"] == "Over" else s.get("under_price")
+    return close_mark("prop", r["side"], r.get("line"), r.get("price"), s.get("line"), p1)
+
+
+def game_close(r: Dict, full: Dict) -> Optional[Dict]:
+    import hoops_games_page as HG
+    if not full or not r.get("money_market"):
+        return None
+    try:
+        it = HG.side_item(full, r["money_market"], r.get("money_side")) or {}
+    except Exception:                                           # noqa: BLE001
+        return None
+    if r["money_market"] == "Moneyline":
+        return close_mark("ml", None, None, r.get("price"), None, it.get("price"))
+    return close_mark("spread", None, r.get("money_line"), r.get("price"), it.get("line"), it.get("price"))
 
 
 def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=None, save=None) -> Dict[str, str]:
@@ -342,7 +424,7 @@ def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=No
         key = KEY.format(kind=kind, sport=sp, day=day)
         cur = _get(key, get)
         rs = cur.get("rows") or {}
-        if not rs or (cur.get("graded_at") and all(r.get("result") for r in rs.values())):
+        if not rs or (cur.get("graded_at") and all(r.get("result") and r.get("close_checked") for r in rs.values())):
             continue                                            # nothing to grade, or already finished
         if kind == "games":
             grade_games(day, list(rs.values()))
@@ -357,6 +439,11 @@ def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=No
                 g = grade_prop(r, res, act)
                 if g:
                     r["result"] = g
+                if not r.get("close_checked"):                  # Nov 21: the close, from the last pre-game read
+                    c = prop_close(r, _snap_closes(r.get("sport") or sp, day, cache))
+                    if c:
+                        r.update(c)
+                    r["close_checked"] = True
         cur = dict(cur, rows=rs, graded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
         _save(key, cur, save)
         w = sum(r.get("result") == "win" for r in rs.values())
@@ -379,6 +466,9 @@ def record(kind: str, sport: str, day: str, get=None) -> Optional[Dict]:
     hits = misses = ung = 0
     units = need = 0.0
     priced = 0
+    beat = sum(r.get("clv_mark") == "beat" for r in led["rows"].values())   # Nov 21: against the close, every pick
+    lost = sum(r.get("clv_mark") == "lost" for r in led["rows"].values())
+    pcts = [float(r["clv_pct"]) for r in led["rows"].values() if r.get("clv_pct") is not None]
     for r in led["rows"].values():
         res = r.get("result")
         if res not in ("win", "loss"):
@@ -395,7 +485,8 @@ def record(kind: str, sport: str, day: str, get=None) -> Optional[Dict]:
     if not n:
         return None
     return {"hits": hits, "misses": misses, "units": units, "needed": need / priced if priced else None,
-            "priced": priced, "n": n, "ungraded": ung}
+            "priced": priced, "n": n, "ungraded": ung, "clv_beat": beat, "clv_lost": lost,
+            "clv_pct_sum": sum(pcts), "clv_pct_n": len(pcts)}
 
 
 # --------------------------------------------------------------------------- CLI
@@ -420,7 +511,8 @@ if __name__ == "__main__":
 def since_record(kind: str, sport: str, start: str, end: str, get=None) -> Optional[Dict]:
     """Nov 21 (rules.py): a ledger's record summed over slates start..end -- one rule version's own record."""
     d0, d1 = date.fromisoformat(max(start, SINCE)), date.fromisoformat(end)
-    acc = {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "priced": 0, "slates": 0}
+    acc = {"hits": 0, "misses": 0, "units": 0.0, "need_sum": 0.0, "priced": 0, "slates": 0, "clv_beat": 0,
+           "clv_lost": 0, "clv_pct_sum": 0.0, "clv_pct_n": 0}
     while d0 <= d1:
         r = record(kind, sport, d0.isoformat(), get)
         if r:
@@ -430,12 +522,17 @@ def since_record(kind: str, sport: str, start: str, end: str, get=None) -> Optio
             acc["need_sum"] += (r["needed"] or 0) * r["priced"]
             acc["priced"] += r["priced"]
             acc["slates"] += 1
+            for f in ("clv_beat", "clv_lost", "clv_pct_sum", "clv_pct_n"):
+                acc[f] += r.get(f) or 0
         d0 += timedelta(days=1)
     n = acc["hits"] + acc["misses"]
     if not n:
         return None
+    moved = acc["clv_beat"] + acc["clv_lost"]
     return dict(acc, n=n, hit_rate=acc["hits"] / n, needed=acc["need_sum"] / acc["priced"] if acc["priced"] else None,
-                roi=acc["units"] / acc["priced"] if acc["priced"] else None)
+                roi=acc["units"] / acc["priced"] if acc["priced"] else None,
+                beat_rate=acc["clv_beat"] / moved if moved else None, clv_moved=moved,
+                clv_avg=acc["clv_pct_sum"] / acc["clv_pct_n"] if acc["clv_pct_n"] else None)
 
 
 def rule_records(end: str, sports_=("NBA", "NHL", "NFL", "NCAAF", "NCAAMB"), get=None) -> List[Dict]:
