@@ -254,7 +254,7 @@ def _all_sports_view():
                            "graded on final box scores.")
             st.caption("The day's best picks across every sport, earliest game first: up to 15, ranked by **Edge** — the "
                        "**earned** chance (the model's chance corrected to its track record) less what the price needs. "
-                       "Only picks with a positive edge are listed. Before Nov 21: the 15 likeliest by the model's chance. "
+                       "Only picks with a positive edge are listed, at most 5 from one sport. Before Nov 21: the 15 likeliest by the model's chance. "
                        "**Pick'em line, no book price** = only a pick'em app posts it (most college props): no "
                        "sportsbook price checks the model there, and those chances have run optimistic. Pick an "
                        "earlier date to see how a day's list did.")

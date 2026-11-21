@@ -90,3 +90,10 @@ def test_strongest_ranks_by_earned_edge_and_drops_negative_edges():
 def test_strongest_falls_back_to_chance_without_earned():
     picks = [{"kind": "Prop", "pick": "a", "chance": 0.6}, {"kind": "Prop", "pick": "b", "chance": 0.7}]
     assert [r["pick"] for r in PL.strongest(picks)] == ["b", "a"]
+
+
+def test_strongest_takes_at_most_five_from_one_sport():
+    picks = [{"kind": "Prop", "sport": "NCAAF", "pick": f"f{i}", "earned": 0.60, "price": -110} for i in range(8)]
+    picks += [{"kind": "Prop", "sport": "NBA", "pick": "n", "earned": 0.55, "price": -110}]
+    got = PL.strongest(picks)
+    assert sum(r["sport"] == "NCAAF" for r in got) == 5 and got[-1]["pick"] == "n"
