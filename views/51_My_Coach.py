@@ -96,20 +96,6 @@ if _less:
         for x in _less:
             st.markdown(f"- {_money(x)}")
 
-# ---- Nov 8: the bet finder -- pick a sport, time and game; every bet on offer gets 🟢 / 🟡 / 🔴 and why
-st.markdown("#### 🔎 Find a bet")
-st.caption("Pick a sport, then narrow to a start time or a game. Every bet with a live price is checked against "
-           "the model, the price, how that kind of pick has done lately, and how you've done with it.")
-import datetime as _d
-import pytz as _pytz
-_now = _d.datetime.now(_pytz.timezone("US/Eastern")).date()
-f1, f2 = st.columns([1, 1])
-f_sport = f1.selectbox("Sport", ["NFL", "NBA", "NHL", "NCAAF", "NCAAMB"], key="coach_sport")
-f_day = f2.date_input("Date", _now, min_value=_now, max_value=_now + _d.timedelta(days=2), key="coach_day",
-                      format="MM/DD/YYYY")
-f_date = f_day.strftime("%Y-%m-%d")
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def _cands(sport, day, code_version=None):
     import best_bets_data as BBD
@@ -136,6 +122,76 @@ def _cands(sport, day, code_version=None):
     except Exception:                                           # noqa: BLE001
         counts = None
     return cands, tags, err, counts
+
+
+# ---- Nov 22 (owner): the coach's top 15 -- like the Command Center's strongest picks, but held to YOUR rules
+st.markdown("#### 🏆 The coach's top 15")
+st.caption("Every bet on offer with a live price, judged at its **earned** chance (the model's chance corrected to "
+           "its record) and held to your rules below. Only bets that keep every rule and that the coach would place "
+           "make the list — 🟢 Good bets first, then your best lane, then the biggest edge; at most 5 from one sport.")
+_TOP_SPORTS = ["NFL", "NBA", "NHL", "NCAAF", "NCAAMB"]
+_top_pick = st.radio("Sport", ["🌐 All sports"] + _TOP_SPORTS, horizontal=True, key="coach_top_sport",
+                     label_visibility="collapsed")
+_top_keys = _TOP_SPORTS if _top_pick.startswith("🌐") else [_top_pick]
+import hashlib as _hl0
+_code0 = _hl0.md5(open(CO.__file__, "rb").read()).hexdigest()
+_tcands, _ttags, _tcounts = [], {}, {}
+with st.spinner("Checking every bet against your rules…"):
+    for _sk in _top_keys:
+        try:
+            _cc, _tg, _er, _mc = _cands(_sk, _today_s, _code0)
+        except Exception:                                       # noqa: BLE001
+            continue
+        for c in _cc:                                           # judged at the earned chance where there is one
+            _tcands.append(dict(c, chance=c["earned"]) if c.get("earned") is not None else c)
+        _ttags.update(_tg or {})
+        if _mc:
+            _tcounts.update(_mc)
+_tf = CO.rule_filters(bets)
+_tj = CO.finder(_tcands, _every, _ttags, _tcounts or None)
+_top = CO.coach_top(_tj, _tf, per_sport=CO.TOP_PER_SPORT if len(_top_keys) > 1 else None)
+_on = [x for x in (("skip bets against the model" if _tf["no_against"] else None),
+                   (f"60%+ picks only at {_tf['strong_max_price']:+.0f} or better" if _tf["strong_max_price"] else None),
+                   *[f"no {b} prices" for b in _tf["avoid_prices"]],
+                   (f"skip your leak ({_tf['leak']})" if _tf["leak"] else None),
+                   (f"your best lane first ({_tf['best']})" if _tf["best"] else None)) if x]
+st.caption("Rules applied: " + ("; ".join(_on) if _on else "none yet — not enough settled bets in this period") + ".")
+if not _top:
+    st.info("Nothing keeps every rule right now. No bet is better than a bad bet — lines move, so check back later.")
+else:
+    _top = C.by_kickoff(_top, lambda r: r.get("dt") or r.get("time"))
+    _tdf = pd.DataFrame([{"Time": r["time"], "Sport": r.get("sport"), "Bet": r["pick"],
+                          "Price": None if r.get("price") is None else f"{float(r['price']):+.0f}",
+                          "Coach": r.get("signal") or r["verdict"], "Earned chance": r.get("real_chance"),
+                          "Price needs": r.get("need"), "Edge": r.get("edge"),
+                          "Lane": "⭐ best lane" if r.get("best_lane") else "",
+                          "Game": r["game"], "Why": r["why"]} for r in _top])
+    if len(_top_keys) == 1:
+        _tdf = _tdf.drop(columns=["Sport"])
+    _tsel = LU.picked(_top, LU.selectable(_tdf, key="coach_top_sel", hide_index=True, width="stretch",
+                                          column_config={"Earned chance": PCT, "Price needs": PCT,
+                                                         "Edge": st.column_config.NumberColumn(format="percent")}))
+    _titems = []
+    for r in _tsel:
+        if r.get("kind") == "Game line":
+            if r.get("bet_market") and r.get("_rec"):
+                _titems.append(dict(r, price=r.get("bet_price") if r.get("price") is None else r.get("price")))
+        else:
+            _titems.append(r)
+    LU.panel(_titems, "coach_top_log", _today_s, tag="coach-top")
+
+# ---- Nov 8: the bet finder -- pick a sport, time and game; every bet on offer gets 🟢 / 🟡 / 🔴 and why
+st.markdown("#### 🔎 Find a bet")
+st.caption("Pick a sport, then narrow to a start time or a game. Every bet with a live price is checked against "
+           "the model, the price, how that kind of pick has done lately, and how you've done with it.")
+import datetime as _d
+import pytz as _pytz
+_now = _d.datetime.now(_pytz.timezone("US/Eastern")).date()
+f1, f2 = st.columns([1, 1])
+f_sport = f1.selectbox("Sport", ["NFL", "NBA", "NHL", "NCAAF", "NCAAMB"], key="coach_sport")
+f_day = f2.date_input("Date", _now, min_value=_now, max_value=_now + _d.timedelta(days=2), key="coach_day",
+                      format="MM/DD/YYYY")
+f_date = f_day.strftime("%Y-%m-%d")
 
 
 with st.spinner(f"Loading {f_sport} bets… (the first load can take a minute)"):
