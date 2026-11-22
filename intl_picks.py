@@ -859,6 +859,10 @@ def too_soon(get=None, now: Optional[datetime] = None) -> bool:
 
 
 def main(argv=None) -> int:
+    args = list(argv or sys.argv[1:])
+    if args and args[0] == "rescore":                          # Nov 22: python intl_picks.py rescore NCAAMB 2026-11-01
+        rescore_history(args[1] if len(args) > 1 else "NCAAMB", args[2] if len(args) > 2 else "2026-11-01")
+        return 0
     api = os.environ.get("ODDS_API_KEY")
     if not api:
         print("ODDS_API_KEY not set")
@@ -954,3 +958,76 @@ def slate_leagues(get=None) -> Optional[List[str]]:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
+# --------------------------------------------------------------------------- Nov 22: scrub the old misjudgments
+V1_FIELDS = ("model_margin", "model_p", "model_p_raw", "edge", "ml_edge", "pick", "ml_pick", "neutral", "close_edge")
+
+
+def rescore_history(league: str = "NCAAMB", since: str = "2026-11-01", picks=None, games=None, save=None,
+                    out=print) -> Dict:
+    """Owner, Nov 22: "not the records themselves but the misjudgements -- this seems to be a lingering problem that
+    is costing me money and credibility." The stored college projections still carried the old model's numbers (home
+    court 9.5, none taken off at neutral sites), and the parts of the platform that LEARN from that history -- the
+    win-chance calibration, the lean records by gap size, the Money Score's fit -- were learning the old mistakes.
+
+    Every stored game since `since` is re-projected the way the corrected model would have seen it THAT morning
+    (walk-forward: ratings from earlier games only, the firm home-court prior, ESPN's neutral-site flag), and its
+    model fields replaced; the old ones stay in the payload under "v1". The line, the score and the result are never
+    touched, and the shown-picks record (pick_ledger) is a different store -- nothing that was shown is rewritten."""
+    import model_store as MS
+    import pytz
+    picks = MS.load_game_picks(league) if picks is None else picks
+    games = MS.load_results(league, since="2025-10-01") if games is None else games
+    _cols = ("final_home", "final_away", "result", "id", "ts", "payload", "open_line", "close_line")
+    save = save or (lambda p: MS.rewrite_game_pick_payload(league, p["game_id"], {k: v for k, v in p.items()
+                                                                                   if k not in _cols}))
+    cfg = I.LEAGUES[league]
+    cache: Dict[str, Dict] = {}
+    et = pytz.timezone("US/Eastern")
+    n = changed = flipped = 0
+    for p in picks:
+        if str(p.get("kickoff") or "")[:10] < since or p.get("model_margin") is None:
+            continue
+        try:
+            day = datetime.fromisoformat(str(p["kickoff"]).replace("Z", "+00:00")).astimezone(et).date().isoformat()
+        except ValueError:
+            continue
+        if day not in cache:
+            gg = [g for g in games if str(g["date"])[:10] < day]
+            cache[day] = I.ratings_weighted(gg, I.decay_weights(gg, day, league), cfg["lam"], I.HFA_PRIOR.get(league))
+        r = cache[day]
+        neu = bool(p.get("neutral"))
+        for g in games:                                         # the result's own neutral-site flag, when played
+            if str(g["date"])[:10] in (day, (date.fromisoformat(day) + timedelta(days=1)).isoformat()) and \
+                    I.find_team([g["home_team"]], p["home"]) and I.find_team([g["away_team"]], p["away"]):
+                neu = str(g.get("neutral_site")).lower() in ("true", "1")
+                break
+        proj = I.project(r, p["home"], p["away"], neutral=neu, loose=False)
+        if not proj:
+            continue
+        n += 1
+        old = {k: p.get(k) for k in V1_FIELDS}
+        hs = p.get("home_spread")
+        edge = None if hs is None else proj["margin"] + float(hs)
+        p_raw = I.win_prob(proj["margin"], league=league)
+        new = dict(p, model_margin=round(proj["margin"], 1), model_p_raw=round(p_raw, 3), model_p=round(p_raw, 3),
+                   neutral=neu, edge=None if edge is None else round(edge, 2),
+                   ml_edge=None if p.get("fair_home") is None else round(p_raw - float(p["fair_home"]), 3),
+                   rescored="2026-11-22 corrected model (home court, neutral sites)")
+        if p.get("close_edge") is not None and edge is not None:
+            new["close_edge"] = round(edge, 2)
+        rules = HOOPS_RULES.get(league, {})
+        se, me = rules.get("spread"), rules.get("ml")
+        new["pick"] = ("home" if edge > 0 else "away") if se is not None and edge is not None and abs(edge) >= se else None
+        new["ml_pick"] = (("home" if new["ml_edge"] > 0 else "away")
+                          if me is not None and new["ml_edge"] is not None and abs(new["ml_edge"]) >= me else None)
+        new.setdefault("v1", old)
+        if (old.get("edge") or 0) * (edge or 0) < 0:
+            flipped += 1
+        if abs((old.get("model_margin") or 0) - new["model_margin"]) >= 0.05:
+            changed += 1
+        save(new)
+    out(f"{league}: re-projected {n} stored games since {since}; {changed} changed, {flipped} spread leans flipped side")
+    return {"n": n, "changed": changed, "flipped": flipped}
