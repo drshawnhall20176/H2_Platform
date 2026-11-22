@@ -6,7 +6,7 @@ tracking picks where the backtested rules allow one, and the graded record. Data
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Dict, Optional
 
 import pandas as pd
 import streamlit as st
@@ -184,12 +184,63 @@ def _book_ml(p):
         f"{p['home']} {f(p.get('best_home'))} / {f(p.get('best_away'))}"
 
 
+def model_sides(p: Dict) -> Dict[str, Optional[str]]:
+    """Nov 22 (owner: "we need a method to identify the preferred pick" in the multi-column tick tables): the model's
+    side in each market -- {"spread", "total", "ml"} -> "home" / "away" / "over" / "under" / None. Spread: the side
+    the model's margin points to against the book's; total: the model's total against the book's; moneyline: the
+    model's win chance against the market's no-vig chance."""
+    out: Dict[str, Optional[str]] = {"spread": None, "total": None, "ml": None}
+    try:
+        hs, mm = p.get("home_spread"), p.get("model_margin")
+        if hs is not None and mm is not None and float(mm) + float(hs) != 0:
+            out["spread"] = "home" if float(mm) + float(hs) > 0 else "away"
+    except (TypeError, ValueError):
+        pass
+    try:
+        mt, lt = p.get("model_total"), p.get("line_total")
+        if mt is not None and lt is not None and float(mt) != float(lt):
+            out["total"] = "over" if float(mt) > float(lt) else "under"
+    except (TypeError, ValueError):
+        pass
+    try:
+        mp, fh = p.get("model_p"), p.get("fair_home")
+        if mp is not None and fh is not None and float(mp) != float(fh):
+            out["ml"] = "home" if float(mp) > float(fh) else "away"
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def _star_spread(p) -> str:
+    hs, side = p.get("home_spread"), model_sides(p)["spread"]
+    if hs is None:
+        return "—"
+    if side == "away":
+        return f"⭐ Away: {p['away']} {-float(hs):+g}"
+    if side == "home":
+        return f"⭐ Home: {p['home']} {float(hs):+g}"
+    return _book_spread(p)
+
+
+def _star_total(p) -> str:
+    if p.get("line_total") is None:
+        return "—"
+    side = model_sides(p)["total"]
+    return f"{float(p['line_total']):g}" + (f" · ⭐ {side.title()}" if side else "")
+
+
+def _star_ml(p) -> str:
+    side = model_sides(p)["ml"]
+    return _book_ml(p) + (f" · ⭐ {side.title()}" if side and _book_ml(p) != "—" else "")
+
+
 def with_book_ticks(df: pd.DataFrame, games, after: str) -> pd.DataFrame:
-    """Nov 18: the book's spread, total and moneyline, each followed by its tick boxes, placed after `after`."""
+    """Nov 18: the book's spread, total and moneyline, each followed by its tick boxes, placed after `after`.
+    Nov 22: each names the model's side with a ⭐ (⭐ Away / ⭐ Under / ⭐ Home), matching the tick box beside it."""
     extra = pd.DataFrame([{
-        "Book spread": _book_spread(p), "✓ Home spread": False, "✓ Away spread": False,
-        "Book total": "—" if p.get("line_total") is None else f"{float(p['line_total']):g}", "✓ Over": False,
-        "✓ Under": False, "Book ML": _book_ml(p), "✓ Home ML": False, "✓ Away ML": False} for p in games],
+        "Book spread": _star_spread(p), "✓ Home spread": False, "✓ Away spread": False,
+        "Book total": _star_total(p), "✓ Over": False,
+        "✓ Under": False, "Book ML": _star_ml(p), "✓ Home ML": False, "✓ Away ML": False} for p in games],
         index=df.index)
     at = list(df.columns).index(after) + 1 if after in df.columns else len(df.columns)
     return pd.concat([df.iloc[:, :at], extra, df.iloc[:, at:]], axis=1)
@@ -236,8 +287,9 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
                  past=day < _today_et())
     st.caption(f"Form: {GP.HOT} = leans of that size won 55%+ of 20 or more graded games in the last 30 days; "
                f"{GP.EVEN} = about break-even; {GP.COLD} = losing; {GP.NEW} = fewer than 20 games. A −110 spread needs "
-               "52.4% to break even. **The model says** = who the model has winning and by how much, the same for "
-               "the book, and the side of the spread that difference points to; \"No bet\" = no tested rule, so the "
+               "52.4% to break even. **Model has** / **Book has** = who each has winning and by how much; **Leans** = "
+               "the side of the spread that difference points to; ⭐ = the model's side in each market, beside its tick "
+               "box; \"No bet\" = no tested rule, so the "
                "lean is information, not a pick. Gap = how far the model is from the book."
                + ("" if cust else " Long backtest = how often the model's side covered in the long-run test. "
                   + USE_LEGEND + " " + _rules_text(rules or {})))

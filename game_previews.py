@@ -84,6 +84,22 @@ def says(p: Dict, playable: bool = False) -> str:
     return f"{head}model: {model} · book: {book} → leans {lean}"
 
 
+def says_parts(p: Dict, playable: bool = False, tagged: bool = False) -> Dict[str, str]:
+    """Nov 22 (owner: "The model says column could benefit from some text wrapping"): the same sentence as says(), in
+    three short columns the table can show without cutting off -- Model has, Book has, Leans. `tagged`: the table has
+    a Use column, which already says whether it's a bet; otherwise a game without a tested rule reads "No bet"."""
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    if hs is None or mm is None:
+        return {"Model has": "—", "Book has": "—", "Leans": "—"}
+    home, away = p.get("home"), p.get("away")
+    model = "a toss-up" if abs(mm) < 0.5 else _by(home, round(mm, 1)) if mm > 0 else _by(away, round(-mm, 1))
+    bm = -hs
+    book = "pick'em" if bm == 0 else _by(home, bm) if bm > 0 else _by(away, -bm)
+    lean = _lean(p)
+    return {"Model has": model, "Book has": book,
+            "Leans": lean if (playable or tagged) else f"No bet (leans {lean})"}
+
+
 def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Callable[[Dict], str],
                  tag: Optional[Callable[[Dict], Dict]] = None, use: Optional[Callable[[Dict], str]] = None,
                  extras: Optional[Callable[[Dict], Dict]] = None) -> List[Dict]:
@@ -110,7 +126,8 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
                                     if mv.get("spread_move_why") else "") if x)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}", **lead,
-                    "The model says": says(p, playable), "Gap (pts)": None if e is None else round(abs(e), 1),
+                    **says_parts(p, playable, tagged=bool(use)),
+                    "Gap (pts)": None if e is None else round(abs(e), 1),
                     **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
                     "Total: model / book": f"{p.get('model_total')} / {p.get('line_total') or '—'}",

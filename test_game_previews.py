@@ -23,7 +23,7 @@ def test_preview_rows_describe_the_game_without_calling_it_a_pick():
                            lambda p: {"use": PE.USE_PASS})
     a, b = rows
     # Nov 17: one sentence instead of Model leans / Model's winner / Book line / Model line
-    assert a["Game"] == "A1 @ H1" and a["The model says"] == "No bet — model: H1 by 6.1 · book: H1 by 5 → leans H1 -5"
+    assert a["Game"] == "A1 @ H1" and (a["Model has"], a["Book has"], a["Leans"]) == ("H1 by 6.1", "H1 by 5", "No bet (leans H1 -5)")
     assert "Model's winner" not in a and "Book line" not in a and "Model leans" not in a
     assert a["_lean"] == "H1 -5" and a["Gap (pts)"] == 1.1 and a["Form (30 days)"] == "❄️ Cold · 10–12 (45%)"
     assert b["_lean"] == "A2 +36.5" and b["Gap (pts)"] == 19.1 and b["Form (30 days)"] == "🔥 Hot · 15–9 (62%)"
@@ -46,7 +46,7 @@ def test_spotlight_lists_only_games_with_a_tested_reason():
     rows = GP.preview_rows("NCAAMB", [_g(1, 1.1), moving, _g(3, 9.7), _g(4, -19.1)], RECS, lambda p: "",
                            tag=lambda p: {"use": PE.USE_SINGLE} if p["home"] == "H3" else {})
     assert [r["Game"] for r in GP.spotlight(rows)] == ["A3 @ H3", "A2 @ H2"]   # playable first, then moving our way
-    assert rows[1]["Spread move"].startswith("📈 our way") and rows[2]["The model says"].startswith("model: H3")
+    assert rows[1]["Spread move"].startswith("📈 our way") and rows[2]["Model has"].startswith("H3")
     assert GP.spotlight([]) == []
 
 
@@ -64,9 +64,9 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     at.secrets["AUDIENCE"] = "commercial"
     at.run()
     assert not at.exception
-    games = [d.value for d in at.dataframe if "The model says" in d.value.columns][0]
+    games = [d.value for d in at.dataframe if "Leans" in d.value.columns][0]
     assert "Use" not in games.columns and "Why" not in games.columns and "Pick" not in games.columns
-    assert [x.split("leans ")[-1] for x in games["The model says"]] == ["H1 -10.5", "A2 +36.5"]
+    assert [x.split("leans ")[-1].rstrip(")") for x in games["Leans"]] == ["H1 -10.5", "A2 +36.5"]
     assert any("Previews, not picks" in i.value for i in at.info)
     assert not any("says Pass" in i.value for i in at.info)
 
@@ -74,11 +74,11 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     at.secrets["AUDIENCE"] = "owner"
     at.run()
     assert not at.exception
-    owner = [d.value for d in at.dataframe if "The model says" in d.value.columns][0]
+    owner = [d.value for d in at.dataframe if "Leans" in d.value.columns][0]
     # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
-    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", "Use", "The model says", "Gap (pts)"]
+    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", "Use", "Model has", "Book has"]
     assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
-    assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and all(x.startswith("No bet — ") for x in owner["The model says"])
+    assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and not any(x.startswith("No bet") for x in owner["Leans"])   # the Use column says it
     assert any("Previews, not picks" in i.value for i in at.info)
     # Nov 18: the owner ticks any side -- a box next to the book's spread, total and moneyline for each team
     assert {"✓ Home spread", "✓ Away spread", "✓ Over", "✓ Under", "✓ Home ML", "✓ Away ML"} <= set(owner.columns)
@@ -122,6 +122,6 @@ def test_ncaaf_game_lab_lists_previews_with_form(monkeypatch):
     tables = [d.value for d in at.dataframe if "Form (30 days)" in d.value.columns]
     assert tables, [str(e.value)[:200] for e in at.exception]
     t = tables[0]
-    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Tracking pick", "The model says", "Gap (pts)"]
-    assert [x.split("leans ")[-1] for x in t["The model says"]] == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
+    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Tracking pick", "Model has", "Book has"]
+    assert [x.split("leans ")[-1].rstrip(")") for x in t["Leans"]] == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
     assert list(t["Game"]) == ["A1 @ H1", "A2 @ H2 (neutral)"] and list(t["Tracking pick"]) == ["H1 -3", "—"]

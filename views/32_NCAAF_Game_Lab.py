@@ -138,7 +138,7 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                                 f"{r['Gap (pts)']:.1f} points from the book. Leans of this size: {r['Form (30 days)']}.")
             if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
                 _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
-            _cols = ["Tip (ET)", "Game", "Tracking pick", "The model says", "Gap (pts)", "Form (30 days)",
+            _cols = ["Tip (ET)", "Game", "Tracking pick", "Model has", "Book has", "Leans", "Gap (pts)", "Form (30 days)",
                      "Total: model / book", "News check"]
             st.dataframe(pd.DataFrame(_prev)[_cols].rename(columns={"Tip (ET)": "Kickoff (ET)"}), hide_index=True,
                          width="stretch")
