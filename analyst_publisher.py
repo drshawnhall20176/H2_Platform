@@ -145,6 +145,7 @@ def _published_recap_rows(sport_key: str, today_str: str) -> Optional[str]:
 
 SLOT_SPORTS = ("NFL", "NCAAF")
 SLOTS = [("early", "Early games"), ("afternoon", "Afternoon games"), ("night", "Night games")]
+PER_GAME = 3                   # Nov 22: at most 3 calls from one game on a football card
 SLOT_AHEAD = 4.0               # hours before a window's first start that its card may go out
 
 
@@ -196,7 +197,8 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
     # SLOT_AHEAD hours of its first start; other sports post one card a day, as before.
     def _post_card(kind: str, subset: List[Dict], label: str) -> str:
         fp = AT.fingerprint_line(AL.fetch_calls())
-        text = AT.discord_picks_text(subset, sport_label=label, date_str=date_str, book_label=book_name, extra_line=fp)
+        text = AT.discord_picks_text(subset, sport_label=label, date_str=date_str, book_label=book_name, extra_line=fp,
+                                     per_game=PER_GAME if sport_key in SLOT_SPORTS else None)
         out["text"][kind] = text
         if not post:
             return "locked, not posted" if lock else "dry run"
