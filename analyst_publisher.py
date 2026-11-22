@@ -258,14 +258,35 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
     return 1 if bad else 0
 
 
+TEST_TEXT = ("✅ **H2 Sports Media — Analyst Desk** connection test. The daily card for each sport posts here around "
+             "11:20 AM ET, with the recap of the last graded day. Not a pick.")
+
+
+def test_webhook(webhook: Optional[str], out=print, send: Optional[Callable] = None) -> int:
+    """Nov 22 (owner: "test the DISCORD_WEBHOOK_URL"): one short message, nothing locked or graded."""
+    if not (webhook or "").strip():
+        out("DISCORD_WEBHOOK_URL is not set in the repository secrets.")
+        return 1
+    try:
+        AT.post_to_discord(webhook, TEST_TEXT, post=send)
+    except RuntimeError as exc:
+        out(f"webhook test failed: {exc}")
+        return 1
+    out("webhook test posted")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Lock, grade and post the Analyst Desk's daily card and recap.")
     ap.add_argument("--post", action="store_true", help="write the record and post to Discord (default: dry run)")
+    ap.add_argument("--test-webhook", action="store_true", help="post one test message and stop")
     ap.add_argument("--lock", action="store_true", help="grade and lock the record, post nothing (the scheduled run)")
     ap.add_argument("--sports", nargs="*", help="sport keys (default: every enabled sport with projections)")
     ap.add_argument("--date", help="slate date YYYY-MM-DD (default: today, US/Eastern)")
     ap.add_argument("--book", help="sportsbook key (default: ANALYST_BOOK or the platform default)")
     args = ap.parse_args(argv)
+    if args.test_webhook:
+        return test_webhook(os.environ.get("DISCORD_WEBHOOK_URL"))
     keys = [k.upper() for k in (args.sports or os.environ.get("ANALYST_SPORTS", "").replace(",", " ").split())] or default_sports()
     return run(keys, date_str=args.date, book=args.book, post=args.post,
                webhook=os.environ.get("DISCORD_WEBHOOK_URL"), lock=args.lock)

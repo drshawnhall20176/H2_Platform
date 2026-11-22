@@ -388,3 +388,11 @@ def test_lock_mode_needs_no_webhook_but_does_need_the_shared_database(env, monke
 def test_a_market_grading_cant_settle_is_never_locked():
     c = {"date": _day(1), "market": "First TD Scorer", "game_date": _iso(1)}
     assert not AL.loggable(c, _day(0)) and AL.loggable(dict(c, market="Receptions"), _day(0))
+
+
+def test_the_webhook_test_posts_one_message_and_locks_nothing(env):
+    out, send = [], Sender()
+    assert PUB.test_webhook(HOOK, out=out.append, send=send) == 0 and len(send.sent) == 1
+    assert "connection test" in send.sent[0] and AL.fetch_calls() == []
+    assert PUB.test_webhook("", out=out.append) == 1
+    assert PUB.test_webhook(HOOK, out=out.append, send=Sender(404)) == 1 and "deleted" in out[-1]
