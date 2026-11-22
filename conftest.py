@@ -43,3 +43,16 @@ def _clear_streamlit_caches():
         # or a real test run over a missing optional dependency.
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _game_money_not_paused(monkeypatch, request):
+    """Nov 22: the 💰 college game-line rule is paused in production (money_score.PAUSED); tests of the rule itself
+    run it unpaused, and test_money_score checks the pause directly. test_rules fingerprints the real setting."""
+    if request.node.fspath.basename == "test_rules.py":
+        return
+    try:
+        import money_score as _MSC
+        monkeypatch.setattr(_MSC, "PAUSED", {})
+    except Exception:                                           # noqa: BLE001
+        pass
