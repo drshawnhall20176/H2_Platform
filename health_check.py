@@ -193,8 +193,8 @@ def banner(rec: Optional[Dict], today: str) -> Optional[Dict]:
         at = ""
     probs = [i for i in rec.get("items") or [] if i["level"] in ("error", "warn")]
     icon = {"ok": "✅", "warn": "⚠️", "error": "❌"}.get(rec.get("state"), "ℹ️")
-    text = (f"Morning check {at}: all clear" if not probs else
-            f"Morning check {at}: {len(probs)} thing{'s' if len(probs) != 1 else ''} to look at")
+    text = (f"Health check {at}: all clear" if not probs else
+            f"Health check {at}: {len(probs)} thing{'s' if len(probs) != 1 else ''} to look at")
     return {"icon": icon, "text": text, "items": rec.get("items") or []}
 
 

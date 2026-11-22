@@ -37,8 +37,25 @@ def _today_et() -> str:
     return datetime.now(pytz.timezone("US/Eastern")).date().isoformat()
 
 
-def _fresh(saved_at: float, date_str: str) -> bool:
-    return date_str < _today_et() or (time.time() - saved_at) < FRESH_S
+# Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): a college slate built inside the app
+# takes ~1 GB and many minutes, and the Cloud app dies for everyone when it runs out of memory. In the app these sports
+# never build: they read the warm job's saved slate (hourly), up to HEAVY_FRESH_S old, or get an empty slate.
+HEAVY = ("NCAAF", "NCAAMB")
+HEAVY_FRESH_S = 6 * 3600
+
+
+def _in_app() -> bool:
+    if os.environ.get("H2_BOARD_LIVE"):
+        return False
+    try:
+        from streamlit import runtime
+        return runtime.exists()
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def _fresh(saved_at: float, date_str: str, max_age: Optional[float] = None) -> bool:
+    return date_str < _today_et() or (time.time() - saved_at) < (FRESH_S if max_age is None else max_age)
 
 
 def encode(value) -> bytes:
@@ -53,10 +70,10 @@ def _off() -> bool:
     return bool(os.environ.get("SLATE_STORE_OFF")) or "PYTEST_CURRENT_TEST" in os.environ
 
 
-def load(sport: str, date_str: str) -> Optional[bytes]:
+def load(sport: str, date_str: str, max_age: Optional[float] = None) -> Optional[bytes]:
     """A fresh saved slate (compressed), from this process or the database; None when there isn't one."""
     hit = _mem.get((sport, date_str))
-    if hit and _fresh(hit[0], date_str):
+    if hit and _fresh(hit[0], date_str, max_age):
         return hit[1]
     try:
         import model_store as MS
@@ -68,7 +85,7 @@ def load(sport: str, date_str: str) -> Optional[bytes]:
     try:
         ts = datetime.fromisoformat(str(row["ts"]))
         saved_at = (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)).timestamp()
-        if not _fresh(saved_at, date_str):
+        if not _fresh(saved_at, date_str, max_age):
             return None
         blob = base64.b64decode(row["payload"])
     except Exception:                                           # noqa: BLE001
@@ -100,6 +117,12 @@ def persisted(sport: str) -> Callable:
             blob = load(*key)
             if blob is not None:
                 return decode(blob)                             # a fresh copy each call: callers may edit rows
+            if sport in HEAVY and _in_app():                    # Nov 21: never build a college slate in the app
+                blob = load(*key, max_age=HEAVY_FRESH_S)
+                if blob is not None:
+                    return decode(blob)
+                print(f"[slate_store] {sport} {date_str}: no saved slate yet -- not built in the app (memory)")
+                return [], []
             with _guard:
                 lock = _locks.setdefault(key, threading.Lock())
             with lock:                                          # two pages opening at once build it once
