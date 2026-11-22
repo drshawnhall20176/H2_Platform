@@ -38,6 +38,7 @@ SINGLES = 3
 LEGS = 2
 START = "2026-11-22"    # the first Hot Tickets slate
 KEY = "HOT:{day}"       # the posted parlay: {"legs": [ledger keys], "price", "chance", "posted_at"}
+EARLIEST = (8, 30)      # Nov 22: never before 8:30 AM ET (the morning review runs overnight too)
 POTW = {5: "NCAAF", 6: "NFL"}     # Saturday / Sunday -> the Pick of the Week's sport
 POTW_NAME = {"NCAAF": "College Football", "NFL": "NFL"}
 
@@ -299,6 +300,11 @@ def run(post: bool = False, now: Optional[datetime] = None, webhook: Optional[st
     if post and not (webhook or "").strip():
         out("DISCORD_WEBHOOK_URL is not set: nothing posted")
         return 1
+    import pytz                                         # Nov 22: the morning review is a backup poster -- not overnight
+    et = (now or datetime.now(timezone.utc)).astimezone(pytz.timezone("US/Eastern"))
+    if post and (et.hour, et.minute) < EARLIEST:
+        out(f"too early to post ({et:%H:%M} ET); Hot Tickets go out from {EARLIEST[0]}:{EARLIEST[1]:02d} AM ET")
+        return 0
     # yesterday's recap first, once every ticket is graded
     rt = recap_text(yest) if yest >= START else ""
     if rt:
