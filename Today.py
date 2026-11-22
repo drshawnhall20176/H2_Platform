@@ -198,10 +198,16 @@ if _owner:
             with st.expander(_title, expanded=_i == 0):         # the newest note open, the other one folded
                 _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
                 if _b.get("table"):
+                    # Nov 21: every heading above the table (the game-lines heading sat under it), the footer below
                     _head = [l for l in _lines if l.strip() and not l.startswith("•")]
-                    st.markdown(C.money_md(_head[0]))
-                    st.dataframe(_pd.DataFrame(_b["table"]), hide_index=True, width="stretch")
-                    for _l in _head[1:]:
+                    _foot = [l for l in _head if l.startswith("Singles only")]
+                    for _l in [l for l in _head if l not in _foot]:
+                        st.markdown(C.money_md(_l))
+                    _tdf = _pd.DataFrame(_b["table"])
+                    if "Price" in _tdf:
+                        _tdf["Price"] = _tdf["Price"].fillna("—")
+                    st.dataframe(_tdf, hide_index=True, width="stretch")
+                    for _l in _foot:
                         st.caption(C.money_md(_l))
                 else:
                     st.markdown(C.money_md("  \n".join(_lines)))
