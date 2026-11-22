@@ -635,10 +635,12 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
         evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
                                                         "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
         neutral = []
-        if league == "NCAAMB":                                 # Nov 22: tournament games have no home court
-            for d in (now.date() - timedelta(days=1), now.date(), now.date() + timedelta(days=1)):
+        if league in getattr(I, "NEUTRAL_URL", {}):            # Nov 22: tournament / international games: no home edge
+            days_ = 7 if league == "NFL" else 1                # the NFL board holds the whole week
+            for i in range(-1, days_ + 1):
+                d = now.date() + timedelta(days=i)
                 try:
-                    neutral += I.ncaamb_neutral(d, fetch)
+                    neutral += I.espn_neutral(league, d, fetch)
                 except Exception:                               # noqa: BLE001 -- a missing flag never blocks a capture
                     pass
         recs = hoops_build(league, r, evs, now, TC.current_k(sport=league), neutral=neutral)

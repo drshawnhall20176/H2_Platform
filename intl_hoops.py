@@ -392,6 +392,30 @@ def ncaamb_day(day: date, fetch: Callable = _http) -> List[Dict]:
     return out
 
 
+NEUTRAL_URL = {"NCAAMB": (NCAAMB_URL, {"groups": 50, "limit": 500}),
+               "NFL": ("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", {})}
+
+
+def espn_neutral(league: str, day: date, fetch: Callable = _http) -> List[tuple]:
+    """Nov 22: [(home, away)] of `league`'s neutral-site games on `day` (ESPN neutralSite) -- college tournaments, the
+    NFL's international games. NFL walk-forward 2026: those games ran +5.8 points toward the listed home team."""
+    if league == "NCAAMB":
+        return ncaamb_neutral(day, fetch)
+    url, extra = NEUTRAL_URL.get(league, (None, {}))
+    if not url:
+        return []
+    data = fetch(url, dict(extra, dates=day.strftime("%Y%m%d"))) or {}
+    out = []
+    for ev in data.get("events") or []:
+        for c in ev.get("competitions") or []:
+            if not c.get("neutralSite"):
+                continue
+            side = {t.get("homeAway"): (t.get("team") or {}).get("displayName") for t in c.get("competitors") or []}
+            if side.get("home") and side.get("away"):
+                out.append((side["home"], side["away"]))
+    return out
+
+
 def ncaamb_neutral(day: date, fetch: Callable = _http) -> List[tuple]:
     """Nov 22: [(home, away)] of the day's NEUTRAL-SITE games, played or not (ESPN neutralSite). The odds feed doesn't
     say a game is at a neutral site, so without this every tournament game gave its listed "home" team home court --

@@ -596,3 +596,19 @@ def test_ncaamb_neutral_reads_espn_flags():
     from datetime import date
     assert I.ncaamb_neutral(date(2026, 11, 22), fetch=lambda u, p=None: data) == [("Duke Blue Devils", "Army Black Knights")]
     assert I.HFA_PRIOR["NCAAMB"] == (3.2, 20000.0)
+
+
+def test_nfl_neutral_sites_come_from_espn_too():
+    import intl_hoops as I
+    from datetime import date
+    seen = {}
+    data = {"events": [{"competitions": [{"neutralSite": True, "competitors": [
+        {"homeAway": "home", "team": {"displayName": "Miami Dolphins"}},
+        {"homeAway": "away", "team": {"displayName": "Washington Commanders"}}]}]}]}
+
+    def fetch(url, params=None):
+        seen["url"], seen["params"] = url, params
+        return data
+    assert I.espn_neutral("NFL", date(2026, 11, 15), fetch) == [("Miami Dolphins", "Washington Commanders")]
+    assert "football/nfl" in seen["url"] and seen["params"]["dates"] == "20261115"
+    assert I.espn_neutral("NHL", date(2026, 11, 15), fetch) == []
