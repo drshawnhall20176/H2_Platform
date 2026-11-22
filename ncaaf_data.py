@@ -540,8 +540,10 @@ def _cached_read_records(path: str) -> List[Dict]:
     try:
         # Nov 21 (page audit: the season's per-game stats took ~600 MB as dicts): blank cells are left out of each
         # row -- most players have most stat columns empty -- so a missing stat reads None instead of NaN
-        records = [{k: v for k, v in row.items() if not (isinstance(v, float) and v != v)}
-                   for row in pd.read_csv(path).to_dict("records")]
+        records = []
+        for chunk in pd.read_csv(path, chunksize=20000):   # a chunk at a time: no full-width copy of every row
+            records += [{k: v for k, v in row.items() if not (isinstance(v, float) and v != v)}
+                        for row in chunk.to_dict("records")]
     except pd.errors.EmptyDataError:
         # A zero-row API response writes a columnless CSV (pd.DataFrame([]) has no columns at
         # all, not just no rows) -- read_csv on that raises rather than returning an empty

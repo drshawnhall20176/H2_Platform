@@ -84,8 +84,7 @@ def load_board(sport_key: str, date_str: str):
     # Nov 21 (page audit: college basketball's 2,200 players and 300 teams took 1.5 GB and broke the table): only the
     # games the books posted player props for -- the warm job's saved board lists them
     if sport_key in BBD.BIG_SLATE_SPORTS:
-        _sb = BBD.saved_board(sport_key, date_str, BBD.O.DEFAULT_BOOK)
-        _ids = {str(m.get(k)) for m in ((_sb or [None, []])[1] or []) for k in ("home_id", "away_id")}
+        _ids = BBD.props_team_ids(sport_key, date_str) or set()
         rows = [r for r in rows if str(r.get("_team_id")) in _ids]
         meta = [m for m in meta if str(m.get("home_id")) in _ids]
         if not rows:

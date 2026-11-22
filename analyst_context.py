@@ -117,6 +117,11 @@ def load_matchups(sport_key: str, date_str: str, engine, projections) -> Tuple[D
     try:
         if sport_key in BASKETBALL:
             rows, _meta = engine.build_slate(date_str)
+            import best_bets_data as _BBD                       # Nov 21 (page audit: 1.4 GB on college basketball)
+            if sport_key in _BBD.BIG_SLATE_SPORTS:              # only the games with posted props
+                _ids = _BBD.props_team_ids(sport_key, date_str)
+                if _ids is not None or _BBD._heavy_guard():     # in the app with no saved board: nothing, not 300
+                    rows = [r for r in rows if str(r.get("_team_id")) in (_ids or set())]
             opp_ids = sorted({r["_opp_id"] for r in rows if r.get("_opp_id") is not None})
             allowed = {oid: engine.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
             board = projections.build_hot_hand_board(rows, allowed)

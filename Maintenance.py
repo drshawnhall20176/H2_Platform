@@ -66,6 +66,7 @@ if st.button("🔄 Restart the site now", type="primary"):
             getattr(m, "_CACHE", {}).clear()
         except Exception:                                       # noqa: BLE001
             pass
+    CG.clear_module_caches()
     gc.collect()
     after = CG.rss_mb()
     try:
