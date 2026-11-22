@@ -150,6 +150,13 @@ def refit(save=None, grade=None) -> Dict:
 
 
 POST_FROM = "2026-11-22"   # earned chance v2 (rules.py): the second stage applies from this slate
+# Nov 22 (owner: "remove any model misjudgment from all sports"), earned chance v3. The site-wide audit, held-out days
+# Nov 12-21: pick'em-only lines -- the earned chance said 57% (NBA, NHL, college basketball alike), they hit 44-52%;
+# college basketball's priced props had no sportsbook fit and fell back to the model's own chance (said 59%, hit 49%).
+# So: a pick'em line earns NO model credit (50%) until its own record shows an edge, and a priced market without a
+# sportsbook fit takes the books' chance. A finer Over/Under correction was tested the same way and didn't help.
+V3_FROM = "2026-11-22"
+PICKEM_CREDIT = False
 POST_MIN = 200
 
 
@@ -247,9 +254,16 @@ def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None,
         return None
     cf = (w_by if w_by is not None else coefs()).get(sport) or {}
     pmod = float(p_model_side) if side == "Over" else 1 - float(p_model_side)
+    import props_engine as PE
+    v3 = (day or PE._et_today()) >= V3_FROM
     if p_market_side is not None and (cf.get(market) or cf.get("_all")):
         w = cf.get(market) or cf.get("_all")
         pm = float(p_market_side) if side == "Over" else 1 - float(p_market_side)
+    elif v3 and p_market_side is not None:      # v3: priced, no sportsbook fit -> the books' chance, no model credit
+        pm_s = float(p_market_side)
+        return pm_s if side == "Over" else 1 - pm_s
+    elif v3 and not PICKEM_CREDIT:              # v3: a pick'em line earns no model credit until its record shows one
+        return 0.5
     else:                       # no price, or (Nov 21: college basketball, NHL blocked shots) no priced fit yet
         w = cf.get(f"{market}|model") or cf.get("_all|model")
         pm = 0.5
@@ -259,7 +273,6 @@ def earned(sport: str, market: str, side: str, p_model_side, p_market_side=None,
     e = po if side == "Over" else 1 - po
     # Nov 21 (earned v2, from POST_FROM): the second stage fit on shown picks (fit_post)
     if post is None:
-        import props_engine as PE
         post = (day or PE._et_today()) >= POST_FROM
     if post:
         pw = ((w_by if w_by is not None else coefs()).get("_post") or {}).get(
@@ -274,8 +287,18 @@ PICKEM_NEED = 0.5425       # a pick'em entry's break-even per pick (5-pick flex 
 
 def play_earned(sport: str, p: Dict, w_by=None) -> Optional[float]:
     """earned() for a board play."""
+    mkt = None if p.get("Pickem") else p.get("MarketProb")
+    if mkt is None and not p.get("Pickem") and p.get("RealPrice") is not None:   # Nov 22 (v3): a priced line without
+        try:                                                    # the other side's price -- its own implied chance
+            import props_engine as PE                           # (vig left in: the cautious side), not "pick'em"
+            d = PE.decimal(p["RealPrice"])
+            if d:
+                q = 1 / d
+                mkt = q if p.get("Side") == "Over" else 1 - q
+        except Exception:                                       # noqa: BLE001
+            mkt = None
     return earned(sport, p.get("Market"), p.get("Side"), p.get("ModelRaw") if p.get("ModelRaw") is not None
-                  else p.get("ModelProb"), None if p.get("Pickem") else p.get("MarketProb"), w_by)
+                  else p.get("ModelProb"), mkt, w_by)
 
 
 def needed(price, pickem: bool = False) -> Optional[float]:

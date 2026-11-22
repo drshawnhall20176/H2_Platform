@@ -44,7 +44,11 @@ RULES: Dict[str, List[Dict]] = {
                                               "lines: the model's chance pulled toward 50% by its record"},
         {"v": 2, "from": "2026-11-22", "what": "v1, then a second stage fit on SHOWN picks only (sportsbook and pick'em "
                                               "separately), pulled toward 50% -- shown picks hit about 51% whatever "
-                                              "their v1 chance", "fp": "8f64ae14f8"},
+                                              "their v1 chance"},
+        {"v": 3, "from": "2026-11-22", "what": "v2, except a pick'em-only line earns no model credit (50%) until its "
+                                              "record shows an edge, and a priced market without a sportsbook fit "
+                                              "takes the books' chance (site-wide audit: pick'em said 57%, hit 44-52%)",
+         "fp": "6938f3f4da"},
     ],
     "strong": [
         {"v": 1, "from": "2026-11-20", "what": "the 15 likeliest saved props by the model's chance"},
@@ -95,7 +99,8 @@ def params() -> Dict[str, Dict]:
                         "markets": list(MSC.MONEY_MARKETS)},
         "lock": {"min_ev": PE.LOCK_MIN_EV, "pickem_books": sorted(PE.PICKEM_BOOKS)},
         "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED,
-                   "post_from": PM.POST_FROM, "post_min": PM.POST_MIN},
+                   "post_from": PM.POST_FROM, "post_min": PM.POST_MIN, "v3_from": PM.V3_FROM,
+                   "pickem_credit": PM.PICKEM_CREDIT},
         "strong": {"n": PL.STRONG_N, "per_sport": PL.PER_SPORT},
         "stakes": {"mode": PE.STAKE_MODE, "flat": PE.FLAT_UNIT, "daily_cap": ST.DAILY_CAP},
         "shutoff": {"window": SO.WINDOW, "min_n": SO.MIN_N, "min_clv_n": SO.MIN_CLV_N, "min_beat": SO.MIN_BEAT,
