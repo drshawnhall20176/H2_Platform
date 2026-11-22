@@ -105,16 +105,17 @@ def test_a_dropped_pick_on_a_game_still_on_the_board_is_not_kept():
     assert TB.keep_started([], old, on_board={"A @ B"}) == [{"game": "E @ F", "pick": "z"}]
 
 
-def test_game_line_money_picks_join_the_strongest_list():
+def test_game_line_money_picks_join_the_strongest_list(monkeypatch):
+    monkeypatch.setattr(PL, "_today_et", lambda: "2099-11-21")             # Nov 22: neither pick has started
     full = {"sport": "NCAAMB", "home": "Siena Saints", "away": "Rider Broncs", "home_spread": -6.5, "game_id": "g1",
-            "kickoff": "2026-11-21T16:00:00Z"}
+            "kickoff": "2099-11-21T16:00:00Z"}
     rows = [{"sport": "NCAAMB", "money": True, "money_market": "Spread", "money_side": "home", "money_line": -6.5,
              "money_price": -109, "money_chance": 0.56, "money_pick": "Siena Saints -6.5", "money_score": 0.07,
              "game": "Rider Broncs @ Siena Saints", "time": "11:00 AM", "_rec": {"game_id": "g1"}, "_full": full},
             {"sport": "NCAAMB", "money": False, "money_market": "Spread"}]
     g = PL.game_candidates("2026-11-21", rows)
     assert len(g) == 1 and g[0]["kind"] == "Game" and g[0]["bet_market"] == "Spread" and g[0]["earned"] == 0.56
-    props = [{"kind": "Prop", "sport": "NBA", "pick": "p", "earned": 0.55, "price": -110}]
+    props = [{"kind": "Prop", "sport": "NBA", "pick": "p", "earned": 0.55, "price": -110, "time": "11:00 PM"}]
     got = PL.strongest(props + g)
     assert [r["pick"] for r in got] == ["Siena Saints -6.5", "p"]           # +3.8 points beats +2.6
 
@@ -169,3 +170,15 @@ def test_a_football_player_with_no_stat_line_in_a_finished_game_is_void():
     assert not PL.dnp_void(dict(r, game="Boston College @ Miami"), "2026-11-21", cache)   # not this week
     assert PL.dnp_void({"sport": "NFL", "game": "MIN @ SF"}, "2026-11-22", cache)
     assert not PL.dnp_void({"sport": "NFL", "game": "NYJ @ LAC"}, "2026-11-22", cache)
+
+
+def test_started_picks_dont_crowd_out_games_still_to_come(monkeypatch):
+    """Nov 22: the NFL's 1 PM picks (started, kept to show results) filled its 5 places; the 4 PM and 8:20 PM games
+    never made the list."""
+    monkeypatch.setattr(PL, "_today_et", lambda: "2026-11-22")
+    early = [{"kind": "Prop", "sport": "NFL", "pick": f"early{i}", "earned": 0.60, "price": 120,
+              "kickoff": "2026-11-22T18:00:00Z"} for i in range(5)]
+    late = [{"kind": "Prop", "sport": "NFL", "pick": "night", "earned": 0.55, "price": -110,
+             "kickoff": "2099-11-23T01:20:00Z"}]
+    got = [r["pick"] for r in PL.strongest(early + late)]
+    assert got[0] == "night" and len(got) == 5

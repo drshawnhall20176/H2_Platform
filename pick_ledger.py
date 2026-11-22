@@ -162,6 +162,14 @@ def earned_edge(r: Dict) -> Optional[float]:
     return None if need is None else float(e) - need
 
 
+def _today_et() -> str:
+    try:
+        import props_engine as PE
+        return PE._et_today()
+    except Exception:                                           # noqa: BLE001
+        return datetime.now(timezone.utc).date().isoformat()
+
+
 def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     """The Command Center's list. Nov 21 (owner: "proven edge A+"): ranked by EARNED edge -- the earned chance less
     what the price needs -- and only picks that clear it. Ranking by the model's raw chance picked out its biggest
@@ -178,7 +186,11 @@ def strongest(picks: Sequence[Dict], n: int = STRONG_N) -> List[Dict]:
     scored = [dict(r, earned_edge=earned_edge(r)) for r in props]
     if any(r["earned_edge"] is not None for r in scored):
         out, per = [], {}
-        for r in sorted([r for r in scored if (r["earned_edge"] or 0) > 0], key=lambda r: -r["earned_edge"]):
+        # Nov 22: picks still to come take the places first -- a started game's picks (kept so its results show) no
+        # longer crowd out the evening games
+        _day = _today_et()
+        for r in sorted([r for r in scored if (r["earned_edge"] or 0) > 0],
+                        key=lambda r: (started(_day, r), -r["earned_edge"])):
             sp = r.get("sport")
             if per.get(sp, 0) >= PER_SPORT:
                 continue
