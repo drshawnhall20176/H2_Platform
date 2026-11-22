@@ -24,6 +24,9 @@ page, sp = sys.argv[1], sys.argv[2]
 import slate_store as SS, best_bets_data as BBD
 SS._in_app = lambda: True
 BBD._in_app = lambda: True
+import streamlit as st
+st.page_link = lambda *a, **k: None                 # page links need the site's menu; not what's being measured
+st.switch_page = lambda *a, **k: None
 from streamlit.testing.v1 import AppTest
 t = time.time()
 res = {"page": page, "sport": sp}
@@ -74,12 +77,13 @@ def run(job):
         return {"page": page, "sport": sp, "exc": ["TIMEOUT >400s"], "secs": 400, "peak_mb": None}
 
 want = os.environ.get("AUDIT_SPORTS", "NFL").split(",")
+only = [x for x in os.environ.get("AUDIT_PAGES", "").split(",") if x]
 jobs = []
 for sp in want:
     if sp == "GENERAL":
         jobs += [(p, "-") for p in ("Today.py", "Owner_Office.py", "Maintenance.py")]
     else:
-        jobs += [(p, sp) for p in pages_for(sp)]
+        jobs += [(p, sp) for p in pages_for(sp) if not only or any(o in p for o in only)]
 print(f"PA {len(jobs)} page loads for {want}")
 with ThreadPoolExecutor(3) as ex:
     for r in ex.map(run, jobs):
