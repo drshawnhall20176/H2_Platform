@@ -38,7 +38,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 
 import pytz
@@ -143,8 +143,25 @@ def _published_recap_rows(sport_key: str, today_str: str) -> Optional[str]:
     return max(days) if days else None
 
 
+SLOT_SPORTS = ("NFL", "NCAAF")
+SLOTS = [("early", "Early games"), ("afternoon", "Afternoon games"), ("night", "Night games")]
+SLOT_AHEAD = 4.0               # hours before a window's first start that its card may go out
+
+
+def football_slot(start) -> str:
+    """early (before 2:30 PM New York) / afternoon (to 7 PM) / night. A game with no time counts as early."""
+    dt = sports.game_dt(start)
+    if dt is None:
+        return "early"
+    import pytz
+    et = dt.astimezone(pytz.timezone("US/Eastern"))
+    mins = et.hour * 60 + et.minute
+    return "early" if mins < 14 * 60 + 30 else "afternoon" if mins < 19 * 60 else "night"
+
+
 def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str, Callable], *, book: str,
-                  webhook: Optional[str], post: bool, send: Optional[Callable] = None, lock: bool = False) -> Dict:
+                  webhook: Optional[str], post: bool, send: Optional[Callable] = None, lock: bool = False,
+                  now: Optional[datetime] = None) -> Dict:
     """Run one sport end to end. Returns {sport, locked, picks: 'posted'|'already posted'|'nothing to post'|
     'dry run'|'failed: …', recap: …, graded, notes, text}. With post=False and lock=False nothing is written or sent;
     lock=True (Nov 22) grades, locks and marks the record but sends nothing."""
@@ -160,7 +177,9 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
 
     # Once the card is out the angles can't change what was posted; a later run only needs the book's current lines (for
     # the closing-line marks), so it skips the heavy evidence reads and the credits they cost.
-    built = build_calls(sport_key, date_str, book, deps, evidence=not (post and AL.posted("picks", sport_key, date_str)))
+    _kinds = ["picks"] + ([f"picks:{sl}" for sl, _ in SLOTS[1:]] if sport_key in SLOT_SPORTS else [])
+    built = build_calls(sport_key, date_str, book, deps,
+                        evidence=not (post and all(AL.posted(k, sport_key, date_str) for k in _kinds)))
     out["notes"] = built["notes"]
     cards = [c for c in built["calls"] if c["book_state"] == A.STATE_POSTED and AL.loggable(c, today_str)
              and not c.get("cold")]
@@ -171,27 +190,45 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
         except Exception:                                      # noqa: BLE001 — marking is best effort
             pass
 
-    # --- the picks card --------------------------------------------------------------
-    if cards:
+    # --- the picks card(s) -----------------------------------------------------------
+    # Nov 22 (owner: "the first set of analyst cards covered the 1pm slot, we also have a 4pm slot and the evening
+    # game"): football posts one card per kickoff window (early / afternoon / night), each on the first run within
+    # SLOT_AHEAD hours of its first start; other sports post one card a day, as before.
+    def _post_card(kind: str, subset: List[Dict], label: str) -> str:
         fp = AT.fingerprint_line(AL.fetch_calls())
-        text = AT.discord_picks_text(cards, sport_label=short, date_str=date_str, book_label=book_name, extra_line=fp)
-        out["text"]["picks"] = text
+        text = AT.discord_picks_text(subset, sport_label=label, date_str=date_str, book_label=book_name, extra_line=fp)
+        out["text"][kind] = text
         if not post:
-            out["picks"] = "locked, not posted" if lock else "dry run"
-        elif AL.claim_post("picks", sport_key, date_str):
-            try:
-                AT.post_to_discord(webhook, text, post=send)
-            except RuntimeError as exc:
-                AL.release_post("picks", sport_key, date_str)
-                out["picks"] = f"failed: {exc}"
-            else:
-                try:
-                    AL.mark_published(AT.published_in_text(cards, text))
-                except Exception:                              # noqa: BLE001 — the post went out; the stamp is best effort
-                    pass
-                out["picks"] = "posted"
-        else:
-            out["picks"] = "already posted"
+            return "locked, not posted" if lock else "dry run"
+        if not AL.claim_post(kind, sport_key, date_str):
+            return "already posted"
+        try:
+            AT.post_to_discord(webhook, text, post=send)
+        except RuntimeError as exc:
+            AL.release_post(kind, sport_key, date_str)
+            return f"failed: {exc}"
+        try:
+            AL.mark_published(AT.published_in_text(subset, text))
+        except Exception:                                      # noqa: BLE001 — the post went out; the stamp is best effort
+            pass
+        return "posted"
+
+    if cards and sport_key in SLOT_SPORTS:
+        res = []
+        now_ = now or datetime.now(timezone.utc)
+        for slot, label in SLOTS:
+            subset = [c for c in cards if football_slot(c.get("start")) == slot]
+            if not subset:
+                continue
+            first = min((sports.game_dt(c.get("start")) for c in subset if sports.game_dt(c.get("start"))), default=None)
+            if first is not None and first > now_ + timedelta(hours=SLOT_AHEAD):
+                res.append(f"{slot}: later")
+                continue
+            kind = "picks" if slot == "early" else f"picks:{slot}"
+            res.append(f"{slot}: {_post_card(kind, subset, f'{short} · {label}')}")
+        out["picks"] = "; ".join(res) if res else "nothing to post"
+    elif cards:
+        out["picks"] = _post_card("picks", cards, short)
 
     # --- the recap of the latest fully graded published day ----------------------------
     day = _published_recap_rows(sport_key, today_str)

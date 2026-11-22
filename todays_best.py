@@ -83,6 +83,7 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
                     "earned": earned, "use": p.get("Use") or "", "lock": lock, "page": "Best Bets",
                     # Nov 7: what the Home panel needs to log the pick
                     "player": p.get("Player"), "pid": p.get("PlayerId"), "market": p.get("Market"), "side": p.get("Side"),
+                    "team": p.get("Team"),                      # Nov 22: Discord cards name the player's team
                     "line": line, "market_key": p.get("MarketKey"),
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
                     "pickem_only": bool(p.get("Pickem")),

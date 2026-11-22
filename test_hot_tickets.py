@@ -123,3 +123,35 @@ def test_run_posts_once_and_a_dry_run_posts_nothing(store, monkeypatch):
     assert HT.run(post=True, webhook=hook, send=send, out=out.append, now=NOON) == 0 and len(sent) == 1
     assert "already posted" in out[-1]
     assert HT.run(post=True, webhook="", out=out.append) == 1
+
+
+def test_an_update_replaces_game_line_tickets_and_keeps_the_record(store, monkeypatch):
+    import props_engine as PE
+    monkeypatch.setattr(PE, "_et_today", lambda: DAY)
+    game = _r("Dayton moneyline", "NCAAMB", 0.63, -156, "Dayton @ Northwestern", money_market="Moneyline",
+              game_id="g1", money_side="away")
+    HT.save_posted(DAY, {"singles": [game, _cands()[0]], "parlay": None, "potw": None}, NOON)
+    fixed = _cands()
+    monkeypatch.setattr(HT, "candidates", lambda day, now=None: fixed)
+    sent = []
+
+    def send(url, json=None, timeout=None):
+        sent.append(json["content"])
+
+        class R:
+            status_code = 204
+        return R()
+    hook = "https://discord.com/api/webhooks/1/abc"
+    assert HT.revise("Corrected model.", post=True, webhook=hook, send=send, out=lambda m: None) == 0
+    t = sent[0]
+    assert "UPDATED" in t and "~~NCAAMB · Dayton moneyline (-156)~~" in t and "Corrected model." in t
+    assert "Alpha Over" not in t.split("UPDATED TICKETS")[1]          # already posted: not repeated
+    rows = PL.rows("hot", "ALL", DAY)
+    assert any(r["pick"] == "Dayton moneyline" for r in rows) and len(rows) == 3       # old kept, one new
+    assert HT.revise("again", post=True, webhook=hook, send=send, out=lambda m: None) == 0 and len(sent) == 1
+
+
+def test_a_ticket_names_the_players_team_and_game():
+    r = dict(_r("Alpha Over", "NBA", 0.64, -150, "A @ B"), player="Alpha", team="BOS", need=0.6)
+    line = HT.pick_line(r)
+    assert "**Alpha (BOS) Over**" in line and "· A @ B, 7:00 PM ET" in line

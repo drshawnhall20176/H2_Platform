@@ -140,10 +140,18 @@ def fingerprint_line(rows: List[Dict]) -> str:
     return f"Record fingerprint ({len(rows)} locked calls to date): {fp}" if fp else ""
 
 
+def card_desc(c: Dict) -> str:
+    """A call as the Discord card writes it: Nov 22 (owner), with the player's team -- "Chris Bell (BAL) Over ..."."""
+    desc = A.describe_call(c)
+    if c.get("team") and c.get("player"):
+        desc = desc.replace(str(c["player"]), f"{c['player']} ({c['team']})", 1)
+    return desc
+
+
 def published_in_text(calls: List[Dict], text: str) -> List[Dict]:
     """The calls whose play appears in a message — the ones actually shown to the audience, even if the
-    owner edited the draft before posting."""
-    return [c for c in calls if A.describe_call(c) in text]
+    owner edited the draft before posting. Either form: with the team (Nov 22) or without."""
+    return [c for c in calls if card_desc(c) in text or A.describe_call(c) in text]
 
 
 def _fit(lines: List[str], footer: str, more_word: str) -> str:
@@ -172,9 +180,11 @@ def discord_picks_text(calls: List[Dict], *, sport_label: str, date_str: str, bo
              f"Lines are from {book_label} at the time of posting. Each call is locked to the public record before kickoff."]
     for c in ordered:
         price = f" at {c['price']:+.0f}" if c.get("price") is not None else ""
-        when = f" · {c['kickoff']}" if c.get("kickoff") and c["kickoff"] != "time TBD" else ""
+        game = f" · {c['game']}" if c.get("game") else ""            # Nov 22 (owner): the game on every call
+        when = (f"{', ' if game else ' · '}{c['kickoff']}" if c.get("kickoff") and c["kickoff"] != "time TBD" else "")
         angles = ", ".join(a["label"] for a in c.get("angles", []))
-        lines.append(f"{'💎' if c.get('gem') else '•'} **{A.describe_call(c)}**{price}{when} — {angles}")
+        desc = card_desc(c)                                         # Nov 22 (owner): the player's team too
+        lines.append(f"{'💎' if c.get('gem') else '•'} **{desc}**{price}{game}{when} — {angles}")
     return _fit(lines, (extra_line + "\n" if extra_line else "") + DISCLAIMER, "plays")
 
 

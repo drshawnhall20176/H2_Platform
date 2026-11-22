@@ -284,3 +284,12 @@ def test_the_record_csv_has_the_angles_the_gem_flag_and_results_for_each_call():
     assert out[1][10:] == ["", "", "0", "", "", "", ""] and out[1][8:10] == ["", ""]
     assert [AT.result_label(r) for r in rows] == ["Hit", "Open"]
     assert AT.result_label({"hit": 0}) == "Miss" and AT.result_label({"hit": None, "settled_at": "x"}) == "Void"
+
+
+def test_discord_picks_name_the_game():
+    """Nov 22 (owner): it would be beneficial to have the game included."""
+    import analyst_tools as AT
+    c = {"player": "Chris Bell", "side": "Over", "line": 14.5, "market": "Receiving Yards", "model_prob": 0.51,
+         "price": -112, "kickoff": "1:00 PM ET", "game": "CLE @ BAL", "team": "BAL", "angles": [{"label": "Game script"}]}
+    t = AT.discord_picks_text([c], sport_label="NFL", date_str="2026-11-22", book_label="DraftKings")
+    assert "**Chris Bell (BAL) Over 14.5 Receiving Yards (51%)** at -112 · CLE @ BAL, 1:00 PM ET — Game script" in t

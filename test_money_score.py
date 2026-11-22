@@ -106,3 +106,13 @@ def test_money_record_text_live_then_tested_then_new():
     assert MSB.record_text("NBA", b).startswith("💰 live: 3–2 (60%")
     assert MSB.record_text("NBA", {"sports": []}).startswith("💰 tested: 50–57")
     assert MSB.record_text("NHL", b).startswith("💰 new rule")
+
+
+def test_the_college_game_line_rule_is_paused_from_nov_22(monkeypatch):
+    """Nov 22: re-tested on the corrected college model at -0.8% per $1 -- paused, earlier slates keep their flags."""
+    import props_engine as PE
+    monkeypatch.setattr(MSC, "PAUSED", {"NCAAMB": "2026-11-22"})
+    monkeypatch.setattr(PE, "money_sports", lambda now=None, day=None: ("NCAAMB",))
+    s = {"mkt": "ML", "score": 0.07, "chance": 0.6}
+    assert not MSC.is_money("NCAAMB", s, day="2026-11-22")
+    assert MSC.is_money("NCAAMB", s, day="2026-11-21")
