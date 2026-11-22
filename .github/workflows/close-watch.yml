@@ -6,11 +6,16 @@
 # is covered by the next) and right after bets are logged (log-plays dispatches it). The repo is public, so Actions
 # minutes are free; Odds API credits are spent only on games with open bets, once or twice each.
 #
+# Nov 22: it also watches every SHOWN pick (the strongest list, the 💰 props and game lines -- ledger_close.py) at 60,
+# 30, 15 and 5 minutes before its start, so the record's closing-line value is read right before the game. A 10:40am
+# start was added so noon games get their 60-minute capture.
+#
 # A newer run replaces an older one (concurrency below), so there is never more than one watcher.
 name: close-watch
 
 on:
   schedule:
+    - cron: "40 14 * * *"   # 10:40am ET -- noon starts' first capture (Nov 22)
     - cron: "40 15 * * *"   # 11:40am ET -- covers early afternoon (NFL 1pm, college noon, day games)
     - cron: "40 20 * * *"   # 4:40pm ET  -- covers the evening slate
     - cron: "40 1 * * *"    # 9:40pm ET  -- covers late West Coast starts
