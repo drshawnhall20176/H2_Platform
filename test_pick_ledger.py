@@ -146,3 +146,11 @@ def test_record_counts_closing_line_value():
     s[k]["graded_at"] = "x"
     rec = PL.record("money", "NBA", "2026-11-21", get)
     assert rec["clv_beat"] == 1 and rec["clv_lost"] == 0
+
+
+def test_a_player_missing_from_a_finished_game_is_void(monkeypatch):
+    cache = {("final", "NBA"): [("boston celtics", "sacramento kings")]}
+    r = {"sport": "NBA", "game": "Boston Celtics @ Sacramento Kings", "pid": 1}
+    assert PL.dnp_void(r, "2026-11-21", cache)
+    assert not PL.dnp_void(dict(r, game="LA Clippers @ Dallas Mavericks"), "2026-11-21", cache)
+    assert not PL.dnp_void(dict(r, sport="NCAAF"), "2026-11-21", cache)
