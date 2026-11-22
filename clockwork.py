@@ -12,8 +12,10 @@ demand). Every minute it reads the repo's recent runs; for each workflow below w
 ago (giving GitHub's schedule its chance) and that hasn't run since, it dispatches that workflow once. Due times
 older than GRACE minutes are let go -- the next one is never far away. Dispatched runs use the workflow's defaults,
 so only workflows that behave the same dispatched as scheduled are listed (not daily-review / tuning-report /
-capture-ufc-odds, which treat a manual run as "force", and not close-watch, which is its own watcher); morning-brief
-is dispatched with kind=auto (INPUTS).
+capture-ufc-odds, which treat a manual run as "force"); morning-brief is dispatched with kind=auto (INPUTS).
+Nov 22: close-watch is listed after all -- it was "its own watcher", but GitHub skipped its 10:40 and 11:40 starts and
+no shown pick got a captured close; a dispatched watcher replaces a running one (its concurrency), which covers the same
+games. analyst-lock, hot-tickets and backup too (each posts or saves once a day; a dispatch can't double it).
 The repo is public, so Actions minutes are free; each dispatch spends what the scheduled run would have.
 """
 from __future__ import annotations
@@ -27,7 +29,9 @@ from typing import Dict, Iterable, List, Optional
 
 WORKFLOWS = ("warm-slates", "settle-results", "capture-closing-lines", "capture-line-snapshots", "capture-game-picks",
              "capture-intl", "refresh-matchups", "refresh-ncaaf", "refresh-statcast", "refresh-calibration",
-             "script-learn", "settle-analyst", "money-review")
+             "script-learn", "settle-analyst", "money-review",
+             # Nov 22: skipped today -- close-watch ran once (3:44 AM) of four, analyst-lock 0 of 2, hot-tickets 0 of 3
+             "close-watch", "analyst-lock", "hot-tickets", "backup")
 # Inputs for a dispatch, where the defaults would change what the run does. A run started by clockwork (GitHub's
 # token) doesn't set off the workflow_run chain the scheduled one would, so morning-brief is dispatched on its own
 # crons -- as "auto" (whatever note is due, never resent), which also runs the morning review when it's due.
