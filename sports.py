@@ -735,3 +735,16 @@ def team_trend_tag(recent: Optional[float], season: Optional[float]) -> Tuple[st
     if ratio <= 0.92:
         return "📉 Cold", round(ratio, 2)
     return "➡️ Steady", round(ratio, 2)
+
+
+
+def et_clock(game_iso) -> str:
+    """Nov 22 (owner: "TD engine does not have times"): a game's start as "1:00 PM" New York, or "" when unknown."""
+    dt = game_dt(game_iso)
+    if dt is None:
+        return ""
+    try:
+        import pytz
+        return dt.astimezone(pytz.timezone("US/Eastern")).strftime("%-I:%M %p")
+    except Exception:                                           # noqa: BLE001
+        return ""

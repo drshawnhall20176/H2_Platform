@@ -121,12 +121,19 @@ if not filtered:
     st.info("No players match the current position filter.")
     st.stop()
 
+# Nov 22 (owner: "TD engine does not have times"): each player's kickoff, New York time, earliest first
+_kick = {(r.get("Player"), r.get("Team")): r.get("_game_date") for r in all_rows}
+for b in filtered:
+    _gd = _kick.get((b.get("Player"), b.get("Team")))
+    b["Time"] = sports.et_clock(_gd)
+    b["_tsort"] = str(sports.game_dt(_gd) or "~")
+
 # --- leaderboard ---------------------------------------------------------
 C.section_header("🏆", "Leaderboard")
 top_n = st.slider("Show top N", 5, min(50, len(filtered)), min(25, len(filtered)))
 top = filtered[:top_n]
 
-ldf = pd.DataFrame(top)[["Player", "Position", "Team", "Opp", "Model TD %", "Book TD %", "Model call", "Use",
+ldf = pd.DataFrame(top)[["Time", "Player", "Position", "Team", "Opp", "Model TD %", "Book TD %", "Model call", "Use",
                          "ModelProb", "Agrees", "Fair", "TDGames", "GamesPlayed"]]
 ldf = ldf.rename(columns={"ModelProb": "Recent scoring rate", "Fair": "Fair odds (rate)", "TDGames": "TD Games",
                           "GamesPlayed": "Games on File"})
@@ -156,7 +163,7 @@ for tab, pos in zip(tabs, positions_present):
         if not pos_rows:
             st.caption("No players at this position on the current slate.")
             continue
-        pdf = pd.DataFrame(pos_rows)[["Player", "Team", "Opp", "Model TD %", "Model call", "Use", "ModelProb", "Why"]]
+        pdf = pd.DataFrame(pos_rows)[["Time", "Player", "Team", "Opp", "Model TD %", "Model call", "Use", "ModelProb", "Why"]]
         pdf = pdf.rename(columns={"ModelProb": "Recent scoring rate"})
         st.dataframe(
             pdf.style.format({"Model TD %": "{:.0%}", "Recent scoring rate": "{:.0%}"}, na_rep="—")
