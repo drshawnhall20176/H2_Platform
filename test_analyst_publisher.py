@@ -360,3 +360,31 @@ def test_a_later_run_skips_the_heavy_evidence_reads_once_the_card_is_out(env):
     assert calls == ["env", "mu"]                                    # the second does not
     go(env, post=False)                                              # a dry run before the card exists still would; after it, post=False reads
     assert calls == ["env", "mu", "env", "mu"]
+
+
+# ------------------------------------------------------------------ Nov 22: the scheduled lock, nothing posted
+def test_lock_mode_locks_and_grades_but_posts_nothing(env):
+    send = Sender()
+    r = PUB.publish_sport("NBA", _day(0), _day(0), env["deps"], book="draftkings", webhook=None, post=False, send=send,
+                          lock=True)
+    assert r["locked"] == 1 and r["picks"] == "locked, not posted" and send.sent == []
+    (row,) = AL.fetch_calls()
+    assert row["player"] == "Gem Guy" and not row["published_at"] and not AL.posted("picks", "NBA", _day(0))
+    again = PUB.publish_sport("NBA", _day(0), _day(0), env["deps"], book="draftkings", webhook=None, post=False,
+                              send=send, lock=True)
+    assert again["locked"] == 0 and len(AL.fetch_calls()) == 1                     # first sighting wins
+
+
+def test_lock_mode_needs_no_webhook_but_does_need_the_shared_database(env, monkeypatch):
+    out = []
+    assert PUB.run(["NBA"], lock=True, deps=env["deps"], out=out.append, require_shared_db=False) == 0
+    assert len(AL.fetch_calls()) == 1 and "locked 1" in out[0]
+    monkeypatch.setattr(AL, "USING_POSTGRES", False)
+    out2 = []
+    assert PUB.run(["NBA"], lock=True, deps=env["deps"], out=out2.append) == 1
+    assert "Refusing to write the record" in out2[0]
+
+
+def test_a_market_grading_cant_settle_is_never_locked():
+    c = {"date": _day(1), "market": "First TD Scorer", "game_date": _iso(1)}
+    assert not AL.loggable(c, _day(0)) and AL.loggable(dict(c, market="Receptions"), _day(0))

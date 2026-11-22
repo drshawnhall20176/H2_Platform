@@ -1,0 +1,50 @@
+# Lock the Analyst Record every day (Nov 22 audit). The Desk locked calls only when the owner opened it for a sport --
+# 24 of 43 days, one or two sports a day, nothing after Nov 10 -- because this schedule was never created. Each run
+# grades earlier days, locks every covered sport's calls for games that haven't started (first sighting wins, never
+# rewritten) and notes the latest line on calls already locked.
+#
+# Nov 22 (owner: yes to posting the Desk's daily card): when the DISCORD_WEBHOOK_URL secret is set, the run also posts
+# each sport's card (up to 8 calls) once a day and the recap of the last fully graded published day, and stamps the
+# posted calls "published" -- the audience record. Without the secret it only locks (nothing is posted).
+name: analyst-lock
+
+on:
+  schedule:
+    - cron: "23 16 * * *"   # ~11:23am ET -- before noon / early-afternoon starts
+    - cron: "23 20 * * *"   # ~3:23pm ET  -- the late-afternoon and evening slate
+    - cron: "23 23 * * *"   # ~6:23pm ET  -- late games, and the latest lines on calls already locked
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analyst-lock
+  cancel-in-progress: false
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Lock and grade the record
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            python -u analyst_publisher.py --post
+          else
+            echo "DISCORD_WEBHOOK_URL not set: locking only, nothing posted"
+            python -u analyst_publisher.py --lock
+          fi
