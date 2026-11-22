@@ -37,7 +37,16 @@ def _words(s) -> List[str]:
 
 
 def same_team(label: str, name: str) -> bool:
-    """"Miami" ~ "Miami Hurricanes", "San José St Spartans" ~ "San Jose State Spartans"."""
+    """"Miami" ~ "Miami Hurricanes", "San José St Spartans" ~ "San Jose State Spartans", NFL "MIN" ~ "Minnesota
+    Vikings" (the NFL board names teams by abbreviation)."""
+    lab = str(label or "").strip()
+    if 1 < len(lab) <= 3 and lab.isupper():
+        try:
+            import position_lines as PLN
+            full = PLN.NFL_TEAMS.get(lab)
+        except Exception:                                       # noqa: BLE001
+            full = None
+        return bool(full) and _norm(full) == _norm(name)
     a, b = _norm(label), _norm(name)
     if not a or not b:
         return False
