@@ -11,7 +11,7 @@ THE RULE (rules.py "hot"):
     picks -- never a pick'em-only line (no price to grade), never a game that has started, never a market the
     automatic shut-off has pulled;
   * MOST PROBABLE, BUT IT MUST PAY: ranked by the EARNED chance (what the model's record has earned, not its raw
-    opinion), keeping only picks whose earned chance clears what the price needs, at no worse than MAX_FAV (-200).
+    opinion), keeping only picks whose earned chance clears what the price needs, at no worse than MAX_FAV (-300).
     A -400 favorite wins a lot and still loses money; Hot Tickets that lose money would burn the trust they're built
     to earn;
   * SINGLES singles, one per game and one per player; the top one is the 🎟️ Ticket of the Day;
@@ -33,7 +33,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 
-MAX_FAV = -200          # no worse than -200
+MAX_FAV = -300          # no worse than -300 (Nov 22 dry run: at -200 the top ticket was a 57% shot)
 SINGLES = 3
 LEGS = 2
 START = "2026-11-22"    # the first Hot Tickets slate
