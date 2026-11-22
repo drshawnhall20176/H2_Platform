@@ -40,7 +40,7 @@ def _today_et() -> str:
 # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): a college slate built inside the app
 # takes ~1 GB and many minutes, and the Cloud app dies for everyone when it runs out of memory. In the app these sports
 # never build: they read the warm job's saved slate (hourly), up to HEAVY_FRESH_S old, or get an empty slate.
-HEAVY = ("NCAAF", "NCAAMB")
+HEAVY = ("NCAAF", "NCAAMB", "NFL")      # Nov 21: NFL measured 2.1 GB on a Sunday slate
 HEAVY_FRESH_S = 6 * 3600
 
 
