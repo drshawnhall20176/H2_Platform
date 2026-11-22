@@ -39,6 +39,8 @@ def test_team_names_and_event_match():
     assert LC.same_team("Miami", "Miami Hurricanes")
     assert LC.same_team("San José St Spartans", "San Jose State Spartans")
     assert not LC.same_team("Miami", "Virginia Tech Hokies")
+    assert LC.same_team("MIN", "Minnesota Vikings") and LC.same_team("SF", "San Francisco 49ers")
+    assert not LC.same_team("LA", "Las Vegas Raiders") and LC.same_team("LA", "Los Angeles Rams")
     kick = datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc)
     assert LC.match_event("Virginia Tech @ Miami", [EV], kick)["id"] == "e9"
     assert LC.match_event("Virginia Tech @ Miami", [EV], kick + timedelta(hours=6)) is None    # another day's game
