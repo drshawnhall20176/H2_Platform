@@ -132,6 +132,72 @@ def check_ledgers(day: str, load: Optional[Callable] = None) -> List[Dict]:
     return out
 
 
+# Nov 22 (owner: "this seems to be a lingering problem that is costing me money and credibility"): the college model
+# rated home teams 7.2 points too high in close games for days before anyone noticed. Every game model is now checked
+# each morning: league -> (a "close game" is within this many points on the spread, the bias that raises a warning).
+BIAS_LEAGUES = {"NCAAMB": (10.0, 3.0), "NBA": (10.0, 3.0), "NFL": (7.0, 3.0), "NCAAF": (7.0, 3.5), "NHL": (1.5, 0.5)}
+BIAS_DAYS = 14
+BIAS_MIN_N = 30
+LEAN_MIN_N = 12
+LEAN_SHARE = 0.8
+
+
+def check_bias(today: str, load: Optional[Callable] = None, now: Optional[datetime] = None) -> List[Dict]:
+    """Each game model's home-side bias: over the last BIAS_DAYS days' graded close games, (model margin - actual
+    margin) averaging more than the league's limit AND clearly not noise (2.5+ standard errors); or today's slate
+    leaning one way on LEAN_SHARE+ of its games (28 of 35 home leans on Nov 22 was the first sign)."""
+    if load is None:
+        import model_store as MS
+        load = MS.load_game_picks
+    now = now or datetime.now(timezone.utc)
+    since = (date.fromisoformat(today) - timedelta(days=BIAS_DAYS)).isoformat()
+    out = []
+    for lg, (close, limit) in BIAS_LEAGUES.items():
+        try:
+            recs = load(lg)
+        except Exception:                                       # noqa: BLE001
+            continue
+        errs = []
+        for r in recs or []:
+            if str(r.get("kickoff") or "")[:10] < since or r.get("final_home") is None or r.get("model_margin") is None:
+                continue
+            ref = r.get("home_spread")
+            size = abs(float(ref)) if ref is not None else abs(float(r["model_margin"]))
+            if size <= close:
+                errs.append(float(r["model_margin"]) - (float(r["final_home"]) - float(r["final_away"])))
+        if len(errs) >= BIAS_MIN_N:
+            m = sum(errs) / len(errs)
+            sd = (sum((e - m) ** 2 for e in errs) / (len(errs) - 1)) ** 0.5
+            se = sd / len(errs) ** 0.5 if sd else None
+            if abs(m) > limit and se and abs(m) / se >= 2.5:
+                side = "home" if m > 0 else "road"
+                out.append(_issue("model bias", "warn",
+                                  f"{lg} game model rates {side} teams {abs(m):.1f} too high in close games "
+                                  f"(last {BIAS_DAYS} days, {len(errs)} games, ±{se:.1f}) -- check its home court and "
+                                  "neutral sites before trusting its leans"))
+        upcoming = []
+        for r in recs or []:
+            try:
+                k = datetime.fromisoformat(str(r.get("kickoff")).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if k.tzinfo is None:
+                k = k.replace(tzinfo=timezone.utc)
+            if now < k <= now + timedelta(hours=36) and r.get("home_spread") is not None and r.get("model_margin") is not None:
+                e = float(r["model_margin"]) + float(r["home_spread"])
+                if e:
+                    upcoming.append(e > 0)
+        if len(upcoming) >= LEAN_MIN_N:
+            share = sum(upcoming) / len(upcoming)
+            if share >= LEAN_SHARE or share <= 1 - LEAN_SHARE:
+                side = "home" if share >= LEAN_SHARE else "road"
+                n_side = sum(upcoming) if side == "home" else len(upcoming) - sum(upcoming)
+                out.append(_issue("model bias", "warn",
+                                  f"{lg} game model leans {side} on {n_side} of {len(upcoming)} upcoming games -- a "
+                                  "one-sided slate is the first sign of a home-court problem"))
+    return out
+
+
 def check_rules() -> List[Dict]:
     import rules as RU
     return [_issue("rules", "error", d) for d in RU.drift()]
@@ -148,7 +214,8 @@ def run(today: Optional[str] = None, bets=None, results=None, ledger_load=None, 
     for name, fn in (("settlement", lambda: check_settlement(bets, today, results)),
                      ("closes", lambda: check_closes(bets, today)),
                      ("ledger", lambda: check_ledgers(yest, ledger_load)),
-                     ("rules", check_rules)):
+                     ("rules", check_rules),
+                     ("model bias", lambda: check_bias(today))):
         try:
             issues += fn()
         except Exception as exc:                                # noqa: BLE001 -- one check failing never hides the rest
