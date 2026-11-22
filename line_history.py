@@ -202,7 +202,9 @@ def _pg_series(sport, player, market, side=None, book=None) -> List[Dict]:
 
 def _pg_index(sport, since=None) -> List[Dict]:
     from psycopg2.extras import RealDictCursor
-    q, params = "SELECT * FROM line_snapshots WHERE sport=%s", [sport]
+    # Nov 21: the columns readers use, not every column (the page audit's biggest memory line)
+    q, params = ("SELECT captured_at, game, player, market, side, line, price, book FROM line_snapshots "
+                 "WHERE sport=%s"), [sport]
     if since:
         q += " AND captured_at>=%s"
         params.append(since)

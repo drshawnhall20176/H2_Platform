@@ -211,13 +211,12 @@ def _pg_conn():
 def _pg_replace_day(slate_date, sport, rows) -> int:
     with _pg_conn() as con, con.cursor() as cur:
         cur.execute("DELETE FROM graded_plays WHERE slate_date=%s AND sport=%s", (slate_date, sport))
-        n = 0
-        ph = ",".join(["%s"] * len(_FIELDS))
-        for fields in rows:
-            vals = [fields.get(c) for c in _FIELDS]
-            cur.execute(f"INSERT INTO graded_plays ({','.join(_FIELDS)}) VALUES ({ph})", vals)
-            n += 1
-        return n
+        # Nov 21 (page audit: Retrospective spent 2+ minutes here, one round trip per row): one batched insert
+        from psycopg2.extras import execute_values
+        vals = [[fields.get(c) for c in _FIELDS] for fields in rows]
+        if vals:
+            execute_values(cur, f"INSERT INTO graded_plays ({','.join(_FIELDS)}) VALUES %s", vals, page_size=1000)
+        return len(vals)
 
 
 def _pg_fetch(sport, market, since_date) -> List[Dict]:
