@@ -760,7 +760,7 @@ def simulate_ncaaf_game(home_scoring: Optional[Dict[str, float]],
                         away_allowed: Optional[Dict[str, float]],
                         league_avg_scoring: Optional[float],
                         n_sims: int = DEFAULT_GAME_SIMS,
-                        seed: Optional[int] = None) -> Optional[Dict]:
+                        seed: Optional[int] = None, hfa: float = 0.0) -> Optional[Dict]:
     """Monte Carlo game simulation: moneyline win probability, projected spread, projected total.
     Uses schedule-based scoring data ONLY -- proven, Week-1 ready, no drives cache dependency.
 
@@ -775,6 +775,9 @@ def simulate_ncaaf_game(home_scoring: Optional[Dict[str, float]],
 
     home_proj = _blend_score(home_scoring["recent_avg"], away_allowed["recent_avg"], league_avg_scoring)
     away_proj = _blend_score(away_scoring["recent_avg"], home_allowed["recent_avg"], league_avg_scoring)
+    # Nov 22 (owner): home field, split across the two scores -- hfa is the full edge in points of margin (the
+    # Game Lab passes the ratings model's own backtested 2.5, or 0 at a neutral site)
+    home_proj, away_proj = home_proj + hfa / 2.0, away_proj - hfa / 2.0
 
     # Std proxy: difference between recent and season averages. Floor at 7.0 pts -- the minimum
     # meaningful variance for a full football game (a single scoring play swings 3-8 points and

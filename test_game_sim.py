@@ -86,3 +86,15 @@ def test_hockey_finishes_look_like_real_nhl_games():
     s = GS.simulate("NHL", 0.0, 6.0, key="even", n=100000)
     assert 0.21 < s["overtime"] < 0.26
     assert 0.36 < s["blowout"] < 0.44 and 0.38 < s["close"] < 0.46
+
+
+def test_football_scoring_rate_sims_give_the_home_team_its_edge():
+    """Nov 22 (owner): the football Game Labs' scoring-rate simulation had no home field."""
+    import ncaaf_projections as NP
+    import nfl_projections as FP
+    even = {"recent_avg": 24.0, "season_avg": 24.0}
+    for sim, hfa in ((NP.simulate_ncaaf_game, 2.5), (FP.simulate_nfl_game, 1.7)):
+        flat = sim(even, even, even, even, 24.0, seed=1)
+        home = sim(even, even, even, even, 24.0, seed=1, hfa=hfa)
+        assert abs(flat["proj_spread"]) < 0.05 and abs(home["proj_spread"] - hfa) < 0.05
+        assert abs(home["proj_total"] - flat["proj_total"]) < 0.05 and home["home_win_prob"] > flat["home_win_prob"]

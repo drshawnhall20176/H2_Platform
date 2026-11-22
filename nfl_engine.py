@@ -180,6 +180,8 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
                 # expected margin (positive = home favoured), the closing total, and the roof type. The Position
                 # Matchups game log filters on them.
                 "spread_line": r.get("spread_line"), "total_line": r.get("total_line"), "roof": r.get("roof"),
+                # Nov 22: "Home" or "Neutral" (international games) -- the Game Lab gives no home field at a neutral site
+                "location": r.get("location"),
             })
         except (KeyError, ValueError):
             continue
