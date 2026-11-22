@@ -44,10 +44,8 @@ at.run()
 stop.append(1)
 print(f"PP DONE {sp} {page} peak={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e3:.0f}MB {time.time()-t:.0f}s exc={[str(e.value)[:150] for e in at.exception]}", flush=True)
 '''
-for page, sp in (("views/39_Analyst_Desk.py", "NBA"), ("views/39_Analyst_Desk.py", "NCAAMB"),
-                 ("views/31_NCAAF_Player_Lines.py", "NCAAF"), ("views/16_#L01f50d_Retrospective.py", "NCAAF"),
-                 ("views/16_#L01f50d_Retrospective.py", "NBA"), ("views/61_Pickem_Board.py", "NCAAF"),
-                 ("views/61_Pickem_Board.py", "NFL")):
+for page, sp in (("views/39_Analyst_Desk.py", "NCAAMB"), ("views/31_NCAAF_Player_Lines.py", "NCAAF"),
+                 ("views/16_#L01f50d_Retrospective.py", "NCAAF"), ("views/10_Hot_Hand_Engine.py", "NCAAMB")):
     p = subprocess.run([sys.executable, "-c", CHILD, page, sp], capture_output=True, text=True, timeout=600)
     for l in p.stdout.splitlines():
         if l.startswith("PP"): print(l)
