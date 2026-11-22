@@ -243,7 +243,25 @@ def slate(sport: str, date_str: str, fetch: Callable = _http) -> list:
     hit = _CACHE.get(key)
     if hit and time.time() - hit[0] < hit[2]:
         return hit[1]
+    # Nov 21 (page audit: NCAA Football Best Bets waited 2+ minutes on 60 games' geocodes and forecasts): the warm job
+    # saves the day's weather; the app reads that copy (3 hours) before looking anything up itself
+    import slate_store as _SS
+    try:
+        _blob = _SS.load(f"WX:{sport}", date_str, max_age=3 * 3600) if not _SS._off() else None
+        if _blob is not None:
+            out = _SS.decode(_blob)
+            _CACHE[key] = (time.time(), out, TTL)
+            return out
+    except Exception:                                           # noqa: BLE001
+        pass
+    if sport == "NCAAF" and _SS._in_app() and not _SS._off():
+        return []                                               # 60+ games: never looked up inside the app
     out = go() or []
+    if out and not _SS._off():
+        try:
+            _SS.save(f"WX:{sport}", date_str, out)
+        except Exception:                                       # noqa: BLE001
+            pass
     if out:                                                     # a slate missing an outdoor game's weather retries soon
         complete = all(g["indoor"] or g.get("wind") is not None for g in out)
         _CACHE[key] = (time.time(), out, TTL if complete else 300)

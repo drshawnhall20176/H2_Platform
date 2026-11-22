@@ -71,6 +71,12 @@ def boards(day: str) -> None:
             print(f"{key} board: {len(plays)} plays, {len(saved)} on Today's best, {time.time() - t0:.0f}s")
         except Exception as exc:                                # noqa: BLE001
             print(f"{key} board failed ({type(exc).__name__}: {exc})")
+    for _wsp in ("NFL", "NCAAF"):                               # Nov 21: football weather, saved for the app
+        try:
+            import football_weather as FW
+            print(f"{_wsp} weather: {len(FW.slate(_wsp, day))} games")
+        except Exception as exc:                                # noqa: BLE001
+            print(f"{_wsp} weather failed ({type(exc).__name__}: {exc})")
     try:                                                        # Nov 21: the game-line 💰 as shown (pick_ledger.py)
         import money_score as MSC
         import pick_ledger as PL
