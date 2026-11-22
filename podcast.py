@@ -184,6 +184,113 @@ TEACHING_SEGMENTS_NHL = [
 ]
 
 
+# Nov 22 (owner: overhaul the Podcast Studio): NBA, college basketball, the NFL and college football all got the WNBA
+# lessons ("she", rotation minutes in a 40-minute game). Each now has its own set, and every set carries the two
+# lessons the record itself teaches: the earned chance, and why the show grades the picks it actually showed.
+_EARNED = {
+    "topic": "Why our chance is lower than the model's (the earned chance)",
+    "beats": [
+        _line("Deezy", "Hold up. The model says 64% on this one and you're tellin' the people 56%? Which is it?"),
+        _line("Dr. Hall", "Both, honestly. 64% is what the model thinks. 56% is what its record says it's earned. We graded "
+                          "every pick it showed — when it said 60-something, those hit closer to the mid-50s."),
+        _line("Deezy", "So you're nerfing your own model on air?"),
+        _line("Dr. Hall", "I'm telling the truth about it. The books' price is the starting point, and the model only gets "
+                          "credit for the part of its disagreement it's actually been right about. As the record grows, "
+                          "that number moves — up or down."),
+        _note("Land it: a number you can trust beats a big number. The earned chance is how much of the model's opinion "
+              "the results have paid for."),
+    ],
+}
+_SHOWN = {
+    "topic": "Why we grade the picks we showed, not the whole board",
+    "beats": [
+        _line("Deezy", "Everybody on the timeline posts their winners. Why do we post our losers too?"),
+        _line("Dr. Hall", "Because every pick we showed gets saved before the game and graded after — wins and losses, at "
+                          "the price we said. Nothing added after tip, nothing deleted after it loses."),
+        _line("Deezy", "That sounds like a great way to look bad on a cold night."),
+        _line("Dr. Hall", "On a cold night, sure. But it's the only kind of record worth anything. If you can't see the "
+                          "losses, you can't trust the wins. And we check one more thing: did we get a better price than "
+                          "where the line closed? That shows up long before the money does."),
+        _note("Land it: a record you can't edit is the whole brand. Point people to the running record every show."),
+    ],
+}
+_PRICE = {
+    "topic": "The price matters more than the pick",
+    "beats": [
+        _line("Deezy", "I like the Over. Why do I care if it's -110 or -140? Over is over."),
+        _line("Dr. Hall", "Because the price is the chance you need to be right. At -110 you need about 52%. At -140 you "
+                          "need 58%. Same pick, totally different bet."),
+        _line("Deezy", "So a pick can be good at one book and bad at another?"),
+        _line("Dr. Hall", "Exactly. That's why every pick we show has a price and a book on it. If you can't get that "
+                          "number or better, the edge we're talking about isn't there for you."),
+        _note("Land it: shop the number. A great read at a bad price is a bad bet."),
+    ],
+}
+TEACHING_SEGMENTS_BASKETBALL = [
+    {
+        "topic": "What CLV is (why we 'win' even when the bet loses)",
+        "beats": [
+            _line("Deezy", "Dad, you keep sayin' we 'beat the number' on a bet that LOST. That makes zero sense. We lost. L. Loss."),
+            _line("Dr. Hall", "Right, but here's the thing — closing-line value. We took a rebounds prop in the morning at one number. By tip-off the whole market moved past it. We got a better price than everyone who bet it later."),
+            _line("Deezy", "Okay but the board didn't come off his way. We still lost the money."),
+            _line("Dr. Hall", "One night, yeah. But if we consistently get better numbers than where the line closes, the math says we win long-term — even with cold nights mixed in. CLV is the proof we're on the right side."),
+            _note("Land it: results are one night of luck; beating the close, over and over, is skill. That's why we track CLV, not just W/L."),
+        ],
+    },
+    _EARNED,
+    {
+        "topic": "Minutes, rest and blowout risk",
+        "beats": [
+            _line("Deezy", "Why'd we skip him? Dude's a walking bucket when he plays."),
+            _line("Dr. Hall", "'When he plays' is doing a lot of work. Second night of a back-to-back, a minutes limit, a game that's over by the third quarter — any of those and the starters sit. A points line is really a minutes line first."),
+            _line("Deezy", "So no minutes, no bet?"),
+            _line("Dr. Hall", "Basically. Steady minutes are worth more to the model than one huge game off the bench. Check the injury report and the rest news before you lock anything in."),
+            _note("Land it: role and minutes come before talent in a prop. A blowout is an Under's best friend."),
+        ],
+    },
+    TEACHING_SEGMENTS_WNBA[1],   # parlays
+    _PRICE,
+    _SHOWN,
+    TEACHING_SEGMENTS_WNBA[4],   # variance
+]
+TEACHING_SEGMENTS_FOOTBALL = [
+    {
+        "topic": "What CLV is (why we 'win' even when the bet loses)",
+        "beats": [
+            _line("Deezy", "Dad, you keep sayin' we 'beat the number' on a bet that LOST. That makes zero sense. We lost. L. Loss."),
+            _line("Dr. Hall", "Right, but here's the thing — closing-line value. We took a receptions prop early in the week at one number. By kickoff the whole market moved past it. We got a better price than everyone who bet it later."),
+            _line("Deezy", "Okay but he dropped the ball on third down. We still lost the money."),
+            _line("Dr. Hall", "One game, yeah. But if we consistently get better numbers than where the line closes, the math says we win long-term. In football that matters even more — one game a week means the results take forever to prove anything. CLV shows up first."),
+            _note("Land it: one game is luck; beating the close, week after week, is skill. That's why we track CLV, not just W/L."),
+        ],
+    },
+    _EARNED,
+    {
+        "topic": "Snaps and targets before talent",
+        "beats": [
+            _line("Deezy", "Why we on some WR3 nobody's heard of instead of the star?"),
+            _line("Dr. Hall", "Because a receiving line is really a targets line. If the WR3 is on the field every snap and the star is banged up or getting shadowed, the volume goes somewhere. We follow the snaps and the targets, not the name."),
+            _line("Deezy", "So the boring guy with the job beats the famous guy with the highlights?"),
+            _line("Dr. Hall", "More often than you'd think, at the price. The books price the name. We price the role."),
+            _note("Land it: volume — snaps, routes, targets, carries — is the foundation of every football prop."),
+        ],
+    },
+    {
+        "topic": "Game script and weather",
+        "beats": [
+            _line("Deezy", "The QB's been cookin'. Over on passing yards, easy."),
+            _line("Dr. Hall", "Unless his team is up 21 at halftime and runs the ball for thirty minutes. Or it's 25 mph wind. How the game is likely to go changes every number on the board."),
+            _line("Deezy", "So we gotta predict the whole game to bet one guy?"),
+            _line("Dr. Hall", "We gotta respect it. The spread and the total tell you what the market expects. A big favorite leans run late; a shootout total leans throw. Wind and rain hit the passing game and the kickers first."),
+            _note("Land it: check the spread, the total and the forecast before any yardage prop."),
+        ],
+    },
+    _PRICE,
+    _SHOWN,
+    TEACHING_SEGMENTS_WNBA[4],   # variance
+]
+
+
 def rotating_teaching(date_str: str, sport: str = "MLB") -> Dict:
     """Deterministically rotate the teaching topic by date, so each show gets a fresh one."""
     try:
@@ -194,6 +301,10 @@ def rotating_teaching(date_str: str, sport: str = "MLB") -> Dict:
         segments = TEACHING_SEGMENTS
     elif sport == "NHL":
         segments = TEACHING_SEGMENTS_NHL
+    elif sport in ("NFL", "NCAAF"):
+        segments = TEACHING_SEGMENTS_FOOTBALL
+    elif sport in ("NBA", "NCAAMB"):
+        segments = TEACHING_SEGMENTS_BASKETBALL
     else:
         segments = TEACHING_SEGMENTS_WNBA
     return segments[doy % len(segments)]
@@ -240,9 +351,13 @@ def selection_beats(p: Dict) -> List[Dict]:
     else:
         price_beat = (f"Fair price is around {fair}. Model has it ~{prob}% — a lean we like, not a "
                       f"lock. We only fire if the live number beats {fair}.")
+    if p.get("Earned") is not None:                    # Nov 22: the chance quoted is the earned one (show_picks.py)
+        price_beat = price_beat.replace("Model has it", "Our earned chance has it")
+    flag = "💰 " if p.get("Money") else "🔒 " if p.get("Lock") else ""
+    edge = (f"[earned edge {p['EarnedEdge'] * 100:+.1f} pts]" if p.get("EarnedEdge") is not None
+            else f"[conviction {p.get('Conviction', 0):.1f}x]")
     return [
-        _note(f"SELECTION: {p['Player']} ({p['Team']}) — {p['Market']} {p['Side']} {p['Line']:g}{opp}  "
-              f"[conviction {p.get('Conviction', 0):.1f}x]"),
+        _note(f"SELECTION: {flag}{p['Player']} ({p['Team']}) — {p['Market']} {p['Side']} {p['Line']:g}{opp}  {edge}"),
         _line("Dr. Hall", f"Here's the case: {p.get('Why', 'the model likes the matchup')}."),
         _line("Deezy", push),
         _line("Dr. Hall", price_beat),
@@ -253,7 +368,8 @@ def selection_beats(p: Dict) -> List[Dict]:
 # --- full script assembly --------------------------------------------------
 def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
                     retro: Optional[Dict], caught_homers: Optional[List[Dict]],
-                    sport: str = "MLB", slate_note: str = "") -> List[Dict]:
+                    sport: str = "MLB", slate_note: str = "", ledger: Optional[Dict] = None,
+                    running: Optional[Dict] = None) -> List[Dict]:
     """Return ordered sections: {title, time, beats[]}. Pure — no Streamlit, fully testable.
 
     `sport` swaps the handful of baseball-flavored phrases (park/weather, "went deep", the
@@ -277,7 +393,22 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
         _fill("⚡ Who let us down? (the team/player that went ice cold)"),
         _fill("⚡ Any robbery? (a great play, a blown call, something that made you yell)"),
     ]
-    if retro and retro.get("graded"):
+    if ledger:                                          # Nov 22: the picks we SHOWED, graded (show_picks.py)
+        import show_picks as SP
+        moved = ledger["beat"] + ledger["lost"]
+        review.append(_note("THE RECORD, HONESTLY: " + SP.record_line(ledger, "the picks we showed yesterday")
+                            + (f" Since {running['since']}: {running['hits']}–{running['misses']}, "
+                               f"{running['units']:+.2f}u." if running else "")))
+        if ledger["wins"]:
+            names = ", ".join(SP.pick_name(r) for r in ledger["wins"][:3])
+            review.append(_line("Dr. Hall", f"Cashed: {names}. Saved before the game, graded at the price we said."))
+        if ledger["losses"]:
+            names = ", ".join(SP.pick_name(r) for r in ledger["losses"][:3])
+            review.append(_line("Deezy", f"And we gotta own these: {names}. Keep it a buck."))
+        if moved:
+            review.append(_line("Dr. Hall", f"And the number that matters most early: we beat the closing line on "
+                                            f"{ledger['beat']} of the {moved} prices that moved."))
+    elif retro and retro.get("graded"):
         hr = retro.get("hit_rate")
         review.append(_note(f"THE BOARD, HONESTLY: of the plays we'd have flagged, "
                             f"{retro['hits']}/{retro['graded']} hit"
@@ -327,8 +458,9 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
 
     # 3) Top selections (the meat)
     top_beats = [_line("Deezy", "Aight, the people came for the picks. What we likin' tonight?"),
-                 _note("These are our top conviction leans across markets. Work each as a beat: "
-                       "Dr. Hall makes the case, Deezy gut-checks it, land the reality check.")]
+                 _note("These come from the platform's own list — the same picks on the Command Center, ranked by "
+                       "earned edge (💰 = a Money pick). Work each as a beat: Dr. Hall makes the case, Deezy "
+                       "gut-checks it, land the reality check.")]
     for p in headliners:
         top_beats += selection_beats(p)
     if not headliners:
@@ -367,6 +499,10 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
         _note("Reinforce: we track every play honestly — CLV and results — and we own the misses on air. "
               "That's the brand."),
     ]
+    if running:
+        plan.insert(2, _line("Dr. Hall", f"And the running tab, since {running['since']}: {running['hits']}–"
+                                         f"{running['misses']}, {running['units']:+.2f}u at the prices we showed. "
+                                         "Every pick, wins and losses."))
     S.append({"title": "🧭 Game Plan & Honest Reality Check", "time": "52:00–58:00", "beats": plan})
 
     # 7) Sign-off + banter button
