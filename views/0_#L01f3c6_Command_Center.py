@@ -178,6 +178,77 @@ def _et_clock(iso):
         return None
 
 
+def _strongest_section(keys, picks, only=None):
+    """Nov 20: the strongest list (today: tick to log; past days: graded). Nov 22 (owner: "when I click an individual
+    sport nothing shows up in this space"): one sport's part of the same list (only=key) -- its up-to-5 picks on the
+    every-sport list, the same picks the record grades."""
+    sfx = f"_{only}" if only else ""
+    with st.container(border=True):
+        C.section_header("⭐", "The strongest picks, every sport" if only is None
+                         else f"The strongest picks — {sports.get(only).label.split(' — ')[0]}")
+        _d1, _d2 = st.columns([1, 3])
+        _now_d = datetime.strptime(today, "%Y-%m-%d").date()
+        sday = _d1.date_input("Date", _now_d, max_value=_now_d, key=f"cc_all_strong_date{sfx}", format="MM/DD/YYYY")
+        spast = sday < _now_d
+        sdate = sday.strftime("%Y-%m-%d")
+        spicks = _strong_past(sdate, tuple(keys)) if spast else picks
+        if only is not None:                                    # Nov 22: one sport's own list
+            spicks = [r for r in spicks if (r.get("sport") or r.get("league")) == only]
+        _ledger = spast and bool(spicks) and spicks[0].get("_ledger")
+        import pick_ledger as _PL
+        top = (sorted(spicks, key=lambda r: -(r.get("earned_edge") or r.get("chance") or 0)) if _ledger
+               else _PL.strongest(spicks))                     # Nov 21: ranked by earned edge
+        top.sort(key=lambda r: CT._tkey(r.get("time"), C._kick_dt))                # earliest game first
+        if top and spast:
+            C.hit_miss_breakdown(top, "result", "chance", key=f"cc_all_strong_hm{sfx}",
+                                 title="How that day's strongest picks did")
+            top = C.show_filter(top, "result", key=f"cc_all_strong_show{sfx}")
+        if top:
+            _sdf = pd.DataFrame([{"Time": r.get("time") or "", "Sport": r.get("sport"),
+                                  "Pick": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
+                                          + (r.get("pick") or ""),
+                                  "Chance": r.get("chance"),
+                                  "Edge": r.get("earned_edge") if r.get("earned_edge") is not None
+                                  else _PL.earned_edge(r),
+                                  "Model said": r.get("raw_chance"),
+                                  "Best price": (f"{int(float(r['price'])):+d} · {r.get('book') or ''}"
+                                                 if r.get("price") is not None and not r.get("pickem_only")
+                                                 else "pick'em line, no book price"),
+                                  "Game": r.get("game") or "",
+                                  **({"First shown": _et_clock(r.get("first_seen")) or ""} if _ledger else {}),
+                                  **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {}),
+                                  **({"vs close": {"beat": "✅ beat", "lost": "❌ lost", "same": "➖ same"}.get(
+                                      r.get("clv_mark"), "—")} if _ledger else {})}
+                                 for r in top])
+            _cfg = {"Chance": st.column_config.NumberColumn(format="percent", help="Earned chance: the model's chance "
+                                                            "corrected to its track record."),
+                    "Edge": st.column_config.NumberColumn(format="percent", help="Earned chance less what the price "
+                                                          "needs to break even (a pick'em line: about 54%)."),
+                    "Model said": st.column_config.NumberColumn(format="percent", help="The model's own chance, "
+                                                                "before the correction.")}
+            _sdf = _sdf.drop(columns=[c for c in ("Edge", "Model said") if c in _sdf and _sdf[c].isna().all()])
+            if spast:
+                st.dataframe(_sdf, hide_index=True, width="stretch", column_config=_cfg)
+            else:
+                st.caption("☑️ Tick rows to log them to the Bet Log — as singles, a parlay, or both.")
+                _sel = LU.picked(top, LU.selectable(_sdf, f"cc_all_strong_sel{sfx}", hide_index=True, width="stretch",
+                                                    column_config=_cfg))
+                LU.panel(_sel, f"cc_all_strong_log{sfx}", sdate)
+            if _ledger:
+                st.caption(f"Every pick that was on this list before its game started ({len(top)} — the list changes "
+                           "through the day as boards rebuild), at the line and price it showed the first time, "
+                           "graded on final box scores.")
+            st.caption("The day's best picks across every sport, earliest game first: up to 15, ranked by **Edge** — the "
+                       "**earned** chance (the model's chance corrected to its track record) less what the price needs. "
+                       "Only picks with a positive edge are listed, at most 5 from one sport. Before Nov 21: the 15 likeliest by the model's chance. "
+                       "**Pick'em line, no book price** = only a pick'em app posts it (most college props): no "
+                       "sportsbook price checks the model there, and those chances have run optimistic. Pick an "
+                       "earlier date to see how a day's list did.")
+        else:
+            st.info("No boards saved for this date." if spast else
+                    "No boards saved yet today. They save as each sport's board is built.")
+
+
 def _all_sports_view():
     try:
         owner = st.secrets.get("AUDIENCE", "owner") == "owner"
@@ -229,67 +300,7 @@ def _all_sports_view():
                "board was last built; pick the sport in the bar above for its live desk, which also refreshes this.")
     # Nov 20 (owner: "add a tick mark to log right from this page ... see hit miss of prior days' selections ... how
     # well do these actually perform"): full width, its own date, tick-to-log today, results + pies on past days
-    with st.container(border=True):
-        C.section_header("⭐", "The strongest picks, every sport")
-        _d1, _d2 = st.columns([1, 3])
-        _now_d = datetime.strptime(today, "%Y-%m-%d").date()
-        sday = _d1.date_input("Date", _now_d, max_value=_now_d, key="cc_all_strong_date", format="MM/DD/YYYY")
-        spast = sday < _now_d
-        sdate = sday.strftime("%Y-%m-%d")
-        spicks = _strong_past(sdate, tuple(keys)) if spast else picks
-        _ledger = spast and bool(spicks) and spicks[0].get("_ledger")
-        import pick_ledger as _PL
-        top = (sorted(spicks, key=lambda r: -(r.get("earned_edge") or r.get("chance") or 0)) if _ledger
-               else _PL.strongest(spicks))                     # Nov 21: ranked by earned edge
-        top.sort(key=lambda r: CT._tkey(r.get("time"), C._kick_dt))                # earliest game first
-        if top and spast:
-            C.hit_miss_breakdown(top, "result", "chance", key="cc_all_strong_hm",
-                                 title="How that day's strongest picks did")
-            top = C.show_filter(top, "result", key="cc_all_strong_show")
-        if top:
-            _sdf = pd.DataFrame([{"Time": r.get("time") or "", "Sport": r.get("sport"),
-                                  "Pick": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
-                                          + (r.get("pick") or ""),
-                                  "Chance": r.get("chance"),
-                                  "Edge": r.get("earned_edge") if r.get("earned_edge") is not None
-                                  else _PL.earned_edge(r),
-                                  "Model said": r.get("raw_chance"),
-                                  "Best price": (f"{int(float(r['price'])):+d} · {r.get('book') or ''}"
-                                                 if r.get("price") is not None and not r.get("pickem_only")
-                                                 else "pick'em line, no book price"),
-                                  "Game": r.get("game") or "",
-                                  **({"First shown": _et_clock(r.get("first_seen")) or ""} if _ledger else {}),
-                                  **({"Result": TB.RESULT_ICON.get(r.get("result"), "—")} if spast else {}),
-                                  **({"vs close": {"beat": "✅ beat", "lost": "❌ lost", "same": "➖ same"}.get(
-                                      r.get("clv_mark"), "—")} if _ledger else {})}
-                                 for r in top])
-            _cfg = {"Chance": st.column_config.NumberColumn(format="percent", help="Earned chance: the model's chance "
-                                                            "corrected to its track record."),
-                    "Edge": st.column_config.NumberColumn(format="percent", help="Earned chance less what the price "
-                                                          "needs to break even (a pick'em line: about 54%)."),
-                    "Model said": st.column_config.NumberColumn(format="percent", help="The model's own chance, "
-                                                                "before the correction.")}
-            _sdf = _sdf.drop(columns=[c for c in ("Edge", "Model said") if c in _sdf and _sdf[c].isna().all()])
-            if spast:
-                st.dataframe(_sdf, hide_index=True, width="stretch", column_config=_cfg)
-            else:
-                st.caption("☑️ Tick rows to log them to the Bet Log — as singles, a parlay, or both.")
-                _sel = LU.picked(top, LU.selectable(_sdf, "cc_all_strong_sel", hide_index=True, width="stretch",
-                                                    column_config=_cfg))
-                LU.panel(_sel, "cc_all_strong_log", sdate)
-            if _ledger:
-                st.caption(f"Every pick that was on this list before its game started ({len(top)} — the list changes "
-                           "through the day as boards rebuild), at the line and price it showed the first time, "
-                           "graded on final box scores.")
-            st.caption("The day's best picks across every sport, earliest game first: up to 15, ranked by **Edge** — the "
-                       "**earned** chance (the model's chance corrected to its track record) less what the price needs. "
-                       "Only picks with a positive edge are listed, at most 5 from one sport. Before Nov 21: the 15 likeliest by the model's chance. "
-                       "**Pick'em line, no book price** = only a pick'em app posts it (most college props): no "
-                       "sportsbook price checks the model there, and those chances have run optimistic. Pick an "
-                       "earlier date to see how a day's list did.")
-        else:
-            st.info("No boards saved for this date." if spast else
-                    "No boards saved yet today. They save as each sport's board is built.")
+    _strongest_section(keys, picks)
     with st.container():
         with st.container(border=True):
             C.section_header("🧾", "The proof, every sport")
@@ -450,6 +461,12 @@ if _show_game_devig:
                     + ("first pitch." if _active.key == "MLB" else "game time."))
 
 st.divider()
+# Nov 22 (owner): the strongest list for this sport, as on All sports -- from the boards already saved (database reads)
+try:
+    _s_saved, _s_picks, _ = _all_sports_saved(today, (_active.key,))
+except Exception:                                               # noqa: BLE001
+    _s_picks = []
+_strongest_section((_active.key,), _s_picks, only=_active.key)
 left, right = st.columns([3, 2])
  
 # ---------- tonight's top plays ----------
