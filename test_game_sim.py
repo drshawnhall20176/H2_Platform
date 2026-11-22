@@ -67,6 +67,18 @@ def test_game_lab_shows_the_two_sections_for_a_chosen_game(monkeypatch):
     assert "Total likely range" in m and "Decided by 15+ points" in m and "Decided by 5 or fewer" in m
     assert [x.value for x in at.metric if x.label == "Recent avg scored"] == ["104.0", "114.0"]   # away, then home
     assert any(s.label == "Game to simulate" for s in at.selectbox)
+    # Nov 22: the prior-season baseline, like the football labs
+    box = [c for c in at.checkbox if c.label == "📊 Use 2025-26 season baseline"]
+    assert box
+    res[:] = [{"date": f"2026-0{1 + d % 3}-{10 + d:02d}", "home_team": h, "away_team": a,
+               "home_points": 120 if h == "Boston Celtics" else 100, "away_points": 120 if a == "Boston Celtics" else 100}
+              for d in range(12) for h, a in [("Boston Celtics", "New York Knicks") if d % 2 else ("New York Knicks", "Boston Celtics")]]
+    st.cache_data.clear()
+    box[0].check().run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    m = {x.label: x.value for x in at.metric}
+    assert m["Projected spread"].startswith("Boston Celtics -") and m["Projected spread"] != "Boston Celtics -6.0"
+    assert any("Using 2025-26 season data" in i.value for i in at.info)
 
 
 def test_hockey_finishes_look_like_real_nhl_games():
