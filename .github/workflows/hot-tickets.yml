@@ -15,6 +15,14 @@ on:
         description: "Print the post instead of sending it"
         type: boolean
         default: false
+      revise:
+        description: "Post an UPDATED card under today's rules (replaces posted game-line tickets; keeps the record)"
+        type: boolean
+        default: false
+      reason:
+        description: "One line for the update"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -42,5 +50,9 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DRY_RUN: ${{ inputs.dry_run }}
+          REVISE: ${{ inputs.revise }}
+          HOT_REVISE_REASON: ${{ inputs.reason }}
         run: |
-          if [ "$DRY_RUN" = "true" ]; then python -u hot_tickets.py; else python -u hot_tickets.py post; fi
+          if [ "$REVISE" = "true" ]; then
+            if [ "$DRY_RUN" = "true" ]; then python -u hot_tickets.py revise; else python -u hot_tickets.py revise post; fi
+          elif [ "$DRY_RUN" = "true" ]; then python -u hot_tickets.py; else python -u hot_tickets.py post; fi
