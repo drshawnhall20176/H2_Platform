@@ -138,7 +138,7 @@ def check_ledgers(day: str, load: Optional[Callable] = None) -> List[Dict]:
 BIAS_LEAGUES = {"NCAAMB": (10.0, 3.0), "NBA": (10.0, 3.0), "NFL": (7.0, 3.0), "NCAAF": (7.0, 3.5), "NHL": (1.5, 0.5)}
 BIAS_DAYS = 14
 TOTAL_LIMIT = {"NCAAMB": 4.0, "NBA": 4.0, "NFL": 3.5, "NCAAF": 4.0, "NHL": 0.5}
-SLOPE_RANGE = (0.6, 1.6)
+SLOPE_OFF = 0.2           # actual margins 20%+ bigger or smaller than the model's, at 2.5+ standard errors
 SHOWN_DAYS = 14
 SHOWN_MIN_N = 40
 SHOWN_GAP = 0.07
@@ -192,9 +192,13 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
             my = sum(b for _, b in pairs) / len(pairs)
             sxx = sum((a - mx) ** 2 for a, _ in pairs)
             slope = sum((a - mx) * (b - my) for a, b in pairs) / sxx if sxx else None
-            if slope is not None and not (SLOPE_RANGE[0] <= slope <= SLOPE_RANGE[1]):
+            se = None
+            if slope is not None:
+                res = [b - my - slope * (a - mx) for a, b in pairs]
+                se = (sum(e * e for e in res) / (len(pairs) - 2) / sxx) ** 0.5
+            if slope is not None and se and abs(slope - 1) >= SLOPE_OFF and abs(slope - 1) / se >= 2.5:
                 out.append(_issue("model bias", "warn", f"{lg} game model's margins are too "
-                                  f"{'extreme' if slope < SLOPE_RANGE[0] else 'timid'}: actual margins run {slope:.2f}x "
+                                  f"{'extreme' if slope < 1 else 'timid'}: actual margins run {slope:.2f}x "
                                   f"the model's (last {BIAS_DAYS} days, {len(pairs)} games; 1.00 = the right size)"))
         if len(errs) >= BIAS_MIN_N:
             m = sum(errs) / len(errs)
