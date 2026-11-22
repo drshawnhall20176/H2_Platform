@@ -69,3 +69,19 @@ def test_a_selection_beat_names_the_money_flag_and_earned_edge():
     beats = PC.selection_beats(p)
     assert "💰 A" in beats[0]["text"] and "earned edge +4.0 pts" in beats[0]["text"]
     assert any("earned chance" in b["text"] for b in beats)
+
+
+def test_a_board_ev_without_a_live_price_is_not_called_live_value():
+    import podcast as PC
+    p = {"Player": "A", "Team": "BOS", "Market": "Points", "Side": "Over", "Line": 20.5, "ModelProb": 0.56,
+         "EV": 0.047, "RealPrice": -110, "PriceSource": "book", "Why": "w"}
+    text = " ".join(b["text"] for b in PC.selection_beats(p))
+    assert "Live price" not in text and "-110" in text
+
+
+def test_no_picks_yesterday_still_reads_the_running_record():
+    import podcast as PC
+    running = {"hits": 4, "misses": 3, "units": 0.5, "since": "2026-11-21", "beat": 0, "lost": 0}
+    text = PC.script_to_text("2026-11-22", PC.assemble_script("2026-11-22", [], [], None, None, sport="NFL",
+                                                              running=running))
+    assert "no NFL picks were shown yesterday" in text and "4–3" in text and "pick-six" in text

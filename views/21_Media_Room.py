@@ -101,7 +101,7 @@ def headline(p):
  
  
 def value_text(p):
-    if p.get("EV") is not None:
+    if p.get("EV") is not None and p.get("LivePrice") is not None:    # Nov 22: a live read only with a live price
         live = f"{p['LivePrice']:+.0f}" if p.get("LivePrice") is not None else "—"
         return f"Live value: {p['EV']:+.1f}% at {live} ({p['Book']})." if p.get("Book") else \
                f"Live value: {p['EV']:+.1f}% at {live}."

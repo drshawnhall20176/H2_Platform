@@ -82,7 +82,8 @@ def add(kind: str, sport: str, day: str, new: Sequence[Dict], now: Optional[date
     n = 0
     try:                                                        # Nov 21: the rule version in force (rules.py)
         import rules as _RU
-        rv = _RU.version({"strong": "strong", "money": "money_props", "games": "money_games"}.get(kind, kind), day)
+        rv = _RU.version({"strong": "strong", "money": "money_props", "games": "money_games",
+                          "hot": "hot"}.get(kind, kind), day)
     except Exception:                                           # noqa: BLE001
         rv = None
     for r in new:
@@ -460,12 +461,12 @@ def game_close(r: Dict, full: Dict) -> Optional[Dict]:
     return close_mark("spread", None, r.get("money_line"), r.get("price"), it.get("bet_line"), it.get("price"))
 
 
-def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=None, save=None) -> Dict[str, str]:
+def grade_day(day: str, kinds=("money", "strong", "games", "hot"), sports_=None, get=None, save=None) -> Dict[str, str]:
     """Grades every ledger of `day` and stores the results. {ledger key: "w-l (ungraded u)"}."""
     out: Dict[str, str] = {}
     cache: Dict = {}
     sp_list = list(sports_ or ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB", "WNBA"))
-    targets = [("strong", "ALL")] * ("strong" in kinds)
+    targets = [("strong", "ALL")] * ("strong" in kinds) + [("hot", "ALL")] * ("hot" in kinds)   # Nov 22: Hot Tickets
     targets += [("money", s) for s in sp_list] * ("money" in kinds)
     targets += [("games", s) for s in sp_list] * ("games" in kinds)
     for kind, sp in targets:

@@ -55,6 +55,12 @@ RULES: Dict[str, List[Dict]] = {
         {"v": 2, "from": "2026-11-21", "what": "a flat 1u a 💰 pick, the day scaled to 5u at most -- until ~300 shown "
                                               "💰 picks prove the earned chances and beat the close", "fp": "8aef71dde6"},
     ],
+    "hot": [
+        {"v": 1, "from": "2026-11-22", "what": "🔥 Hot Tickets: the 3 most probable picks by earned chance (one per "
+                                              "game), only where the earned chance clears the price, no worse than "
+                                              "-200; a 2-leg parlay of the top two; weekend Pick of the Week",
+         "fp": "8428f8a3ff"},
+    ],
     "shutoff": [
         {"v": 1, "from": "2026-11-21", "what": "a sport x market loses its 💰 / 🔒 / strongest-list place after 150+ "
                                               "graded picks losing even at the top of their 90% range, or the market "
@@ -65,7 +71,7 @@ RULES: Dict[str, List[Dict]] = {
 
 NAMES = {"money_props": "💰 Money picks (props)", "money_games": "💰 Money picks (game lines)",
          "lock": "🔒 Most probable", "earned": "Earned chance", "strong": "Strongest picks list",
-         "shutoff": "Automatic shut-off", "stakes": "Stake sizing"}
+         "shutoff": "Automatic shut-off", "stakes": "Stake sizing", "hot": "🔥 Hot Tickets"}
 
 
 def params() -> Dict[str, Dict]:
@@ -76,7 +82,9 @@ def params() -> Dict[str, Dict]:
     import props_money as PM
     import shutoff as SO
     import stakes as ST
+    import hot_tickets as HT
     return {
+        "hot": {"max_fav": HT.MAX_FAV, "singles": HT.SINGLES, "legs": HT.LEGS, "potw": HT.POTW},
         "money_props": {"band": list(PE.MONEY_BAND), "min_chance": PE.MONEY_MIN_CHANCE, "min_mev": PE.MONEY_MIN_MEV,
                         "skip": {k: list(v) for k, v in sorted(PE.MONEY_SKIP.items())}},
         "money_games": {"band": list(MSC.BAND), "min_chance": MSC.MIN_CHANCE, "leagues": list(MSC.MONEY_LEAGUES),

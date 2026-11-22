@@ -337,8 +337,8 @@ def selection_beats(p: Dict) -> List[Dict]:
     push = _DEEZY_PUSH.get(p.get("Market"), "Break this one down for me, Doc.").format(prob=prob, inv=inv)
     opp = f" vs {p['Opp']}" if p.get("Opp") else ""
     fair = f"{p['Fair']:+.0f}" if p.get("Fair") is not None else "—"
-    if p.get("EV") is not None:
-        live = f"{p['LivePrice']:+.0f}" if p.get("LivePrice") is not None else "—"
+    if p.get("EV") is not None and p.get("LivePrice") is not None:     # Nov 22: the board's own EV isn't a live read
+        live = f"{p['LivePrice']:+.0f}"
         price_beat = (f"Live price is {live} — that's about {p['EV']:+.1f}% value by our math. "
                       f"Model has it ~{prob}%. That's a real edge at this number, not just a lean.")
     elif p.get("PriceSource") == "book" and p.get("RealPrice") is not None:
@@ -389,6 +389,8 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
              if is_mlb else
              ("⚡ Wild moment of the night? (overtime winner, goalie meltdown, a brawl — whatever you actually saw)")
              if sport == "NHL" else
+             ("⚡ Wild moment of the week? (a walk-off field goal, a pick-six, a meltdown — whatever you actually saw)")
+             if sport in ("NFL", "NCAAF") else
              ("⚡ Wild moment of the night? (buzzer-beater, blowout, meltdown — whatever you actually saw)")),
         _fill("⚡ Who let us down? (the team/player that went ice cold)"),
         _fill("⚡ Any robbery? (a great play, a blown call, something that made you yell)"),
@@ -430,9 +432,12 @@ def assemble_script(date_str: str, headliners: List[Dict], sleepers: List[Dict],
         else:
             review.append(_line("Dr. Hall", "Always keep it a buck. That's variance — one cold night. "
                                             "We'll get into why that doesn't mean the board's broken later."))
+    elif running:                                       # Nov 22: no picks yesterday (a weekly slate) -- the tab
+        review.append(_note(f"THE RECORD, HONESTLY: no {sport} picks were shown yesterday. Since {running['since']}: "
+                            f"{running['hits']}–{running['misses']}, {running['units']:+.2f}u at the prices shown."))
     else:
-        review.append(_fill("📊 THE BOARD: results not pulled yet — recap how last night's flagged plays did "
-                            "(this fills in automatically once yesterday's games are final)."))
+        review.append(_fill("📊 THE RECORD: nothing graded yet — the picks we show are graded the morning after "
+                            "their games, and this fills in automatically."))
     review.append(_note("Reframe for the subs: nights like that are the game, not a broken model. "
                         "Acknowledge the pain, then move on — don't dwell, don't make excuses."))
     S.append({"title": "🎬 Yesterday in Review", "time": "0:00–8:00", "beats": review})
