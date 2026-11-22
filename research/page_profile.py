@@ -40,12 +40,12 @@ at.secrets["AUDIENCE"] = "owner"
 for k in ("ODDS_API_KEY", "DATABASE_URL"):
     if os.environ.get(k): at.secrets[k] = os.environ[k]
 at.session_state["sport"] = sp
+at.session_state["coach_top_sport"] = "🌐 All sports"
 at.run()
 stop.append(1)
 print(f"PP DONE {sp} {page} peak={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1e3:.0f}MB {time.time()-t:.0f}s exc={[str(e.value)[:150] for e in at.exception]}", flush=True)
 '''
-for page, sp in (("views/38_Position_Matchups.py", "NCAAMB"), ("views/58_Players.py", "NCAAMB"),
-                 ("views/50_Game_Script.py", "NCAAMB"), ("views/1_#U2b50_Best_Bets.py", "NCAAF")):
+for page, sp in (("views/51_My_Coach.py", "NBA"),):
     p = subprocess.run([sys.executable, "-c", CHILD, page, sp], capture_output=True, text=True, timeout=600)
     for l in p.stdout.splitlines():
         if l.startswith("PP"): print(l)
