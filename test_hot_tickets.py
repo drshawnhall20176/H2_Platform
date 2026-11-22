@@ -149,3 +149,9 @@ def test_an_update_replaces_game_line_tickets_and_keeps_the_record(store, monkey
     rows = PL.rows("hot", "ALL", DAY)
     assert any(r["pick"] == "Dayton moneyline" for r in rows) and len(rows) == 3       # old kept, one new
     assert HT.revise("again", post=True, webhook=hook, send=send, out=lambda m: None) == 0 and len(sent) == 1
+
+
+def test_a_ticket_names_the_players_team_and_game():
+    r = dict(_r("Alpha Over", "NBA", 0.64, -150, "A @ B"), player="Alpha", team="BOS", need=0.6)
+    line = HT.pick_line(r)
+    assert "**Alpha (BOS) Over**" in line and "· A @ B, 7:00 PM ET" in line

@@ -144,9 +144,15 @@ def _book(r: Dict) -> str:
         return str(r.get("book") or "")
 
 
+def _pick(r: Dict) -> str:
+    """The pick with the player's team (Nov 22, owner: "or the player's team, that will make it easier to find")."""
+    p, who, team = str(r.get("pick") or ""), r.get("player"), r.get("team")
+    return p.replace(str(who), f"{who} ({team})", 1) if who and team and not r.get("money_market") else p
+
+
 def pick_line(r: Dict) -> str:
     bk = _book(r)
-    return (f"{r.get('sport')} · **{r.get('pick')}** ({_price(r.get('price'))}{', ' + bk if bk else ''}){_time(r)}\n"
+    return (f"{r.get('sport')} · **{_pick(r)}** ({_price(r.get('price'))}{', ' + bk if bk else ''}){_time(r)}\n"
             f"   about {float(r['earned']):.0%} to cash by the model's earned chance (the price needs {r['need']:.0%})")
 
 

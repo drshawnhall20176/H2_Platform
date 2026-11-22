@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import re
 import pytest
 import pytz
 from streamlit.testing.v1 import AppTest
@@ -491,7 +492,7 @@ def test_discord_posting_needs_a_webhook_and_posts_the_edited_text_once_asked(de
     btn = [b for b in at.button if b.key == "analyst_post_picks"][0]
     assert btn.disabled and any("add DISCORD_WEBHOOK_URL" in c.value for c in at.caption)
     box = [t for t in at.text_area if t.label.startswith("Today's picks")][0]
-    assert "Gem Guy Over 20.5 Points" in box.value and box.value.endswith(AT.DISCLAIMER)
+    assert re.search(r"Gem Guy( \([A-Z]+\))? Over 20.5 Points", box.value) and box.value.endswith(AT.DISCLAIMER)
 
     sent = []
     monkeypatch.setattr(AT, "post_to_discord", lambda url, text, **k: sent.append((url, text)))
@@ -649,7 +650,7 @@ def test_posting_picks_records_the_posted_calls_as_published_with_the_fingerprin
     [b for b in at.button if b.key == "analyst_post_picks"][0].click().run()
     assert any("1 call(s) recorded as published." in s.value for s in at.success)
     assert AL.fetch_calls(db_path=desk.db)[0]["published_at"]
-    assert sent and "Gem Guy Over 20.5 Points" in sent[0]
+    assert sent and re.search(r"Gem Guy( \([A-Z]+\))? Over 20.5 Points", sent[0])   # Nov 22: with the team
 
 
 def test_a_failed_post_publishes_nothing(desk, monkeypatch):
