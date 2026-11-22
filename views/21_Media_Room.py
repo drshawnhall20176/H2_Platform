@@ -13,7 +13,7 @@ import os
  
 import streamlit as st
 import components as C
-from datetime import datetime  # noqa
+from datetime import datetime, timedelta  # noqa
  
 import sports
 import odds_api as O
@@ -23,6 +23,7 @@ import best_bets_data as BBD
 import media_focus as MF
 import promotions as PR
 import td_evidence as TE
+import show_picks as SP
 
 _active = sports.active()
 
@@ -96,11 +97,11 @@ def line_label(p):
 def headline(p):
     verb = SIDE_PHRASE.get((p["Market"], p["Side"]), f"{p['Side']} {p['Line']:g}")
     vs = f" vs {p['Opp']}" if p.get("Opp") else ""
-    return f"{p['Player']} ({p['Team']}) {verb}{vs}"
+    return f"{SP.tag(p)}{p['Player']} ({p['Team']}) {verb}{vs}"
  
  
 def value_text(p):
-    if p.get("EV") is not None:
+    if p.get("EV") is not None and p.get("LivePrice") is not None:    # Nov 22: a live read only with a live price
         live = f"{p['LivePrice']:+.0f}" if p.get("LivePrice") is not None else "—"
         return f"Live value: {p['EV']:+.1f}% at {live} ({p['Book']})." if p.get("Book") else \
                f"Live value: {p['EV']:+.1f}% at {live}."
@@ -118,7 +119,8 @@ def value_text(p):
  
 def reality_check(p):
     prob = f"{p['ModelProb']*100:.0f}%"
-    return (f"Reality check: model ~{prob} to cash — a lean we found interesting, not a lock. "
+    who = "earned chance" if p.get("Earned") is not None else "model"     # Nov 22: the honest chance (show_picks.py)
+    return (f"Reality check: {who} ~{prob} to cash — a lean we found interesting, not a lock. "
             + value_text(p) + " Only worth backing if you beat the number.")
  
  
@@ -260,15 +262,21 @@ with c2:
 with c3:
     cap = st.slider("Max per market", 1, 3, 2)
 with c4:
-    ev_mode = st.toggle("Rank by live value (uses odds quota)", value=False,
-                        help="On: pulls live prices and ranks by real EV% (same math as the Edge Board). "
-                             "Off: ranks by model conviction and shows fair price — no odds spent.")
+    ev_mode = st.toggle("Show live value (uses odds quota)", value=False,
+                        help="Selections are the platform's own picks, ranked by earned edge. On: also pulls live "
+                             "prices and shows each pick's EV% (same math as the Edge Board), keeping only those "
+                             "with a live read.")
 
 with st.spinner("Curating selections..."):
     if _active.key == "MLB":
         all_plays, meta, ev_used = load_plays_mlb(date_str, ev_mode, board_book)
     else:
         all_plays, meta, ev_used = load_plays_generic(_active.key, date_str, ev_mode, board_book)
+
+# Nov 22 (owner: overhaul the Media Room): only what the platform stands behind -- the same filter as Today's best
+# and the strongest list (never a ⚪ No edge unless 💰, never a shut-off market), each with its earned chance --
+# ranked by earned edge, the strongest list's own order (show_picks.py)
+all_plays = SP.platform_plays(_active.key, all_plays)
 
 # --- the day's games: a weekly slate (NFL/NCAAF) is narrowed to the chosen date -----------------
 day_plays = MF.plays_on_date(all_plays, date_str)
@@ -284,7 +292,7 @@ if not games or not day_plays:
         st.caption("This slate has games on: " + ", ".join(other) + " — pick one of those dates.")
     st.stop()
 
-rank_key = "EV" if ev_used else "Conviction"
+rank_key = SP.RANK
 st.markdown(f"### 🗓️ {MF.slate_phrase(games, date_str, _active.key)}")
 
 # Time slot + Game — the same pair every other page carries: the slot buckets games by real Eastern
@@ -330,7 +338,7 @@ sel = [p for _h, picks in sections for p in picks]
 if not sel:
     st.info("No selections cleared the filters for this focus.")
 
-mode_label = "ranked by **live EV%**" if ev_used else "ranked by **model conviction** (prices not checked)"
+mode_label = ("the platform's own picks, ranked by **earned edge**" + (" · live EV% shown" if ev_used else ""))
 st.caption(f"{n_games} game{'s' if n_games != 1 else ''} on the ticket · {len(sel)} selections · "
            f"{mode_label} · TBD-pitcher plays excluded")
 if ev_mode and not ev_used:
@@ -501,7 +509,15 @@ st.caption("One click the copy icon (top-right of the block) to grab the whole s
 lines = [f"🎙️ H2 Sports Media — Selections we found interesting · {date_str}",
          MF.slate_phrase(games, date_str, _active.key),
          f"📖 Prices/promotions: {book_label}",
-         f"({'live value' if ev_used else 'model conviction — prices not checked'})", ""]
+         "(the platform's own picks, ranked by earned edge · 💰 = a Money pick)", ""]
+try:                                                    # Nov 22: the running record of the picks we SHOWED
+    _run = SP.running_record(_active.key, (target - timedelta(days=1)).isoformat())
+except Exception:                                       # noqa: BLE001
+    _run = None
+if _run:
+    _label = "Our " + _active.key + " record since " + _run["since"]
+    lines += ["📒 " + SP.record_line(_run, _label),
+              "   Every pick we show is saved before the game and graded after — wins and losses.", ""]
 if _graded_on and (_h + _m):
     lines.append(f"🚦 Scorecard: {_h}-for-{_h + _m}  ({_tally})")
     lines.append("")

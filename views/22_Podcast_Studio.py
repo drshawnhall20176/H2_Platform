@@ -87,12 +87,11 @@ def _board_mlb(date_str):
 
 
 def _board_generic(sport_key, date_str):
-    sport = sports.get(sport_key)
-    if not sport.has_projections:
-        rows, meta = [], []
-    else:
-        rows, meta = sport.engine.build_slate(date_str)
-    return sport.projections.build_best_bets(rows), len(meta), rows, meta, None, None
+    # Nov 22: the same priced board Best Bets and the Command Center use (real lines and prices, Use tags, the earned
+    # chance) -- this used to rebuild its own unpriced board from the slate
+    import best_bets_data as BBD
+    plays, meta, _books = BBD.load_generic_best_bets_board(sport_key, date_str, O.DEFAULT_BOOK)
+    return plays, len(meta), None, meta, None, None
 
 
 def _board(sport_key, date_str):
@@ -121,6 +120,7 @@ def load_today(sport_key, date_str, ev_mode):
                 markets = sorted(set(SEL.MARKET_TO_ODDS_KEY.values()))
                 mmap = None
             else:
+                rows, _m = sport.engine.build_slate(date_str)
                 index = sport.projections.build_projection_index(rows, meta)
                 markets = sport.markets
                 mmap = sport.market_map
@@ -129,8 +129,13 @@ def load_today(sport_key, date_str, ev_mode):
             SEL.attach_live_ev(plays, edges, market_map=mmap)
             plays = [p for p in plays if p.get("EV") is not None]
             ev_used = True
-    rank = "EV" if ev_used else "Conviction"
-    headliners = sport.projections.curate_selections(plays, n=5, per_market_cap=2, rank_key=rank)
+    # Nov 22 (owner: overhaul): only what the platform stands behind, ranked by earned edge -- the strongest list's
+    # own order -- so the show never headlines a play the Command Center says to skip (show_picks.py)
+    import show_picks as SP
+    plays = SP.platform_plays(sport_key, plays)
+    rank = SP.RANK
+    headliners = sport.projections.curate_selections(
+        [p for p in plays if (p.get(rank) or 0) > 0] or plays, n=5, per_market_cap=2, rank_key=rank)
     hl = {id(p) for p in headliners}
     sleepers = sport.projections.curate_selections(
         [p for p in plays if id(p) not in hl], n=3, per_market_cap=1, rank_key=rank)
@@ -139,39 +144,32 @@ def load_today(sport_key, date_str, ev_mode):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def load_yesterday(sport_key, date_str):
+    """Nov 22: yesterday's picks AS SHOWN (the strongest list and 💰 picks), graded -- not the whole board."""
+    import show_picks as SP
     try:
-        sport = sports.get(sport_key)
-        plays, *_ = _board(sport_key, date_str)
-        results = sport.engine.get_player_results(date_str)
-        _, summary = R.grade_slate(plays, results)
-        # marquee single-event market for the "and they cashed" flex line — HR for MLB, Points
-        # for WNBA (first entry in that sport's market_map, see sports.py's registry).
-        marquee = next(iter(sport.market_map), None)
-        caught = R.market_report(plays, results, marquee)["caught"] if marquee else []
-        return summary, caught
-    except Exception:
+        return SP.ledger_review(sport_key, date_str), SP.running_record(sport_key, date_str)
+    except Exception:                                           # noqa: BLE001
         return None, None
 
 
 target = st.date_input("Show date (tonight's slate)", MF.today_eastern())
-ev_mode = st.toggle("Feature live-value plays (uses odds quota)", value=False,
-                    help="On: ranks the show's selections by real EV% against live prices (same math "
-                         "as the Edge Board). Off: ranks by model conviction. Either way, TBD-pitcher "
-                         "plays are excluded.")
+ev_mode = st.toggle("Only plays with a live value read (uses odds quota)", value=False,
+                    help="The show's selections are the platform's own picks, ranked by earned edge (the strongest "
+                         "list's order). On: keeps only those with a live EV% read against current prices.")
 date_str = target.strftime("%Y-%m-%d")
 C.season_notice(_active.key, date_str)   # NBA preseason / early-season data warning (no-op otherwise)
 yest = (target - timedelta(days=1)).strftime("%Y-%m-%d")
 
 with st.spinner("Writing tonight's rundown..."):
     headliners, sleepers, n_games, ev_used, slate_note = load_today(_active.key, date_str, ev_mode)
-    retro, caught = load_yesterday(_active.key, yest)
+    ledger, running = load_yesterday(_active.key, yest)
 
 if not headliners:
     st.info("No games on this date to build a show around. Pick a date with a scheduled slate.")
     st.stop()
 
-sections = PC.assemble_script(date_str, headliners, sleepers, retro, caught, sport=_active.key,
-                          slate_note=slate_note)
+sections = PC.assemble_script(date_str, headliners, sleepers, None, None, sport=_active.key,
+                              slate_note=slate_note, ledger=ledger, running=running)
 
 st.caption(f"{n_games} game{'s' if n_games != 1 else ''} tonight · {len(headliners)} headline selections · "
            f"{len(sleepers)} sleepers · teaching + yesterday's review included")
