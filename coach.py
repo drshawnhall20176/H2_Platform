@@ -373,6 +373,14 @@ def _short(use) -> str:
     return str(use or "").replace("🔒", "").replace("🎟️", "").replace("🎯", "").replace("⛔", "").strip() or "this tag"
 
 
+def _earned(sport: str, p: Dict) -> Optional[float]:
+    try:
+        import props_money as PM
+        return PM.play_earned(sport, p)
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
 def prop_candidates(sport: str, plays, meta=None) -> List[Dict]:
     """Every prop on the board that has a live price and a model chance."""
     import sports
@@ -392,7 +400,8 @@ def prop_candidates(sport: str, plays, meta=None) -> List[Dict]:
                     "pick": f"{p.get('Player')} {p.get('Market')} {p.get('Side')}" + ("" if line is None else f" {line:g}"),
                     "market": p.get("Market"), "chance": chance, "price": price, "book": p.get("RealPriceBook") or "",
                     "use": p.get("Use") or "", "tested": True,
-                    "player": p.get("Player"), "pid": p.get("PlayerId"), "side": p.get("Side"), "line": line})
+                    "player": p.get("Player"), "pid": p.get("PlayerId"), "side": p.get("Side"), "line": line,
+                    "earned": _earned(sport, p)})
     return out
 
 
@@ -655,3 +664,78 @@ def why_nothing(judged: Sequence[Dict], sport: str) -> Optional[str]:
         bits.append(f"{unchecked} have no track record (⚪ Unchecked)")
     return (f"Nothing to bet in {sport} right now: " + "; ".join(bits) + ". That's the coach working — no bet is the "
             "right bet when nothing clears the bar.") if bits else None
+
+
+# --------------------------------------------------------------------------- the coach's top 15 (Nov 22)
+# Owner, Nov 22: "a section configured like the command center's top 15 based on the My Coach rules ... selectable
+# from all sports and by individual sports." Every priced bet on offer is judged (judge()), at the EARNED chance where
+# there is one (props_money.earned -- the model's chance corrected to its record), then held to the owner's own rules
+# as rules() writes them from his record: the same tables, the same thresholds, applied as filters.
+TOP_N = 15
+TOP_PER_SPORT = 5
+STRONG_MAX_PRICE = -125
+
+
+def rule_filters(bets: Sequence[Dict]) -> Dict:
+    """The hard rules rules() would write from this record: {"no_against", "strong_max_price", "avoid_prices": [band
+    names], "leak": lane name or None, "best": lane name or None}."""
+    card = {r["What"]: r for r in report_card(bets)}
+    strong, against = card.get(BANDS[0]), card.get(BANDS[3])
+    out = {"no_against": bool(against and against["Bets"] >= MIN_N and (against["Win %"] or 0) < 0.45),
+           "strong_max_price": (STRONG_MAX_PRICE if strong and strong["Bets"] >= MIN_N and strong["Need to win"]
+                                and (strong["Money"] or 0) < 0 else None),
+           "avoid_prices": [r["What"] for r in price_check(bets) if r["Bets"] >= MIN_N and (r["Money"] or 0) < 0
+                            and r["What"] in ("−151 to −200", "Worse than −200")],
+           "leak": None, "best": None}
+    best, worst = best_and_worst(bets, k=1, min_bets=MIN_N)
+    out["best"] = best[0]["What"] if best else None
+    out["leak"] = worst[0]["What"] if worst else None
+    return out
+
+
+def _price_band(price) -> Optional[str]:
+    o = _num(price)
+    if o is None:
+        return None
+    return next((name for name, lo, hi in PRICES if lo <= o <= hi), None)
+
+
+def rules_check(r: Dict, f: Dict) -> Optional[str]:
+    """Why a judged bet breaks one of the owner's rules, or None if it keeps them all."""
+    ch, price = _num(r.get("real_chance")), _num(r.get("price"))
+    if f.get("no_against") and ch is not None and ch < 0.5:
+        return "against the model"
+    if f.get("strong_max_price") is not None and ch is not None and ch >= 0.60 and price is not None \
+            and price < f["strong_max_price"]:
+        return f"a 60%+ pick priced past {f['strong_max_price']:+.0f}"
+    band = _price_band(price)
+    if band and band in f.get("avoid_prices", []):
+        return f"a {band} price"
+    if f.get("leak") and f"{r.get('sport')} · {r.get('market')}" == f["leak"]:
+        return f"your leak ({f['leak']})"
+    return None
+
+
+def coach_top(judged: Sequence[Dict], f: Dict, n: int = TOP_N, per_sport: Optional[int] = TOP_PER_SPORT) -> List[Dict]:
+    """The bets that keep every rule and that the coach would place (🟢 Good bet, or a 🟡 Maybe with 'Small stake
+    OK'), good bets first, your best lane next, then by edge; at most `per_sport` from one sport."""
+    keep = []
+    for r in judged:
+        if r["verdict"].startswith("🔴") or r["verdict"].startswith("⚪"):
+            continue
+        if not (r["verdict"].startswith("🟢") or r.get("signal") == SIGNALS[1]):
+            continue
+        if rules_check(r, f):
+            continue
+        keep.append(dict(r, best_lane=bool(f.get("best") and f"{r.get('sport')} · {r.get('market')}" == f["best"])))
+    keep.sort(key=lambda r: (not r["verdict"].startswith("🟢"), not r["best_lane"], -(r.get("edge") or 0)))
+    out, seen = [], {}
+    for r in keep:
+        sp = r.get("sport")
+        if per_sport and seen.get(sp, 0) >= per_sport:
+            continue
+        seen[sp] = seen.get(sp, 0) + 1
+        out.append(r)
+        if len(out) >= n:
+            break
+    return out
