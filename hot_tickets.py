@@ -346,8 +346,74 @@ def run(post: bool = False, now: Optional[datetime] = None, webhook: Optional[st
     return code
 
 
+def revise_text(day: str, ch: Dict, replaced: Sequence[Dict], reason: str) -> str:
+    import analyst_tools as AT
+    s = ch["singles"]
+    if not s:
+        return ""
+    lines = [f"🔄 **H2 SPORTS HOT TICKETS — UPDATED** · {_nice_day(day)}", reason, ""]
+    if replaced:
+        lines.append("**Replaced** (still on the record, graded as posted):")
+        lines += [f"~~{r.get('sport')} · {r.get('pick')} ({_price(r.get('price'))})~~" for r in replaced]
+        lines.append("")
+    lines.append("🔥 **UPDATED TICKETS**")
+    for i, r in enumerate(s, 1):
+        lines.append(f"{i}) " + pick_line(r))
+    lines += ["", "This morning's parlay stands as posted. Every ticket — old and new — is graded tomorrow, in this "
+              "channel.", f"_{AT.DISCLAIMER}_"]
+    return "\n".join(lines)
+
+
+def revise(reason: str, replace_markets=("Moneyline", "Spread"), post: bool = False, now: Optional[datetime] = None,
+           webhook: Optional[str] = None, send=None, out=print) -> int:
+    """Nov 22 (owner: "run the correct rules and regrade and push updated"): after a rule change mid-day, a second
+    card with tickets chosen under today's rules, replacing the posted tickets the change affects (game lines, by
+    default). Nothing is removed: the posted tickets stay in the ledger and are graded as posted; the new ones join
+    them. Posted once a day (claim "hot_rev")."""
+    import analyst_ledger as AL
+    import analyst_tools as AT
+    import pick_ledger as PL
+    import props_engine as PE
+    today = PE._et_today()
+    posted = PL.rows("hot", "ALL", today)
+    replaced = [r for r in posted if r.get("money_market") in replace_markets]
+    keep = {PL.row_key(r) for r in posted}
+    have = {(r.get("game_id") or r.get("game")) for r in posted if r not in replaced}
+    cands = [r for r in candidates(today, now) if PL.row_key(r) not in keep and (r.get("game_id") or r.get("game")) not in have]
+    ch = choose(cands, today)
+    ch["singles"] = ch["singles"][:max(1, len(replaced))]
+    text = revise_text(today, ch, replaced, reason)
+    if not text:
+        out("no pick clears today's rules for an update")
+        return 0
+    if not post:
+        out(f"--- Hot Tickets update (dry run) ---\n{text}\n")
+        return 0
+    if not (webhook or "").strip():
+        out("DISCORD_WEBHOOK_URL is not set: nothing posted")
+        return 1
+    if not AL.claim_post("hot_rev", "ALL", today):
+        out("today's update already posted")
+        return 0
+    try:
+        AT.post_to_discord(webhook, text, post=send)
+    except RuntimeError as exc:
+        AL.release_post("hot_rev", "ALL", today)
+        out(f"update failed: {exc}")
+        return 1
+    PL.add("hot", "ALL", today, [dict(r, revised=True) for r in ch["singles"]], now=now)
+    out(f"Hot Tickets update posted: {len(ch['singles'])} new, {len(replaced)} replaced")
+    return 0
+
+
+REVISE_REASON = os.environ.get("HOT_REVISE_REASON", "")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "revise":
+        return revise(REVISE_REASON or "A rule changed today; these tickets are chosen under today's rules.",
+                      post=len(argv) > 1 and argv[1] == "post", webhook=os.environ.get("DISCORD_WEBHOOK_URL"))
     return run(post=bool(argv) and argv[0] == "post", webhook=os.environ.get("DISCORD_WEBHOOK_URL"))
 
 
