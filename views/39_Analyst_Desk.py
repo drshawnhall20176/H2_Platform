@@ -196,7 +196,8 @@ def _line_index(sport_key: str, since: str):
     return line_history.sport_index(sport_key, since)
 
 
-_since = (datetime.now(eastern) - timedelta(days=14)).strftime("%Y-%m-%d")
+# Nov 21 (page audit: 14 days of captures took 700 MB here): today's calls only need today's and yesterday's moves
+_since = (datetime.now(eastern) - timedelta(days=2)).strftime("%Y-%m-%d")
 try:
     _line_idx = _line_index(_active.key, _since)         # every snapshot in one query, not one query per play
 except Exception:                                      # noqa: BLE001 — line movement is context, never a reason to break the page
