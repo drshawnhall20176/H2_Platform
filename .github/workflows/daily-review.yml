@@ -86,6 +86,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python pick_ledger.py grade || true
+      # Nov 22: Hot Tickets' first scheduled run never started (GitHub starts new schedules late). The morning review
+      # runs every hour, so it's the backup poster: from 8:30 AM ET, posts today's tickets if nothing has gone out
+      # (posted once a day -- hot-tickets.yml and this see each other), and yesterday's recap right after grading.
+      - name: Hot Tickets backup (hot_tickets.py, Nov 22)
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python hot_tickets.py post || true
       - name: Automatic shut-off (shutoff.py, Nov 21)
         if: always()
         env:

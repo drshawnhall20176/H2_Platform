@@ -116,7 +116,10 @@ def test_run_posts_once_and_a_dry_run_posts_nothing(store, monkeypatch):
         return R()
     hook = "https://discord.com/api/webhooks/1/abc"
     assert HT.run(post=False, out=out.append) == 0 and not sent and "dry run" in out[-1]
-    assert HT.run(post=True, webhook=hook, send=send, out=out.append) == 0 and len(sent) == 1
-    assert HT.run(post=True, webhook=hook, send=send, out=out.append) == 0 and len(sent) == 1
+    early = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)                 # 7 AM New York
+    assert HT.run(post=True, webhook=hook, send=send, out=out.append, now=early) == 0 and not sent
+    assert "too early" in out[-1]
+    assert HT.run(post=True, webhook=hook, send=send, out=out.append, now=NOON) == 0 and len(sent) == 1
+    assert HT.run(post=True, webhook=hook, send=send, out=out.append, now=NOON) == 0 and len(sent) == 1
     assert "already posted" in out[-1]
     assert HT.run(post=True, webhook="", out=out.append) == 1
