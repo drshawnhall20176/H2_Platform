@@ -100,7 +100,7 @@ def test_app_loads_the_saved_board_instead_of_building(monkeypatch):
 def test_heavy_sports_are_never_built_inside_the_app(monkeypatch):
     import best_bets_data as BBD
     monkeypatch.setattr(BBD, "saved_board", lambda *a, **k: None)
-    monkeypatch.setattr(BBD, "_in_app", lambda: True)
+    monkeypatch.setattr(BBD, "_heavy_guard", lambda: True)
     monkeypatch.setattr(BBD, "build_generic_board", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built")))
     BBD.load_generic_best_bets_board.clear()
     assert BBD.load_generic_best_bets_board("NCAAF", "2026-11-21", "draftkings")[0] == []

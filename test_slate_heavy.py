@@ -21,3 +21,23 @@ def test_heavy_sport_in_app_takes_an_older_same_day_copy(monkeypatch):
     monkeypatch.setattr(SS, "load", lambda sport, d, max_age=None: blob if (max_age or 0) > SS.FRESH_S else None)
     f = SS.persisted("NCAAMB")(lambda d: (_ for _ in ()).throw(AssertionError("built")))
     assert f("2026-11-21") == ([9], [8])
+
+
+def test_college_reads_in_the_app_come_from_the_saved_copy(monkeypatch):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "_heavy_guard", lambda: True)
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "k")
+    monkeypatch.setattr(BBD, "saved_reads", lambda sp, d: {("1", "rec"): {"player": "A"}})
+    monkeypatch.setattr(BBD, "slate_reads_for", lambda *a, **k: (_ for _ in ()).throw(AssertionError("computed")))
+    assert BBD.load_slate_reads("NCAAF", "2026-11-21") == {("1", "rec"): {"player": "A"}}
+    monkeypatch.setattr(BBD, "saved_reads", lambda sp, d: None)
+    assert BBD.load_slate_reads("NCAAF", "2026-11-22") == {}           # (another date: the first is cached)
+
+
+def test_nfl_is_never_computed_in_the_app(monkeypatch):
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "_heavy_guard", lambda: True)
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "k")
+    monkeypatch.setattr(BBD, "saved_reads", lambda sp, d: None)
+    monkeypatch.setattr(BBD, "slate_reads_for", lambda *a, **k: (_ for _ in ()).throw(AssertionError("computed")))
+    assert BBD.load_slate_reads("NFL", "2026-11-23") == {}

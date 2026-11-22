@@ -843,7 +843,9 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     if sport_key == "NCAAMB":
         reads = _ncaamb_reads(date_str, meta, offers, preferred_book)
         _snapshot(sport_key, date_str, reads)
-        return _with_display_names(sport_key, reads) or None
+        reads = _with_display_names(sport_key, reads) or None
+        _save_reads(sport_key, date_str, reads)
+        return reads
     if PM.FAMILY_BY_SPORT.get(sport_key) in ("football", "hockey"):
         labels = tuple(sorted({m.get("label") for m in meta if m.get("label")}))
         games = [g for g in PD.list_games(sport_key, date_str) if g["label"] in set(labels)]
@@ -863,7 +865,9 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
         reads = SP.family_slate_reads(sport_key, games, bundles, offers, lines,
                                       book=None if preferred_book in (None, "best") else preferred_book)
         _snapshot(sport_key, date_str, reads)
-        return _with_display_names(sport_key, reads) or None
+        reads = _with_display_names(sport_key, reads) or None
+        _save_reads(sport_key, date_str, reads)
+        return reads
     teams = tuple(sorted({(SP._int_or(m.get(f"{s}_id")), m.get(f"{s}_abbr")) for m in meta for s in ("home", "away")},
                          key=lambda t: str(t[0])))
     inputs = load_props_model_inputs(sport_key, date_str, teams)
@@ -873,7 +877,9 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     reads = SP.slate_reads(meta, inputs["sample"], offers, book=book, injuries=inputs["injuries"],
                            rest=inputs["rest"], game_lines=lines, sport=sport_key, charts=inputs.get("charts"))
     _snapshot(sport_key, date_str, reads)
-    return _with_display_names(sport_key, reads) or None
+    reads = _with_display_names(sport_key, reads) or None
+    _save_reads(sport_key, date_str, reads)
+    return reads
 
 
 def _ncaamb_reads(date_str: str, meta: List[Dict], offers: List[Dict], preferred_book: Optional[str]) -> Dict:
@@ -927,6 +933,32 @@ def _ncaamb_reads(date_str: str, meta: List[Dict], offers: List[Dict], preferred
     return out
 
 
+READS_KEY = "READS:{sport}"
+
+
+def _save_reads(sport_key: str, date_str: str, reads) -> None:
+    """Nov 21: a college sport's reads, saved by the warm job's board build for the pages that need reads (the
+    Pick'em Board, the Edge Board) -- computing them takes ~4 GB, far past the Cloud app's memory."""
+    if not reads or _in_app():                                  # every sport: the pages read it before computing
+        return
+    try:
+        import slate_store as SS
+        if not SS._off():
+            SS.save(READS_KEY.format(sport=sport_key), date_str, reads)
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def saved_reads(sport_key: str, date_str: str) -> Optional[Dict]:
+    try:
+        import slate_store as SS
+        blob = SS.load(READS_KEY.format(sport=sport_key), date_str,
+                       max_age=SS.HEAVY_FRESH_S if sport_key in HEAVY_BOARDS else SS.FRESH_S)
+        return SS.decode(blob) if blob is not None else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
 def _snapshot(sport_key: str, date_str: str, reads) -> None:
     """Keep what the model said before each game started, for the Postgame Review (model_store). Never fails a page."""
     try:
@@ -970,14 +1002,15 @@ def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFA
     if not api_key:
         return None
     sport = sports.get(sport_key)
-    if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
-        # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): building a college slate here
-        # takes ~1 GB and many minutes -- the Cloud app runs out of memory and dies for everyone. Read the warm job's
-        # saved board's games instead; nothing saved yet = no reads (the page says so), never a build.
-        sb = saved_board(sport_key, date_str, preferred_book)
-        if not sb or not sb[1]:
-            return {}
-        meta = sb[1]
+    if _heavy_guard():                                      # Nov 21: every sport reads the saved copy first
+        _saved = saved_reads(sport_key, date_str)
+        if _saved:
+            return _saved
+    if sport_key in HEAVY_BOARDS and _heavy_guard():
+        # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): building a college slate and
+        # its reads here takes ~4 GB -- the Cloud app runs out of memory and dies for everyone. The warm job saves the
+        # reads with each board build (_save_reads); nothing saved yet = no reads (the page says so), never a build.
+        return saved_reads(sport_key, date_str) or {}
     elif sport_key in BIG_SLATE_SPORTS:
         _rows, meta = _big_slate_props_games(sport, sport_key, date_str, api_key)
         if not meta:
@@ -1029,7 +1062,7 @@ def _big_slate_props_games(sport, sport_key: str, date_str: str, api_key: Option
 # compressed: a few hundred KB) and the app loads that instead of building -- seconds, a few MB. The app still builds
 # live when no saved board is fresh enough (a new day before the first warm run, another book).
 BOARD_FRESH_S = 4500                     # 75 minutes: the warm job runs hourly
-HEAVY_BOARDS = ("NCAAF", "NCAAMB")       # too big to build in the app: an older same-day board beats a crash
+HEAVY_BOARDS = ("NCAAF", "NCAAMB", "NFL")   # Nov 21: NFL's reads measured 2.1 GB on a Sunday slate       # too big to build in the app: an older same-day board beats a crash
 HEAVY_STALE_OK_S = 6 * 3600
 
 
@@ -1093,13 +1126,18 @@ def load_generic_best_bets_board(sport_key: str, date_str: str,
     # Nov 20 (owner: the app crashed again opening college basketball, then college football, before the first saved
     # board existed): inside the app, the two heavy sports are never built live -- the page says the board is on its
     # way instead. Scripts (no Streamlit runtime) still build.
-    if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
+    if sport_key in HEAVY_BOARDS and _heavy_guard():
         try:
             st.session_state[f"_board_pending_{sport_key}"] = True
         except Exception:                                       # noqa: BLE001
             pass
         return [], [], list(O.US_BOOKS.keys())
     return build_generic_board(sport_key, date_str, preferred_book)
+
+
+def _heavy_guard() -> bool:
+    """In the Cloud app (not a job, not a test run, not H2_BOARD_LIVE): heavy boards and reads are never built here."""
+    return _in_app() and not os.environ.get("H2_BOARD_LIVE") and "PYTEST_CURRENT_TEST" not in os.environ
 
 
 def _in_app() -> bool:
