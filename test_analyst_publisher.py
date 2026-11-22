@@ -396,3 +396,11 @@ def test_the_webhook_test_posts_one_message_and_locks_nothing(env):
     assert "connection test" in send.sent[0] and AL.fetch_calls() == []
     assert PUB.test_webhook("", out=out.append) == 1
     assert PUB.test_webhook(HOOK, out=out.append, send=Sender(404)) == 1 and "deleted" in out[-1]
+
+
+def test_football_posts_a_card_per_kickoff_window():
+    """Nov 22 (owner): the 1 PM card went out; the 4 PM window and the night game need theirs."""
+    assert PUB.football_slot("2026-11-22T18:00:00Z") == "early"          # 1:00 PM New York
+    assert PUB.football_slot("2026-11-22T21:25:00Z") == "afternoon"      # 4:25 PM
+    assert PUB.football_slot("2026-11-23T01:20:00Z") == "night"          # 8:20 PM
+    assert PUB.football_slot(None) == "early"

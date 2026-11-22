@@ -170,12 +170,22 @@ def _fit(lines: List[str], footer: str, more_word: str) -> str:
 
 
 def discord_picks_text(calls: List[Dict], *, sport_label: str, date_str: str, book_label: str,
-                       max_calls: int = 8, extra_line: str = "") -> str:
+                       max_calls: int = 8, extra_line: str = "", per_game: Optional[int] = None) -> str:
     """The desk's suggestions as a Discord message. `calls` must already be the bettable ones; gems
     lead, then the strongest. Empty string when there is nothing to post."""
     if not calls:
         return ""
-    ordered = sorted(calls, key=lambda c: (c.get("gem", False), c.get("score", 0)), reverse=True)[:max_calls]
+    ordered = sorted(calls, key=lambda c: (c.get("gem", False), c.get("score", 0)), reverse=True)
+    if per_game:                                       # Nov 22: spread a card across the slate, not one game
+        seen: Dict[str, int] = {}
+        kept = []
+        for c in ordered:
+            g = str(c.get("game") or "")
+            if seen.get(g, 0) < per_game:
+                kept.append(c)
+                seen[g] = seen.get(g, 0) + 1
+        ordered = kept
+    ordered = ordered[:max_calls]
     lines = [f"🎙️ **{BRAND} — Analyst Desk · {sport_label}, {date_str}**",
              f"Lines are from {book_label} at the time of posting. Each call is locked to the public record before kickoff."]
     for c in ordered:

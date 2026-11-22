@@ -293,3 +293,11 @@ def test_discord_picks_name_the_game():
          "price": -112, "kickoff": "1:00 PM ET", "game": "CLE @ BAL", "team": "BAL", "angles": [{"label": "Game script"}]}
     t = AT.discord_picks_text([c], sport_label="NFL", date_str="2026-11-22", book_label="DraftKings")
     assert "**Chris Bell (BAL) Over 14.5 Receiving Yards (51%)** at -112 · CLE @ BAL, 1:00 PM ET — Game script" in t
+
+
+def test_a_card_can_cap_calls_per_game():
+    import analyst_tools as AT
+    cs = [{"player": f"P{i}", "side": "Over", "line": 1.5, "market": "Receptions", "model_prob": 0.5, "score": 10 - i,
+           "game": "LV @ DEN" if i < 5 else "PIT @ PHI", "angles": []} for i in range(7)]
+    t = AT.discord_picks_text(cs, sport_label="NFL", date_str="d", book_label="DK", per_game=3)
+    assert t.count("LV @ DEN") == 3 and t.count("PIT @ PHI") == 2
