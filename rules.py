@@ -28,7 +28,10 @@ RULES: Dict[str, List[Dict]] = {
     ],
     "money_games": [
         {"v": 1, "from": "2026-11-20", "what": "college basketball moneyline / spread, Money Score +4% to +12%, "
-                                              "chance 40%+", "fp": "66491557ed"},
+                                              "chance 40%+"},
+        {"v": 2, "from": "2026-11-22", "what": "PAUSED: on the corrected college model (home court, neutral sites) "
+                                              "the rule re-tested at -0.8% per $1 (166 picks); scores show as "
+                                              "information until it re-proves", "fp": "593adde3d1"},
     ],
     "lock": [
         {"v": 1, "from": "2026-11-18", "what": "most probable with a sportsbook line"},
@@ -88,6 +91,7 @@ def params() -> Dict[str, Dict]:
         "money_props": {"band": list(PE.MONEY_BAND), "min_chance": PE.MONEY_MIN_CHANCE, "min_mev": PE.MONEY_MIN_MEV,
                         "skip": {k: list(v) for k, v in sorted(PE.MONEY_SKIP.items())}},
         "money_games": {"band": list(MSC.BAND), "min_chance": MSC.MIN_CHANCE, "leagues": list(MSC.MONEY_LEAGUES),
+                        "paused": dict(MSC.PAUSED),
                         "markets": list(MSC.MONEY_MARKETS)},
         "lock": {"min_ev": PE.LOCK_MIN_EV, "pickem_books": sorted(PE.PICKEM_BOOKS)},
         "earned": {"min_fit": PM.MIN_FIT, "window": PM.WINDOW_DAYS, "pickem_need": PM.PICKEM_NEED,

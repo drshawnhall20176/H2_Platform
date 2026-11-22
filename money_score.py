@@ -34,6 +34,11 @@ MARKETS = ("ML", "SP", "TOT")
 MARKET_NAME = {"ML": "Moneyline", "SP": "Spread", "TOT": "Total"}
 BAND = (0.04, 0.12)
 MONEY_LEAGUES = ("NCAAMB",)
+# Nov 22 (owner: fix the college model's home lean): on the CORRECTED college model (home court 3.2, neutral sites)
+# the 💰 game-line rule re-tested walk-forward Nov 3-21 at -0.8% per $1 over 166 picks (it was +7.8% on the old
+# model, mostly by fading that model's home bias, and -40% on Nov 20-21). Paused from this slate until it re-proves on
+# the corrected model; the scores still show as information. Earlier slates keep the flags they were shown with.
+PAUSED = {"NCAAMB": "2026-11-22"}
 MONEY_MARKETS = ("ML", "SP")
 MIN_CHANCE = 0.40                # Nov 20: no long shots (the first live slate flagged Oakland +2800 at 4%); with this
                                  # floor the walk-forward test kept +12.4% in college basketball (239, halves +6.4/+18.3)
@@ -268,6 +273,11 @@ def is_money(lg: str, s: Optional[Dict], day: Optional[str] = None) -> bool:
     import props_engine as PE
     if not s or lg not in MONEY_LEAGUES or s.get("mkt") not in MONEY_MARKETS:
         return False
+    if lg in PAUSED:
+        if day is None:
+            day = PE._et_today()
+        if str(day)[:10] >= PAUSED[lg]:
+            return False
     ok = (BAND[0] <= s["score"] < BAND[1] and (s.get("chance") or 0) >= MIN_CHANCE
           and lg in PE.money_sports(day=day))
     if ok:                                                      # Nov 21: switched off by its record (shutoff.py)
