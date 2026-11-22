@@ -13,7 +13,12 @@ on:
     - cron: "23 16 * * *"   # ~11:23am ET -- before noon / early-afternoon starts
     - cron: "23 20 * * *"   # ~3:23pm ET  -- the late-afternoon and evening slate
     - cron: "23 23 * * *"   # ~6:23pm ET  -- late games, and the latest lines on calls already locked
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      test_webhook:
+        description: "Only post a test message to the Discord webhook"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,8 +46,11 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_WEBHOOK: ${{ inputs.test_webhook }}
         run: |
-          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+          if [ "$TEST_WEBHOOK" = "true" ]; then
+            python -u analyst_publisher.py --test-webhook
+          elif [ -n "$DISCORD_WEBHOOK_URL" ]; then
             python -u analyst_publisher.py --post
           else
             echo "DISCORD_WEBHOOK_URL not set: locking only, nothing posted"
