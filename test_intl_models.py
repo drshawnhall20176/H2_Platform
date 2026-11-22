@@ -612,3 +612,26 @@ def test_nfl_neutral_sites_come_from_espn_too():
     assert I.espn_neutral("NFL", date(2026, 11, 15), fetch) == [("Miami Dolphins", "Washington Commanders")]
     assert "football/nfl" in seen["url"] and seen["params"]["dates"] == "20261115"
     assert I.espn_neutral("NHL", date(2026, 11, 15), fetch) == []
+
+
+def test_rescoring_history_replaces_the_old_numbers_and_keeps_them():
+    """Nov 22 (owner): scrub the misjudgments, not the records."""
+    import intl_picks as IP
+    games = [{"date": f"2026-11-{d:02d}", "home_team": h, "away_team": a, "home_points": hp, "away_points": ap,
+              "neutral_site": n}
+             for d, h, a, hp, ap, n in [(10, "Duke Blue Devils", "Army Black Knights", 80, 60, False),
+                                        (12, "Army Black Knights", "Duke Blue Devils", 62, 78, False),
+                                        (14, "Duke Blue Devils", "Navy Midshipmen", 75, 70, False),
+                                        (16, "Navy Midshipmen", "Army Black Knights", 70, 68, False),
+                                        (20, "Duke Blue Devils", "Navy Midshipmen", 70, 60, True)]]
+    pick = {"sport": "NCAAMB", "game_id": "g9", "kickoff": "2026-11-20T23:00:00+00:00", "home": "Duke Blue Devils",
+            "away": "Navy Midshipmen", "home_spread": -6.0, "fair_home": 0.7, "model_margin": 20.0, "model_p": 0.95,
+            "model_p_raw": 0.95, "edge": 14.0, "ml_edge": 0.25, "pick": "home", "ml_pick": "home", "result": "home",
+            "final_home": 70, "final_away": 60}
+    saved = []
+    res = IP.rescore_history("NCAAMB", "2026-11-01", picks=[pick], games=games, save=saved.append, out=lambda m: None)
+    assert res["n"] == 1 and saved
+    s = saved[0]
+    assert s["v1"]["model_margin"] == 20.0 and s["v1"]["edge"] == 14.0            # the old numbers kept
+    assert s["model_margin"] != 20.0 and s["neutral"] is True                      # re-projected, neutral from the result
+    assert s["final_home"] == 70 and s["result"] == "home" and s["home_spread"] == -6.0   # line and result untouched

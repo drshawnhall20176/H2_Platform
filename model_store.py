@@ -520,6 +520,20 @@ def save_game_picks(records: List[Dict], db_path: Optional[str] = None) -> int:
         return 0
 
 
+def rewrite_game_pick_payload(sport: str, game_id: str, payload: Dict, db_path: Optional[str] = None) -> bool:
+    """Nov 22: replace one stored game projection's payload (the model rescoring its own history -- the line, the
+    score and the result are untouched; the old numbers stay inside the payload under "v1")."""
+    if _test_run(db_path):
+        return False
+    try:
+        with _conn(db_path) as (con, ph):
+            con.cursor().execute(f"UPDATE game_picks SET payload={ph} WHERE sport={ph} AND game_id={ph}",
+                                 [json.dumps(payload, default=str), sport, str(game_id)])
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
 def load_game_picks(sport: str, ungraded: bool = False, db_path: Optional[str] = None) -> List[Dict]:
     if db_path is None and not available():
         return []
