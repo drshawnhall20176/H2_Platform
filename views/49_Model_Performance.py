@@ -2,25 +2,29 @@
 Model Performance — Investor Relations (Nov 6). Owner only.
 
 The evidence report for an investor: does the model have an edge, and how sure can anyone be yet? Every number carries
-its sample size and a 95% range, and each section says plainly what it does and doesn't show. Built from records the
-platform already keeps (investor.py): the locked Analyst Desk calls, each sport's latest morning review, closing-line
-value, and the real-money Bet Log.
+its sample size and a 95% range, and each section says plainly what it does and doesn't show.
+
+Nov 22 (owner: should the counters start today, since the platform changed so much since October? -- "your call"): the
+headline counts from the current platform's start (investor.ERA, Nov 21: the picks-as-shown ledger, rules frozen and
+versioned). Everything earlier stays, in a labeled "Earlier builds" section -- a wiped record costs more trust in
+diligence than a weak early number.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
 import streamlit as st
 
 import props_engine as PE
-
 import components as C
 import investor as I
 
 C.base_css()
 C.page_header("📊", "Model Performance",
               "Investor Relations · the evidence for the model's edge — with sample sizes, ranges and caveats.")
+
 today = datetime.now(pytz.timezone("US/Eastern")).date()
+_era = datetime.fromisoformat(I.ERA).date()
 st.caption(f"As of {today:%B %-d, %Y}. Every figure is computed from records kept automatically as games are played; "
            "nothing is entered by hand or edited after the fact.")
 
@@ -34,7 +38,7 @@ def rng(lo, hi):
 
 
 @st.cache_data(ttl=900, show_spinner="Gathering the record…")
-def load():
+def load(end: str):
     import analyst_ledger as AL
     import betlog as B
     import model_store as MS
@@ -54,76 +58,92 @@ def load():
         bets = B.list_bets()
     except Exception:                                           # noqa: BLE001
         bets = []
-    return calls, reports, bets
+    try:
+        cur = I.current_record(end)
+    except Exception:                                           # noqa: BLE001
+        cur = {"strong": None, "money": None, "since": I.ERA}
+    return calls, reports, bets, cur
 
 
-calls, reports, bets = load()
-lc = I.locked_calls(calls)
-tags = I.use_tags(reports)
-clv = I.closing_line(bets)
-rm = I.real_money(bets)
+calls, reports, bets, cur = load(today.isoformat())
+strong, money = cur["strong"], cur["money"]
+new_calls = [r for r in calls if str(r.get("call_date") or r.get("date") or "") >= I.ANALYST_ERA]
+old_calls = [r for r in calls if str(r.get("call_date") or r.get("date") or "") < I.ANALYST_ERA]
+lc = I.locked_calls(new_calls)
+rm = I.real_money(bets, since=I.ERA)
 
 # ---------------------------------------------------------------- headline
-st.markdown("### At a glance")
+st.markdown(f"### The current platform · since {_era:%B %-d, %Y}")
+st.caption(f"The record starts {_era:%b %-d}: the first slate where every pick the platform showed was saved before its "
+           "game, graded afterward, and chosen by rules that are frozen and versioned (a rule change starts a new "
+           "record instead of rewriting the old one). Everything before is kept below under **Earlier builds**.")
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Locked calls graded", f"{lc['n']:,}", f"hit {pct(lc['hit'])} vs model said {pct(lc['said'])}", delta_color="off")
-graded_reads = sum(t["n"] for t in tags)
-m2.metric("Model reads graded (30 days)", f"{graded_reads:,}", f"{len(reports)} sports", delta_color="off")
-m3.metric("Beat the closing line", pct(clv["beat"]), f"{clv['moved']} priced moves since {clv['since']}", delta_color="off")
-m4.metric("Real-money singles", f"{rm['singles']}", f"since {rm['first'] or '—'}", delta_color="off")
+if strong:
+    m1.metric("Strongest list", f"{strong['hits']}–{strong['misses']}",
+              f"{strong['units']:+.2f}u at the prices shown" if strong.get("priced") else None, delta_color="off")
+else:
+    m1.metric("Strongest list", "—", "no graded slate yet", delta_color="off")
+if money:
+    m2.metric("💰 picks", f"{money['hits']}–{money['misses']}",
+              f"{money['units']:+.2f}u at the prices shown" if money.get("priced") else None, delta_color="off")
+else:
+    m2.metric("💰 picks", "—", "no graded slate yet", delta_color="off")
+_b = strong if strong and strong.get("clv_moved") else None
+m3.metric("Beat the closing line", pct(_b["beat_rate"]) if _b else "—",
+          f"{_b['clv_moved']} strongest picks whose price moved" if _b else "no moves graded yet", delta_color="off")
+m4.metric("Analyst calls locked", f"{lc['locked']:,}", f"since {datetime.fromisoformat(I.ANALYST_ERA):%b %-d}",
+          delta_color="off")
+
 need = I.bets_for_edge(0.03)
-st.info(f"**Where this stands:** the platform has been grading itself since late October. A real 3% edge at typical "
-        f"prices takes roughly **{need:,} bets** to separate from luck with 95% confidence, so most figures below are "
-        "early readings, labeled as such. The order of evidence, strongest first: calibration and closing-line value "
-        "(they show up within hundreds of bets), then hit rates by tag, then money won (the noisiest).")
+st.info(f"**Where this stands:** the current record is days old. A real 3% edge at typical prices takes roughly "
+        f"**{need:,} bets** to separate from luck with 95% confidence. The order of evidence, strongest first: beating "
+        "the closing line and honest chances (they show up within a few hundred picks), then hit rates, then money won "
+        "(the noisiest).")
 
-# ---------------------------------------------------------------- 1. locked calls
-st.markdown("### 1 · Locked, public calls")
-st.caption("Every Analyst Desk call is written to a ledger before the game starts and can't be changed afterward; the "
-           "full record downloads as a CSV with a fingerprint on the Analyst Record page. The test: does the hit rate "
-           "match the chance the model stated?")
-st.caption("Context: until Nov 6 the Desk also locked calls from an older fallback model whose chances ran high (NBA: "
-           "51% hit vs 61% stated over 976). The current props model's calls were honest (59% vs 57% over 296), and "
-           "from Nov 6 the Desk locks only those. The record keeps every earlier call — nothing is removed.")
-if lc["n"]:
-    st.markdown(f"**{lc['n']:,} graded** of {lc['locked']:,} locked ({lc['first']} → {lc['last']}): hit "
-                f"**{pct(lc['hit'])}** (95% range {rng(lc['lo'], lc['hi'])}) against **{pct(lc['said'])}** stated.")
-    st.dataframe(pd.DataFrame([{"Sport": r["sport"], "Graded": r["n"], "Hit": r["hit"], "Model said": r["said"],
-                                "95% range": rng(r["lo"], r["hi"])} for r in lc["by_sport"]]),
-                 hide_index=True, width="stretch",
+# ---------------------------------------------------------------- 1. picks as shown
+st.markdown("### 1 · Every pick the platform showed")
+st.caption("The Command Center's strongest list and every 💰 pick, saved the first time they appear before the game and "
+           "graded the next morning at the price shown. Nothing is added after a game starts or removed after it loses.")
+rows = []
+for name, r in (("Strongest list", strong), ("💰 picks (props and game lines)", money)):
+    if not r:
+        continue
+    rows.append({"List": name, "Graded": r["n"], "Record": f"{r['hits']}–{r['misses']}", "Hit": r["hit_rate"],
+                 "Price needed": r.get("needed"), "95% range": rng(r.get("lo"), r.get("hi")),
+                 "Units (1u a pick)": round(r["units"], 2) if r.get("priced") else None,
+                 "Reading": I.verdict(r["n"], r["hit_rate"], r.get("needed"), r.get("lo"))})
+if rows:
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                  column_config={"Hit": st.column_config.NumberColumn(format="percent"),
-                                "Model said": st.column_config.NumberColumn(format="percent")})
+                                "Price needed": st.column_config.NumberColumn(format="percent")})
+    st.caption("A pick can be on both lists, so the two rows aren't added together.")
 else:
-    st.caption("No graded locked calls yet.")
+    st.caption("No graded slate yet — the first one is graded the morning after it's played.")
 
-# ---------------------------------------------------------------- 2. use tags
-st.markdown("### 2 · Recommendations by tag")
-st.caption("Every player-prop read is snapshotted at kickoff and graded against the box score the next morning. The "
-           "Use tag is what the platform told members to do with it. A 🎟️ parlay leg needs ~60%; a 🎯 single needs to "
-           "beat the price (~52% at −110). Last 30 days, from each sport's latest morning review.")
-if tags:
-    df = pd.DataFrame([{"Sport": t["sport"], "Use": t["use"], "Graded": t["n"], "Hit": t["hit"], "Model said": t["said"],
-                        "95% range": rng(t["lo"], t["hi"]),
-                        "Reading": I.verdict(t["n"], t["hit"],
-                                             0.60 if "Parlay" in str(t["use"]) else (0.524 if "Single" in str(t["use"])
-                                                                                    else None), t["lo"])}
-                       for t in tags if not PE.is_pass(t["use"])])
-    st.dataframe(df, hide_index=True, width="stretch",
-                 column_config={"Hit": st.column_config.NumberColumn(format="percent"),
-                                "Model said": st.column_config.NumberColumn(format="percent")})
-    passes = [t for t in tags if PE.is_pass(t["use"])]
-    if passes:
-        n = sum(t["n"] for t in passes)
-        h = sum((t["hit"] or 0) * t["n"] for t in passes) / n if n else None
-        st.caption(f"⚪ No edge reads (the ones the platform told members to skip): {n:,} graded, hit {pct(h)} — the "
-                   "comparison group.")
+# ---------------------------------------------------------------- 2. closing line
+st.markdown("### 2 · Beating the closing line")
+st.caption("The closing price is the market's final, sharpest estimate. Since Nov 22 each shown pick's close is captured "
+           "in the last minutes before its game. Getting a better number than the close, consistently, is the standard "
+           "early proof of an edge — it shows up long before profit does. 50% = no edge.")
+crow = []
+for name, r in (("Strongest list", strong), ("💰 picks", money)):
+    if r and r.get("clv_moved"):
+        crow.append({"List": name, "Prices that moved": r["clv_moved"], "Beat the close": r["beat_rate"],
+                     "95% range": rng(r.get("beat_lo"), r.get("beat_hi")),
+                     "Average": f"{r['clv_avg']:+.1f}%" if r.get("clv_avg") is not None else "—"})
+if crow:
+    st.dataframe(pd.DataFrame(crow), hide_index=True, width="stretch",
+                 column_config={"Beat the close": st.column_config.NumberColumn(format="percent")})
+    if max(c["Prices that moved"] for c in crow) < 200:
+        st.caption("Early: a few hundred moves are needed before this reads as evidence.")
 else:
-    st.caption("No morning reviews yet.")
+    st.caption("No closing prices graded yet for the current record.")
 
 # ---------------------------------------------------------------- 3. calibration
 st.markdown("### 3 · Are the stated chances honest?")
 st.caption("Reads grouped by the chance the model gave them: when it says 60%, do they hit about 60%? Honest chances "
-           "are what make every other number trustworthy — and what members size their bets on.")
+           "are what make every other number trustworthy — and what members size their bets on. Last 30 days, from each "
+           "sport's latest morning review.")
 cal = I.calibration(reports)
 if cal:
     st.dataframe(pd.DataFrame([{"Sport": c["sport"], "Model said": c["range"], "Reads": c["n"], "Average said": c["said"],
@@ -131,35 +151,72 @@ if cal:
                  hide_index=True, width="stretch",
                  column_config={"Average said": st.column_config.NumberColumn(format="percent"),
                                 "Actually hit": st.column_config.NumberColumn(format="percent")})
-    st.caption("Where a sport's chances ran high, the platform measures it and applies a correction — approved by the owner, "
-               "and only after it holds up on games it wasn't fitted to.")
-
-# ---------------------------------------------------------------- 4. closing line
-st.markdown("### 4 · Beating the closing line")
-st.caption("The closing price is the market's final, sharpest estimate. Getting a better price than the close, consistently, "
-           "is the standard early proof of an edge — it shows up long before profit does.")
-if clv["n"]:
-    st.markdown(f"Since **{clv['since']}** (the current model): **{clv['n']} bets** with a closing price. Of the "
-                f"{clv['moved']} whose price moved, the bet got the better number **{pct(clv['beat'])}** of the time "
-                f"(95% range {rng(clv['lo'], clv['hi'])}; 50% = no edge); average **{clv['avg']:+.2f}%** per bet. "
-                f"{clv['unchanged']} closed at the same price.")
-    if clv["moved"] < 200:
-        st.caption(f"Early: {clv['moved']} priced moves is well short of the few hundred this needs.")
+    st.caption("Since Nov 21 the chance shown on a pick is the earned chance: the books' chance plus only the part of the "
+               "model's disagreement its record has earned.")
 else:
-    st.caption("Closing prices haven't been captured for enough current-model bets yet.")
-_old = I.closing_line(bets, since=None)
-st.caption(f"Earlier record (all time, {_old['n']} bets): beat the close {pct(_old['beat'])} of the bets whose price moved. "
-           "It is mostly summer MLB bets whose entry and closing prices were taken at different lines, so it isn't a "
-           f"like-for-like comparison; {_old['dropped']} pairs priced beyond ±{I.MAX_ODDS} are left out.")
+    st.caption("No morning reviews yet.")
+
+# ---------------------------------------------------------------- 4. analyst calls
+st.markdown("### 4 · Analyst Desk calls")
+st.caption(f"Since {datetime.fromisoformat(I.ANALYST_ERA):%b %-d} the Desk locks every covered sport's calls on a "
+           "schedule, before each game, and can't change them afterward; the full record downloads as a CSV with a "
+           "fingerprint on the Analyst Record page. The test: does the hit rate match the chance the model stated?")
+if lc["n"]:
+    st.markdown(f"**{lc['n']:,} graded** of {lc['locked']:,} locked: hit **{pct(lc['hit'])}** "
+                f"(95% range {rng(lc['lo'], lc['hi'])}) against **{pct(lc['said'])}** stated.")
+    st.dataframe(pd.DataFrame([{"Sport": r["sport"], "Graded": r["n"], "Hit": r["hit"], "Model said": r["said"],
+                                "95% range": rng(r["lo"], r["hi"])} for r in lc["by_sport"]]),
+                 hide_index=True, width="stretch",
+                 column_config={"Hit": st.column_config.NumberColumn(format="percent"),
+                                "Model said": st.column_config.NumberColumn(format="percent")})
+else:
+    st.caption(f"{lc['locked']:,} locked, none graded yet — the first are graded the morning after their games.")
 
 # ---------------------------------------------------------------- 5. real money
 st.markdown("### 5 · Real money (labeled: the noisiest measure)")
 st.caption("The owner's own bets at small, flat stakes while the record is proven. Over a short window this mostly "
            "reflects luck — shown for completeness, not as the evidence.")
 if rm["settled"]:
-    st.markdown(f"{rm['first']} → {rm['last']}: **{rm['settled']} settled bets**, ROI **{pct((rm['roi'] or 0) / 100, True)}**. "
+    st.markdown(f"Since {_era:%b %-d}: **{rm['settled']} settled bets**, ROI **{pct((rm['roi'] or 0) / 100, True)}**. "
                 f"Singles: {rm['singles']}, hit {pct(rm['singles_hit'])} (95% range {rng(rm['lo'], rm['hi'])}).")
+else:
+    st.caption(f"No real-money bets settled since {_era:%b %-d}.")
+
+# ---------------------------------------------------------------- earlier builds
+with st.expander(f"🗂️ Earlier builds (October – {(_era - timedelta(days=1)):%b %-d}) — kept, not counted above"):
+    st.caption("The platform's record before the current rules. Kept in full so anyone can see how the model got here; "
+               "not mixed into the numbers above, because the rules that chose these picks have since changed.")
+    olc = I.locked_calls(old_calls)
+    if olc["n"]:
+        st.markdown(f"**Analyst Desk, {olc['first']} → {olc['last']}:** {olc['n']:,} graded of {olc['locked']:,} "
+                    f"locked, hit **{pct(olc['hit'])}** (95% range {rng(olc['lo'], olc['hi'])}) against "
+                    f"**{pct(olc['said'])}** stated. Locked only on days the Desk was opened (24 of 43 days), so it isn't "
+                    "a complete daily record. Until Nov 6 it also held an older fallback model whose chances ran high "
+                    "(NBA: 51% hit vs 61% stated over 976).")
+    tags = I.use_tags(reports)
+    if tags:
+        st.markdown("**Recommendations by tag, last 30 days** (the board's reads, not only the picks shown):")
+        st.dataframe(pd.DataFrame([{"Sport": t["sport"], "Use": t["use"], "Graded": t["n"], "Hit": t["hit"],
+                                    "Model said": t["said"], "95% range": rng(t["lo"], t["hi"])}
+                                   for t in tags if not PE.is_pass(t["use"])]),
+                     hide_index=True, width="stretch",
+                     column_config={"Hit": st.column_config.NumberColumn(format="percent"),
+                                    "Model said": st.column_config.NumberColumn(format="percent")})
+    clv = I.closing_line(bets)
+    if clv["n"]:
+        st.markdown(f"**Bet Log closing line since {clv['since']}:** {clv['n']} bets with a closing price; of "
+                    f"{clv['moved']} that moved, beat the close **{pct(clv['beat'])}** (95% range "
+                    f"{rng(clv['lo'], clv['hi'])}), average {clv['avg']:+.2f}%.")
+    _old = I.closing_line(bets, since=None)
+    st.caption(f"All-time Bet Log closing line ({_old['n']} bets): beat the close {pct(_old['beat'])} of moved prices — "
+               "mostly summer MLB bets whose entry and close were taken at different lines, so not like for like; "
+               f"{_old['dropped']} pairs priced beyond ±{I.MAX_ODDS} are left out.")
+    arm = I.real_money(bets)
+    if arm["settled"]:
+        st.caption(f"All-time real money, {arm['first']} → {arm['last']}: {arm['settled']} settled bets, ROI "
+                   f"{pct((arm['roi'] or 0) / 100, True)}.")
+
 st.markdown("---")
 st.caption("Methodology: hit-rate ranges are 95% Wilson intervals. Voids (player didn't play) and pushes are excluded. "
-           "Parlays count once. 'Model said' is the chance the model stated before the game. Sources: the Analyst Record "
-           "ledger, the Postgame Review morning reports, and the Bet Log.")
+           "Parlays count once. 'Model said' is the chance the model stated before the game. Sources: the picks-as-shown "
+           "ledger, the Analyst Record ledger, the Postgame Review morning reports, and the Bet Log.")

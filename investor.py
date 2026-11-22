@@ -17,6 +17,42 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 SPORTS = ("NFL", "NBA", "NHL", "NCAAF", "NCAAMB")
 
+# Nov 22 (owner: "does it make sense to have all of our counters start at today, since the platform has changed
+# significantly since October? Your call"). The headline counts from the CURRENT PLATFORM's start, not today and not
+# October: Nov 21 is the first slate of the picks-as-shown ledger with the rules frozen and versioned (rules.py) -- the
+# first record that is like for like from day to day. Nothing earlier is deleted: it moves to a labeled "earlier builds"
+# section, because an investor's diligence would find a record that was wiped, and that costs more trust than a weak
+# early number. The Analyst Record's own era starts Nov 22, its first day locked on a schedule.
+ERA = "2026-11-21"
+ANALYST_ERA = "2026-11-22"
+
+
+def _combine(recs: Sequence[Optional[Dict]]) -> Optional[Dict]:
+    """pick_ledger.since_record results summed (several sports' 💰 records into one)."""
+    recs = [r for r in recs if r]
+    if not recs:
+        return None
+    acc = {k: sum(r.get(k) or 0 for r in recs) for k in ("hits", "misses", "units", "priced", "clv_beat", "clv_lost",
+                                                         "clv_pct_sum", "clv_pct_n")}
+    need = sum((r.get("needed") or 0) * (r.get("priced") or 0) for r in recs)
+    n = acc["hits"] + acc["misses"]
+    moved = acc["clv_beat"] + acc["clv_lost"]
+    lo, hi = wilson(acc["hits"], n)
+    blo, bhi = wilson(acc["clv_beat"], moved)
+    return dict(acc, n=n, hit_rate=acc["hits"] / n if n else None, lo=lo, hi=hi,
+                needed=need / acc["priced"] if acc["priced"] else None,
+                roi=acc["units"] / acc["priced"] if acc["priced"] else None,
+                clv_moved=moved, beat_rate=acc["clv_beat"] / moved if moved else None, beat_lo=blo, beat_hi=bhi,
+                clv_avg=acc["clv_pct_sum"] / acc["clv_pct_n"] if acc["clv_pct_n"] else None)
+
+
+def current_record(end: str, get=None, sports_: Sequence[str] = SPORTS) -> Dict:
+    """The current platform's picks as shown, ERA..end: {"strong", "money" (💰 props + game lines), "all"}."""
+    import pick_ledger as PL
+    strong = _combine([PL.since_record("strong", "ALL", ERA, end, get)])
+    money = _combine([PL.since_record(k, sp, ERA, end, get) for k in ("money", "games") for sp in sports_])
+    return {"strong": strong, "money": money, "since": ERA}   # kept apart: a pick can be on both lists
+
 
 def wilson(hits: int, n: int, z: float = 1.96) -> Tuple[Optional[float], Optional[float]]:
     """95% range for a hit rate (Wilson score interval)."""
@@ -120,9 +156,10 @@ def closing_line(bets: Sequence[Dict], since: Optional[str] = CLV_ERA) -> Dict:
             "lo": lo, "hi": hi, "since": since}
 
 
-def real_money(bets: Sequence[Dict]) -> Dict:
+def real_money(bets: Sequence[Dict], since: Optional[str] = None) -> Dict:
     import betlog as B
-    real = [b for b in bets if b.get("is_real_bet") not in (False, 0, "0", "false")]
+    real = [b for b in bets if b.get("is_real_bet") not in (False, 0, "0", "false")
+            and (since is None or str(b.get("slate_date") or "") >= since)]
     s = B.summary(real)
     singles = [b for b in B.money_bets(real) if not B.is_parlay_header(b) and not B._ticket(b)
                and B._result(b) in ("win", "loss")]
