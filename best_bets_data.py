@@ -970,7 +970,15 @@ def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFA
     if not api_key:
         return None
     sport = sports.get(sport_key)
-    if sport_key in BIG_SLATE_SPORTS:
+    if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
+        # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): building a college slate here
+        # takes ~1 GB and many minutes -- the Cloud app runs out of memory and dies for everyone. Read the warm job's
+        # saved board's games instead; nothing saved yet = no reads (the page says so), never a build.
+        sb = saved_board(sport_key, date_str, preferred_book)
+        if not sb or not sb[1]:
+            return {}
+        meta = sb[1]
+    elif sport_key in BIG_SLATE_SPORTS:
         _rows, meta = _big_slate_props_games(sport, sport_key, date_str, api_key)
         if not meta:
             return {}
