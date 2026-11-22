@@ -28,5 +28,6 @@ def test_due_steps_in_only_for_a_skipped_run_inside_the_window():
 def test_every_listed_workflow_has_crons_and_none_are_force_on_dispatch():
     for wf in CW.WORKFLOWS:
         assert CW.crons_of(wf), wf
-    assert not {"daily-review", "tuning-report", "capture-ufc-odds", "close-watch"} & set(CW.WORKFLOWS)
+    assert not {"daily-review", "tuning-report", "capture-ufc-odds"} & set(CW.WORKFLOWS)
+    assert {"close-watch", "analyst-lock", "hot-tickets", "backup"} <= set(CW.WORKFLOWS)     # Nov 22: skipped today
     assert "morning-brief" in CW.WORKFLOWS and CW.INPUTS["morning-brief"] == {"kind": "auto"}
