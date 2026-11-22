@@ -69,7 +69,7 @@ def test_assemble_script_produces_all_seven_sections_for_both_sports():
 def test_assemble_script_handles_no_retro_gracefully():
     sections = PC.assemble_script("2026-07-14", [], [], None, None, sport="WNBA")
     text = PC.script_to_text("2026-07-14", sections)
-    assert "results not pulled yet" in text
+    assert "nothing graded yet" in text            # Nov 22: the shown record fills this in
 
 
 def test_selection_beats_uses_real_price_when_available():
