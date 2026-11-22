@@ -843,7 +843,9 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     if sport_key == "NCAAMB":
         reads = _ncaamb_reads(date_str, meta, offers, preferred_book)
         _snapshot(sport_key, date_str, reads)
-        return _with_display_names(sport_key, reads) or None
+        reads = _with_display_names(sport_key, reads) or None
+        _save_reads(sport_key, date_str, reads)
+        return reads
     if PM.FAMILY_BY_SPORT.get(sport_key) in ("football", "hockey"):
         labels = tuple(sorted({m.get("label") for m in meta if m.get("label")}))
         games = [g for g in PD.list_games(sport_key, date_str) if g["label"] in set(labels)]
@@ -863,7 +865,9 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
         reads = SP.family_slate_reads(sport_key, games, bundles, offers, lines,
                                       book=None if preferred_book in (None, "best") else preferred_book)
         _snapshot(sport_key, date_str, reads)
-        return _with_display_names(sport_key, reads) or None
+        reads = _with_display_names(sport_key, reads) or None
+        _save_reads(sport_key, date_str, reads)
+        return reads
     teams = tuple(sorted({(SP._int_or(m.get(f"{s}_id")), m.get(f"{s}_abbr")) for m in meta for s in ("home", "away")},
                          key=lambda t: str(t[0])))
     inputs = load_props_model_inputs(sport_key, date_str, teams)
@@ -927,6 +931,31 @@ def _ncaamb_reads(date_str: str, meta: List[Dict], offers: List[Dict], preferred
     return out
 
 
+READS_KEY = "READS:{sport}"
+
+
+def _save_reads(sport_key: str, date_str: str, reads) -> None:
+    """Nov 21: a college sport's reads, saved by the warm job's board build for the pages that need reads (the
+    Pick'em Board, the Edge Board) -- computing them takes ~4 GB, far past the Cloud app's memory."""
+    if sport_key not in HEAVY_BOARDS or not reads or _in_app():
+        return
+    try:
+        import slate_store as SS
+        if not SS._off():
+            SS.save(READS_KEY.format(sport=sport_key), date_str, reads)
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def saved_reads(sport_key: str, date_str: str) -> Optional[Dict]:
+    try:
+        import slate_store as SS
+        blob = SS.load(READS_KEY.format(sport=sport_key), date_str, max_age=SS.HEAVY_FRESH_S)
+        return SS.decode(blob) if blob is not None else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
 def _snapshot(sport_key: str, date_str: str, reads) -> None:
     """Keep what the model said before each game started, for the Postgame Review (model_store). Never fails a page."""
     try:
@@ -971,13 +1000,10 @@ def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFA
         return None
     sport = sports.get(sport_key)
     if sport_key in HEAVY_BOARDS and _in_app() and not os.environ.get("H2_BOARD_LIVE"):
-        # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): building a college slate here
-        # takes ~1 GB and many minutes -- the Cloud app runs out of memory and dies for everyone. Read the warm job's
-        # saved board's games instead; nothing saved yet = no reads (the page says so), never a build.
-        sb = saved_board(sport_key, date_str, preferred_book)
-        if not sb or not sb[1]:
-            return {}
-        meta = sb[1]
+        # Nov 21 (owner: the site crashed switching the Pick'em Board to NCAA Football): building a college slate and
+        # its reads here takes ~4 GB -- the Cloud app runs out of memory and dies for everyone. The warm job saves the
+        # reads with each board build (_save_reads); nothing saved yet = no reads (the page says so), never a build.
+        return saved_reads(sport_key, date_str) or {}
     elif sport_key in BIG_SLATE_SPORTS:
         _rows, meta = _big_slate_props_games(sport, sport_key, date_str, api_key)
         if not meta:
