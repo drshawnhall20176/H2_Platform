@@ -78,8 +78,8 @@ def test_nfl_game_lab_uses_the_shared_layout_once_games_are_saved_and_the_old_pa
     at.session_state["sport"] = "NFL"
     at.run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
-    slate = [d.value for d in at.dataframe if "The model says" in d.value.columns][0]
-    assert [x.split("leans ")[-1] for x in slate["The model says"]] == ["Baltimore Ravens -3.5"] and list(slate["Gap (pts)"]) == [2.0]
+    slate = [d.value for d in at.dataframe if "Leans" in d.value.columns][0]
+    assert [x.split("leans ")[-1].rstrip(")") for x in slate["Leans"]] == ["Baltimore Ravens -3.5"] and list(slate["Gap (pts)"]) == [2.0]
     m = {x.label: x.value for x in at.metric}
     assert m["Baltimore Ravens ML"] == "66.0%" and m["Projected spread"] == "Baltimore Ravens -5.5"
     assert "Decided by 3 or fewer" in m and "Decided by 14+ points" in m
