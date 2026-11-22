@@ -172,9 +172,10 @@ def discord_picks_text(calls: List[Dict], *, sport_label: str, date_str: str, bo
              f"Lines are from {book_label} at the time of posting. Each call is locked to the public record before kickoff."]
     for c in ordered:
         price = f" at {c['price']:+.0f}" if c.get("price") is not None else ""
-        when = f" · {c['kickoff']}" if c.get("kickoff") and c["kickoff"] != "time TBD" else ""
+        game = f" · {c['game']}" if c.get("game") else ""            # Nov 22 (owner): the game on every call
+        when = (f"{', ' if game else ' · '}{c['kickoff']}" if c.get("kickoff") and c["kickoff"] != "time TBD" else "")
         angles = ", ".join(a["label"] for a in c.get("angles", []))
-        lines.append(f"{'💎' if c.get('gem') else '•'} **{A.describe_call(c)}**{price}{when} — {angles}")
+        lines.append(f"{'💎' if c.get('gem') else '•'} **{A.describe_call(c)}**{price}{game}{when} — {angles}")
     return _fit(lines, (extra_line + "\n" if extra_line else "") + DISCLAIMER, "plays")
 
 
