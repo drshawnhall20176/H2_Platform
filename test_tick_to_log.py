@@ -174,3 +174,19 @@ def test_the_book_columns_star_the_models_side():
     df2 = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "Gap (pts)": 4.5}]), [g2], after="Gap (pts)")
     assert df2.loc[0, "Book spread"] == "⭐ Away: Butler +12.5" and df2.loc[0, "Book total"].endswith("⭐ Over")
     assert df2.loc[0, "Book ML"].endswith("⭐ Away")
+
+
+def test_prior_season_baseline_projects_from_last_seasons_games_only():
+    import hoops_games_page as HG
+    games = []
+    for i in range(40):                                        # 2025-26: Strong beats Weak by ~20 at home and away
+        d = f"2026-0{1 + i % 3}-{10 + i % 15:02d}"
+        h, a = ("Strong", "Weak") if i % 2 else ("Weak", "Strong")
+        games.append({"date": d, "home_team": h, "away_team": a,
+                      "home_points": 80 + (20 if h == "Strong" else 0), "away_points": 80 + (20 if a == "Strong" else 0)})
+    games.append({"date": "2026-11-10", "home_team": "Weak", "away_team": "Strong", "home_points": 120, "away_points": 60})
+    prior = HG.prior_season_games("NBA", "2026-11-22", games)
+    assert len(prior) == 40 and HG.prior_label("NBA", "2026-11-22") == "2025-26"
+    b = HG.baseline_projection("NBA", {"home": "Strong", "away": "Weak"}, prior)
+    assert 15 < b["model_margin"] < 25 and b["model_p"] > 0.9 and 150 < b["model_total"] < 230
+    assert HG.baseline_projection("NBA", {"home": "Strong", "away": "Nobody"}, prior) is None
