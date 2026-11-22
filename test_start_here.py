@@ -11,7 +11,9 @@ def _p(player, prob, use=PE.USE_SINGLE, **kw):
 RECS = {"NBA": {PE.USE_SINGLE: (30, 50), PE.USE_PARLAY: (4, 10), PE.USE_BOTH: (8, 25)}}
 
 
-def test_shortlist_leads_with_winning_pick_types_one_per_player():
+def test_shortlist_leads_with_winning_pick_types_one_per_player(monkeypatch):
+    import props_money as PM
+    monkeypatch.setattr(PM, "V3_FROM", "2099-01-01")         # the shortlist's own logic, on the model's chance
     plays = [_p("A", 0.58), _p("A", 0.66), _p("B", 0.71, use=PE.USE_PARLAY), _p("C", 0.62),
              _p("D", 0.80, use=PE.USE_BOTH),                              # that pick type has been losing: left out
              _p("E", 0.75, Lean="Check news"), _p("F", 0.74, Warnings=["minutes"]), _p("G", 0.9, use=PE.USE_PASS)]
