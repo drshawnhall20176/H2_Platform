@@ -145,56 +145,125 @@ def _events(api_key: str, sports_needed) -> Dict[str, List[Dict]]:
     return out
 
 
+def ledger_plan(rows_: List[Dict], events_by_sport: Dict[str, List[Dict]]) -> List[Tuple[datetime, str, Dict, List[Dict]]]:
+    """Nov 22: [(start, sport, event, ledger picks)] for every game with a shown pick (ledger_close.py)."""
+    import ledger_close as LC
+    games: Dict[str, Tuple[datetime, str, Dict, List[Dict]]] = {}
+    for r in rows_:
+        sp = r.get("sport") or ""
+        e = LC.match_event(r.get("game"), events_by_sport.get(sp) or [], LC.kickoff(r), r.get("game_id"))
+        when = _when(e) if e else None
+        if not e or not when:
+            continue
+        games.setdefault(e["id"], (when, sp, e, []))[3].append(r)
+    return sorted(games.values(), key=lambda g: g[0])
+
+
+def capture_ledger(event: Dict, rows_: List[Dict], api_key: str, sport_key: str) -> Dict[str, Dict]:
+    """{capture key: {"line", "price", "book", "at"}} for one game's shown picks."""
+    import ledger_close as LC
+    import odds_api as O
+    import sports
+    props, games = LC.markets_for(rows_, sport_key)
+    markets = props + [k for k in games if k not in props]
+    if not markets:
+        return {}
+    js, _ = O.fetch_event_props(event["id"], api_key, markets,
+                                sport=O.feed_for(event, sports.get(sport_key).odds_sport_key))
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    out = {}
+    for r in rows_:
+        c = LC.close_for(r, js or {}, sport_key)
+        if c and (c.get("price") is not None or c.get("line") is not None):
+            out[LC.cap_key(r)] = dict(c, at=at)
+    return out
+
+
+def _ledger_rows(now: datetime) -> List[Dict]:
+    import ledger_close as LC
+    out = []
+    for d in LC.slate_days(now):
+        try:
+            out += LC.ledger_rows(d)
+        except Exception as exc:                                # noqa: BLE001
+            print(f"  ledger {d}: couldn't read ({type(exc).__name__})")
+    return out
+
+
 def run(api_key: str, minutes: int = WATCH_MINUTES, once: bool = False, now_fn=lambda: datetime.now(timezone.utc),
-        sleep_fn=time.sleep) -> int:
+        sleep_fn=time.sleep, ledger_fn=None, save_fn=None) -> int:
     import betlog as B
+    import ledger_close as LC
+    ledger_fn = ledger_fn or _ledger_rows
+    save_fn = save_fn or LC.save_caps
     end = now_fn() + timedelta(minutes=minutes)
-    done: set = set()                                           # (event id, lead) already captured
+    done: set = set()                                           # (who, event id, lead) already captured
     written = 0
-    events_at, events_by_sport = None, {}
+    events_at, events_by_sport, have_sports = None, {}, set()
     while now_fn() < end:
         open_bets = [b for b in B.list_bets(settled=False) if watchable(b)]
-        if not open_bets:
-            print("No open bets to watch.")
+        led = [r for r in ledger_fn(now_fn()) if (LC.kickoff(r) or now_fn() + timedelta(hours=1)) > now_fn()]
+        if not open_bets and not led:
+            print("No open bets or shown picks to watch.")
             break
-        if events_at is None or (now_fn() - events_at).total_seconds() > EVENTS_REFRESH_S:
-            events_by_sport = _events(api_key, sorted({b.get("sport") or "" for b in open_bets}))
-            events_at = now_fn()
-        games = [g for g in plan(open_bets, events_by_sport) if g[0] > now_fn()]
+        need = {b.get("sport") or "" for b in open_bets} | {r.get("sport") or "" for r in led}
+        if events_at is None or (now_fn() - events_at).total_seconds() > EVENTS_REFRESH_S or not need <= have_sports:
+            events_by_sport = _events(api_key, sorted(need))
+            events_at, have_sports = now_fn(), set(need)
+        jobs = [("bet", g, CAPTURE_LEADS) for g in plan(open_bets, events_by_sport)] + \
+               [("ledger", g, LC.CAPTURE_LEADS) for g in ledger_plan(led, events_by_sport)]
         due, nxt = [], None
-        for when, sp, e, bets in games:
-            for lead in CAPTURE_LEADS:
-                at = when - timedelta(minutes=lead)
-                if (e["id"], lead) in done:
-                    continue
-                if at <= now_fn() or (once and when <= now_fn() + timedelta(minutes=60)):
-                    due.append((lead, when, sp, e, bets))
-                    done.add((e["id"], lead))
-                elif nxt is None or at < nxt:
-                    nxt = at
-        for lead, when, sp, e, bets in due:
-            try:
-                got = capture_event(e, bets, api_key, sp)
-            except Exception as exc:                            # noqa: BLE001
-                print(f"  [{sp}] {e.get('away_team')} @ {e.get('home_team')}: fetch failed ({type(exc).__name__})")
+        for who, (when, sp, e, items), leads in jobs:
+            if when <= now_fn():
                 continue
-            for bid, price in got.items():
-                try:
-                    B.update_bet(bid, close_odds=price)
-                    written += 1
-                except Exception as exc:                        # noqa: BLE001
-                    print(f"  failed to write bet {bid}: {exc}")
-            print(f"[{sp}] {e.get('away_team')} @ {e.get('home_team')} (starts {when:%H:%M} UTC, T-{lead}m): "
-                  f"{len(got)}/{len(bets)} bets priced")
+            todo = [ld for ld in leads if (who, e["id"], ld) not in done]
+            ready = [ld for ld in todo if when - timedelta(minutes=ld) <= now_fn()
+                     or (once and when <= now_fn() + timedelta(minutes=60))]
+            if ready:
+                lead = min(ready)                               # the latest capture due; earlier ones are moot
+                due.append((who, lead, when, sp, e, items))
+                done.update((who, e["id"], ld) for ld in leads if ld >= lead)
+            for ld in todo:
+                at = when - timedelta(minutes=ld)
+                if at > now_fn() and (nxt is None or at < nxt):
+                    nxt = at
+        for who, lead, when, sp, e, items in due:
+            label = f"[{sp}] {e.get('away_team')} @ {e.get('home_team')} (starts {when:%H:%M} UTC, T-{lead}m)"
+            try:
+                got = capture_event(e, items, api_key, sp) if who == "bet" else capture_ledger(e, items, api_key, sp)
+            except Exception as exc:                            # noqa: BLE001
+                print(f"  {label}: fetch failed ({type(exc).__name__})")
+                continue
+            if who == "bet":
+                for bid, price in got.items():
+                    try:
+                        B.update_bet(bid, close_odds=price)
+                        written += 1
+                    except Exception as exc:                    # noqa: BLE001
+                        print(f"  failed to write bet {bid}: {exc}")
+                print(f"{label}: {len(got)}/{len(items)} bets priced")
+            else:
+                by_day: Dict[str, Dict] = {}
+                for r in items:
+                    c = got.get(LC.cap_key(r))
+                    if c:
+                        by_day.setdefault(r.get("_day"), {})[LC.cap_key(r)] = dict(c, lead=lead)
+                for d, caps in by_day.items():
+                    try:
+                        save_fn(d, caps)
+                        written += len(caps)
+                    except Exception as exc:                    # noqa: BLE001
+                        print(f"  failed to save shown-pick closes: {exc}")
+                print(f"{label}: {sum(len(c) for c in by_day.values())}/{len(items)} shown picks priced")
         if once:
             break
         if nxt is None:
-            print("No more kickoffs with open bets in view.")
+            print("No more starts with open bets or shown picks in view.")
             break
         if nxt >= end:
             print(f"Next capture ({nxt:%H:%M} UTC) is after this run's window; a later run takes it.")
             break
-        wait = max(30.0, min((nxt - now_fn()).total_seconds(), 900.0))   # re-check at least every 15 min (new bets)
+        wait = max(30.0, min((nxt - now_fn()).total_seconds(), 900.0))   # re-check at least every 15 min (new picks)
         sleep_fn(wait)
     print(f"Wrote {written} closing price(s).")
     return written
