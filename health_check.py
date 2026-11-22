@@ -23,7 +23,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 KEY = "health:morning"
 KEY_JOBS = ("warm-slates", "settle-results", "capture-closing-lines", "community-post", "capture-game-picks",
-            "analyst-lock")
+            "analyst-lock", "hot-tickets")
 LOW_CREDITS = 2000
 IGNORE = ("research", "inspect-day")    # analysis runs started by hand, not the platform's jobs
 
