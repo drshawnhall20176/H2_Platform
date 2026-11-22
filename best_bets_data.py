@@ -835,6 +835,14 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     or there are no book lines to read against."""
     if sport_key not in PROPS_MODEL_SPORTS or not offers or not meta:
         return None
+    # Nov 21 (page audit: Long Shots on NCAA Football peaked at 4.1 GB): in the app, every caller reads the warm job's
+    # saved reads first, and the heavy sports never compute them here.
+    if _heavy_guard():
+        _saved = saved_reads(sport_key, date_str)
+        if _saved:
+            return _saved
+        if sport_key in HEAVY_BOARDS:
+            return None
     import json
     import position_data as PD
     import position_lines as PL
