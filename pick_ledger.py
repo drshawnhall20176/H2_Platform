@@ -336,9 +336,54 @@ def finished_games(sport: str, day: str, cache: Dict) -> List[tuple]:
     return cache[k]
 
 
+FOOTBALL = ("NFL", "NCAAF")
+
+
+def _team_match(label: str, name) -> bool:
+    if str(label).strip().lower() == str(name or "").strip().lower():
+        return True
+    import ledger_close as LC
+    return LC.same_team(label, name)
+
+
+def football_final(r: Dict, day: str, cache: Dict) -> bool:
+    """Nov 22 (health check: Elija Lofton, Caden High never graded): is the pick's football game over? From the season
+    schedule (CFBD 'completed'; nflverse scores), the game starting on `day` (New York) or within the next day."""
+    if " @ " not in str(r.get("game") or ""):
+        return False
+    k = ("fsched", r["sport"], day[:4])
+    if k not in cache:
+        try:
+            import sports
+            cache[k] = sports.get(r["sport"]).engine.get_schedule(int(day[:4])) or []
+        except Exception:                                       # noqa: BLE001
+            cache[k] = []
+    away, home = [x.strip() for x in str(r["game"]).split(" @ ", 1)]
+    d0 = date.fromisoformat(day)
+    for g in cache[k]:
+        when = str(g.get("start_date") or g.get("gameday") or g.get("game_date") or "")[:10]
+        try:
+            gd = date.fromisoformat(when)
+        except ValueError:
+            continue
+        if not (d0 <= gd <= d0 + timedelta(days=1)):            # a 7:30 PM ET start is the next day in UTC
+            continue
+        if not (_team_match(away, g.get("away_team")) and _team_match(home, g.get("home_team"))):
+            continue
+        return bool(g.get("completed")) or (g.get("home_score") is not None and g.get("away_score") is not None
+                                            and str(g.get("home_score")) not in ("", "nan"))
+    return False
+
+
 def dnp_void(r: Dict, day: str, cache: Dict) -> bool:
     """Nov 22 (health check: Tatum, P.J. Washington never graded): a player missing from the final box score of a
-    FINISHED game didn't play -- the books void that prop, and so does the ledger."""
+    FINISHED game didn't play -- the books void that prop, and so does the ledger.
+
+    Football (Nov 22): the weekly stat lines list only players who recorded a stat, so a player missing from a
+    finished game either didn't play (the books void) or played without a stat (a 0-catch Under wins). The ledger
+    can't tell which, so it voids -- it never counts a win it can't show."""
+    if r.get("sport") in FOOTBALL:
+        return football_final(r, day, cache)
     if r.get("sport") not in DNP_SPORTS or " @ " not in str(r.get("game") or ""):
         return False
     away, home = [x.strip().lower() for x in str(r["game"]).split(" @ ", 1)]

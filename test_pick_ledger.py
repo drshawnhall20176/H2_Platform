@@ -153,4 +153,19 @@ def test_a_player_missing_from_a_finished_game_is_void(monkeypatch):
     r = {"sport": "NBA", "game": "Boston Celtics @ Sacramento Kings", "pid": 1}
     assert PL.dnp_void(r, "2026-11-21", cache)
     assert not PL.dnp_void(dict(r, game="LA Clippers @ Dallas Mavericks"), "2026-11-21", cache)
+    cache[("fsched", "NCAAF", "2026")] = []
     assert not PL.dnp_void(dict(r, sport="NCAAF"), "2026-11-21", cache)
+
+
+def test_a_football_player_with_no_stat_line_in_a_finished_game_is_void():
+    """Nov 22: Elija Lofton / Caden High (CFBD lists only players with a stat) -- void, never a guessed win."""
+    cache = {("fsched", "NCAAF", "2026"): [
+        {"start_date": "2026-11-22T00:30:00.000Z", "completed": True, "away_team": "Stanford", "home_team": "California"},
+        {"start_date": "2026-11-28T17:00:00.000Z", "completed": False, "away_team": "Boston College", "home_team": "Miami"}],
+        ("fsched", "NFL", "2026"): [{"gameday": "2026-11-22", "away_team": "MIN", "home_team": "SF", "home_score": 24,
+                                     "away_score": 20}]}
+    r = {"sport": "NCAAF", "game": "Stanford @ California", "pid": "5231354"}
+    assert PL.dnp_void(r, "2026-11-21", cache)                            # 7:30 PM ET = next day in UTC
+    assert not PL.dnp_void(dict(r, game="Boston College @ Miami"), "2026-11-21", cache)   # not this week
+    assert PL.dnp_void({"sport": "NFL", "game": "MIN @ SF"}, "2026-11-22", cache)
+    assert not PL.dnp_void({"sport": "NFL", "game": "NYJ @ LAC"}, "2026-11-22", cache)
