@@ -392,6 +392,22 @@ def ncaamb_day(day: date, fetch: Callable = _http) -> List[Dict]:
     return out
 
 
+def ncaamb_neutral(day: date, fetch: Callable = _http) -> List[tuple]:
+    """Nov 22: [(home, away)] of the day's NEUTRAL-SITE games, played or not (ESPN neutralSite). The odds feed doesn't
+    say a game is at a neutral site, so without this every tournament game gave its listed "home" team home court --
+    about 10 points too many for that team in the walk-forward test (53 neutral games, Nov 4-21)."""
+    data = fetch(NCAAMB_URL, {"dates": day.strftime("%Y%m%d"), "groups": 50, "limit": 500}) or {}
+    out = []
+    for ev in data.get("events") or []:
+        for c in ev.get("competitions") or []:
+            if not c.get("neutralSite"):
+                continue
+            side = {t.get("homeAway"): (t.get("team") or {}).get("displayName") for t in c.get("competitors") or []}
+            if side.get("home") and side.get("away"):
+                out.append((side["home"], side["away"]))
+    return out
+
+
 def espn_day(league: str, day: date, fetch: Callable = _http) -> List[Dict]:
     """Completed games on `day` for an ESPN pro league (NBA / NHL / WNBA)."""
     data = fetch(ESPN_LEAGUE_URL[league], {"dates": day.strftime("%Y%m%d"), "limit": 100}) or {}
@@ -467,7 +483,12 @@ def decay_weights(games: Sequence[Dict], asof: str, league: str) -> List[float]:
     return out
 
 
-HFA_PRIOR = {"NCAAMB": (3.0, 200.0), "NBA": (2.5, 200.0), "NHL": (0.25, 200.0), "WNBA": (2.5, 200.0),
+# Nov 22 (owner: "fix it"): college home court was fitted FREELY in effect -- a 200-strength prior let it climb to
+# 9.5 points by Nov 22 (early-season home teams host much weaker schools, and the fit read their blowouts as home
+# court). In games within 10 points on the spread that overrated the home side by 7.2 points. A firm prior at about
+# college basketball's real home edge: walk-forward Nov 4-21, close games' bias +7.2 -> +1.3 points, error 11.0 ->
+# 9.6, win-chance log loss 0.835 -> 0.716, against the spread 48.8% -> 53.1% (with the neutral-site fix below).
+HFA_PRIOR = {"NCAAMB": (3.2, 20000.0), "NBA": (2.5, 200.0), "NHL": (0.25, 200.0), "WNBA": (2.5, 200.0),
              "NFL": (1.7, 200.0)}
 
 
