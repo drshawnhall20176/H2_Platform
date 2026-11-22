@@ -570,3 +570,29 @@ def _previews(at):
         if "✓ Money" not in d.value.columns:
             return d.value
     return at.dataframe[0].value
+
+
+def test_a_neutral_site_college_game_gets_no_home_court():
+    """Nov 22: the odds feed doesn't flag neutral sites; ESPN does (intl_hoops.ncaamb_neutral)."""
+    import intl_picks as IP
+    r = {"mu": 70.0, "off": {"Duke Blue Devils": 5.0, "Army Black Knights": -5.0},
+         "def": {"Duke Blue Devils": -5.0, "Army Black Knights": 5.0}, "hfa": 3.2}
+    ev = [_ev("c1", "Duke Blue Devils", "Army Black Knights", -500, 400, spread=-18.5, total=140)]
+    home = IP.hoops_build("NCAAMB", r, ev, NOW)[0]
+    neu = IP.hoops_build("NCAAMB", r, ev, NOW, neutral=[("Duke Blue Devils", "Army Black Knights")])[0]
+    assert neu["neutral"] and not home["neutral"]
+    assert round(home["model_margin"] - neu["model_margin"], 1) == 3.2
+    other = IP.hoops_build("NCAAMB", r, ev, NOW, neutral=[("Michigan St Spartans", "Army Black Knights")])[0]
+    assert not other["neutral"]
+
+
+def test_ncaamb_neutral_reads_espn_flags():
+    import intl_hoops as I
+    data = {"events": [{"competitions": [{"neutralSite": True, "competitors": [
+        {"homeAway": "home", "team": {"displayName": "Duke Blue Devils"}},
+        {"homeAway": "away", "team": {"displayName": "Army Black Knights"}}]}]},
+        {"competitions": [{"neutralSite": False, "competitors": [
+            {"homeAway": "home", "team": {"displayName": "X"}}, {"homeAway": "away", "team": {"displayName": "Y"}}]}]}]}
+    from datetime import date
+    assert I.ncaamb_neutral(date(2026, 11, 22), fetch=lambda u, p=None: data) == [("Duke Blue Devils", "Army Black Knights")]
+    assert I.HFA_PRIOR["NCAAMB"] == (3.2, 20000.0)

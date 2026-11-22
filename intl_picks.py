@@ -519,8 +519,10 @@ def hoops_refresh(league: str, fetch: Callable = _http, today: Optional[date] = 
     return MS.save_results(league, rows, db_path=db_path)
 
 
-def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime, k: float = 1.0) -> List[Dict]:
-    """k: the league's automatic win-chance calibration (tennis_calibration, Nov 12); 1.0 = none applied yet."""
+def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: datetime, k: float = 1.0,
+                neutral: Sequence[tuple] = ()) -> List[Dict]:
+    """k: the league's automatic win-chance calibration (tennis_calibration, Nov 12); 1.0 = none applied yet.
+    neutral (Nov 22): [(home, away)] played at a neutral site (intl_hoops.ncaamb_neutral) -- no home court there."""
     rules = HOOPS_RULES.get(league, {})
     se, te, me = rules.get("spread"), rules.get("total"), rules.get("ml")
     out = []
@@ -532,7 +534,9 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
         if ko <= now:
             continue
         home, away = ev.get("home_team"), ev.get("away_team")
-        proj = I.project(r, home, away, loose=league != "NCAAMB")
+        _is = lambda x, y: I.find_team([x], y) is not None    # noqa: E731 -- strict: no "Michigan" ~ "Michigan St"
+        neu = any((_is(h, home) and _is(a, away)) or (_is(h, away) and _is(a, home)) for h, a in neutral or ())
+        proj = I.project(r, home, away, neutral=neu, loose=league != "NCAAMB")
         mk = market(ev, home, away)
         if not proj or mk["home_spread"] is None:
             continue
@@ -545,6 +549,7 @@ def hoops_build(league: str, r: Optional[Dict], events: Sequence[Dict], now: dat
         ce = cover_estimate(league, edge)
         tag = use_tag(ce["chance"] if ce else None)
         out.append({"sport": league, "game_id": str(ev.get("id")), "kickoff": ko.isoformat(), "home": home,
+                    "neutral": neu,
                     "cover_est": None if not ce else ce["chance"], "cover_n": None if not ce else ce["n"],
                     "use": tag["use"], "lock": tag["lock"],
                     "away": away, "model_margin": round(proj["margin"], 1), "model_total": round(proj["total"], 1),
@@ -629,7 +634,14 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     if cfg.get("odds_key"):
         evs = fetch(ODDS.format(key=cfg["odds_key"]), {"apiKey": api_key, "regions": "us",
                                                         "markets": "h2h,spreads,totals", "oddsFormat": "american"}) or []
-        recs = hoops_build(league, r, evs, now, TC.current_k(sport=league))
+        neutral = []
+        if league == "NCAAMB":                                 # Nov 22: tournament games have no home court
+            for d in (now.date() - timedelta(days=1), now.date(), now.date() + timedelta(days=1)):
+                try:
+                    neutral += I.ncaamb_neutral(d, fetch)
+                except Exception:                               # noqa: BLE001 -- a missing flag never blocks a capture
+                    pass
+        recs = hoops_build(league, r, evs, now, TC.current_k(sport=league), neutral=neutral)
     else:                                                      # no odds feed for this league: fair lines from the schedule
         evs = []
         if league in getattr(I, "GENIUS_COMPS", {}):
