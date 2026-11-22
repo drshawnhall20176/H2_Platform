@@ -49,8 +49,26 @@ def run(lab, hfa_prior, neutral_aware, fixed_hfa=None):
 rec_errs=[f["model_margin"]-(f["final_home"]-f["final_away"]) for f in lined]
 print("AS RECORDED: bias %+.2f" % (sum(rec_errs)/len(rec_errs)))
 P=I.HFA_PRIOR["NCAAMB"]
-run("current (prior 3/200, no neutral)", P, False)
-run("+ neutral at prediction", P, True)
-for hv in (2.5, 3.0, 3.5, 4.0):
+#run("current (prior 3/200, no neutral)", P, False)
+#run("+ neutral at prediction", P, True)
+for hv in ():
     run(f"neutral + HFA fixed {hv} (fit as now)", P, True, fixed_hfa=hv)
-run("neutral + prior 3.2/20000 (refit)", (3.2, 20000.0), True)
+#run("neutral + prior 3.2/20000 (refit)", (3.2, 20000.0), True)
+
+print("---- close games (|book spread| <= 10) and win-chance accuracy ----")
+def run2(lab, hfa_prior, neutral_aware):
+    e, ll, br, n = [], 0.0, 0.0, 0
+    for f in lined:
+        if abs(f["home_spread"]) > 10: continue
+        r = ratings_at(f["_day"], hfa_prior, str(hfa_prior))
+        p = I.project(r, f["home"], f["away"], neutral=(f["_neutral"] and neutral_aware))
+        if not p: continue
+        act = f["final_home"]-f["final_away"]; e.append(p["margin"]-act)
+        q = I.win_prob(p["margin"], league="NCAAMB"); y = 1.0 if act > 0 else 0.0
+        q = min(max(q, 1e-4), 1-1e-4); ll -= y*math.log(q)+(1-y)*math.log(1-q); br += (q-y)**2; n += 1
+    k=len(e); mb=sum(e)/k; se=(sum((x-mb)**2 for x in e)/(k-1))**.5/math.sqrt(k)
+    print(f"{lab:38s} close games n={k} bias {mb:+.2f}±{se:.2f} mae {sum(abs(x) for x in e)/k:.2f} | win-chance log loss {ll/n:.4f} brier {br/n:.4f}")
+run2("current", P, False)
+run2("neutral only", P, True)
+run2("neutral + prior 3.2/20000", (3.2, 20000.0), True)
+run2("neutral + prior 4.0/20000", (4.0, 20000.0), True)
