@@ -137,6 +137,11 @@ def check_ledgers(day: str, load: Optional[Callable] = None) -> List[Dict]:
 # each morning: league -> (a "close game" is within this many points on the spread, the bias that raises a warning).
 BIAS_LEAGUES = {"NCAAMB": (10.0, 3.0), "NBA": (10.0, 3.0), "NFL": (7.0, 3.0), "NCAAF": (7.0, 3.5), "NHL": (1.5, 0.5)}
 BIAS_DAYS = 14
+TOTAL_LIMIT = {"NCAAMB": 4.0, "NBA": 4.0, "NFL": 3.5, "NCAAF": 4.0, "NHL": 0.5}
+SLOPE_RANGE = (0.6, 1.6)
+SHOWN_DAYS = 14
+SHOWN_MIN_N = 40
+SHOWN_GAP = 0.07
 BIAS_MIN_N = 30
 LEAN_MIN_N = 12
 LEAN_SHARE = 0.8
@@ -165,6 +170,32 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
             size = abs(float(ref)) if ref is not None else abs(float(r["model_margin"]))
             if size <= close:
                 errs.append(float(r["model_margin"]) - (float(r["final_home"]) - float(r["final_away"])))
+        # Nov 22 (owner: "enact methods to keep it from reintroducing itself"): totals running high or low, and margins
+        # too extreme or too timid (the slope of actual margins on the model's: 1 = right size)
+        tots, pairs = [], []
+        for r in recs or []:
+            if str(r.get("kickoff") or "")[:10] < since or r.get("final_home") is None or r.get("model_margin") is None:
+                continue
+            act_m = float(r["final_home"]) - float(r["final_away"])
+            pairs.append((float(r["model_margin"]), act_m))
+            if r.get("model_total") is not None:
+                tots.append(float(r["model_total"]) - (float(r["final_home"]) + float(r["final_away"])))
+        tlim = TOTAL_LIMIT.get(lg)
+        if tlim and len(tots) >= BIAS_MIN_N:
+            tm = sum(tots) / len(tots)
+            tsd = (sum((t - tm) ** 2 for t in tots) / (len(tots) - 1)) ** 0.5
+            if abs(tm) > tlim and tsd and abs(tm) / (tsd / len(tots) ** 0.5) >= 2.5:
+                out.append(_issue("model bias", "warn", f"{lg} game model's totals run {abs(tm):.1f} "
+                                  f"{'high' if tm > 0 else 'low'} (last {BIAS_DAYS} days, {len(tots)} games)"))
+        if len(pairs) >= 60:
+            mx = sum(a for a, _ in pairs) / len(pairs)
+            my = sum(b for _, b in pairs) / len(pairs)
+            sxx = sum((a - mx) ** 2 for a, _ in pairs)
+            slope = sum((a - mx) * (b - my) for a, b in pairs) / sxx if sxx else None
+            if slope is not None and not (SLOPE_RANGE[0] <= slope <= SLOPE_RANGE[1]):
+                out.append(_issue("model bias", "warn", f"{lg} game model's margins are too "
+                                  f"{'extreme' if slope < SLOPE_RANGE[0] else 'timid'}: actual margins run {slope:.2f}x "
+                                  f"the model's (last {BIAS_DAYS} days, {len(pairs)} games; 1.00 = the right size)"))
         if len(errs) >= BIAS_MIN_N:
             m = sum(errs) / len(errs)
             sd = (sum((e - m) ** 2 for e in errs) / (len(errs) - 1)) ** 0.5
@@ -198,6 +229,47 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
     return out
 
 
+def check_shown(today: str, load: Optional[Callable] = None) -> List[Dict]:
+    """Nov 22: the picks members actually saw (strongest list, 💰, Hot Tickets) -- did they hit as often as the chance
+    shown said? By sport and sportsbook vs pick'em, last SHOWN_DAYS days; a shortfall of SHOWN_GAP+ at 2+ standard
+    errors warns (pick'em lines said 57% and hit 44-52% for days before the Nov 22 audit)."""
+    import pick_ledger as PL
+    load = load or PL.load
+    groups: Dict[tuple, List[tuple]] = {}
+    seen = set()
+    d0 = date.fromisoformat(today) - timedelta(days=SHOWN_DAYS)
+    d = d0
+    while d < date.fromisoformat(today):
+        day = d.isoformat()
+        targets = [("strong", "ALL"), ("hot", "ALL")] + [("money", s) for s in ("NBA", "NHL", "NFL", "NCAAF", "NCAAMB")]
+        for kind, sp in targets:
+            try:
+                rows = (load(kind, sp, day) or {}).get("rows") or {}
+            except Exception:                                   # noqa: BLE001
+                continue
+            for k, r in rows.items():
+                if (day, k) in seen or r.get("result") not in ("win", "loss"):
+                    continue
+                ch = r.get("earned") if r.get("earned") is not None else r.get("chance")
+                if ch is None:
+                    continue
+                seen.add((day, k))
+                kind_ = "pick'em" if (r.get("pickem_only") or r.get("price") is None) else "sportsbook"
+                groups.setdefault((r.get("sport") or sp, kind_), []).append((float(ch), r["result"] == "win"))
+        d += timedelta(days=1)
+    out = []
+    for (sp, kind_), xs in sorted(groups.items()):
+        if len(xs) < SHOWN_MIN_N:
+            continue
+        said = sum(c for c, _ in xs) / len(xs)
+        hit = sum(h for _, h in xs) / len(xs)
+        se = (hit * (1 - hit) / len(xs)) ** 0.5 or 0.01
+        if said - hit >= SHOWN_GAP and (said - hit) / se >= 2:
+            out.append(_issue("model bias", "warn", f"{sp} {kind_} picks shown said {said:.0%} and hit {hit:.0%} "
+                              f"(last {SHOWN_DAYS} days, {len(xs)} picks) -- the shown chance is running high"))
+    return out
+
+
 def check_rules() -> List[Dict]:
     import rules as RU
     return [_issue("rules", "error", d) for d in RU.drift()]
@@ -215,7 +287,8 @@ def run(today: Optional[str] = None, bets=None, results=None, ledger_load=None, 
                      ("closes", lambda: check_closes(bets, today)),
                      ("ledger", lambda: check_ledgers(yest, ledger_load)),
                      ("rules", check_rules),
-                     ("model bias", lambda: check_bias(today))):
+                     ("model bias", lambda: check_bias(today)),
+                     ("shown picks", lambda: check_shown(today, ledger_load))):
         try:
             issues += fn()
         except Exception as exc:                                # noqa: BLE001 -- one check failing never hides the rest
