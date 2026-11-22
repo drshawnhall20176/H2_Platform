@@ -1,0 +1,46 @@
+# 🔥 H2 Sports Hot Tickets (Nov 22, hot_tickets.py): the day's most probable picks that still pay, to the Analyst Desk
+# Discord, no later than 11 AM ET (owner: weekend, tournament and bowl games start early). Three tries -- the first
+# that finds tickets posts them, later ones see "already posted" (GitHub can start a scheduled run late). Each run
+# also posts yesterday's recap once every ticket is graded.
+name: hot-tickets
+
+on:
+  schedule:
+    - cron: "53 13 * * *"   # ~8:53am ET
+    - cron: "23 14 * * *"   # ~9:23am ET
+    - cron: "23 15 * * *"   # ~10:23am ET
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the post instead of sending it"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hot-tickets
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Hot Tickets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then python -u hot_tickets.py; else python -u hot_tickets.py post; fi
