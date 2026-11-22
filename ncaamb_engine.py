@@ -111,6 +111,38 @@ _key_locks: Dict[Tuple, threading.Lock] = {}
 _key_locks_guard = threading.Lock()
 
 
+_TEAM_KEEP = ("id", "abbreviation", "displayName", "shortDisplayName", "location", "name")
+
+
+def _slim(url: str, data):
+    """Nov 21 (page audit: Position Matchups / Players on college basketball held 1.1 GB of raw ESPN responses): keep
+    only what the readers use. A scoreboard: each event's id, date, names, season, status and its competitors' ids,
+    sides, scores and team names. A game package: its boxscore and header."""
+    if not isinstance(data, dict):
+        return data
+    try:
+        if url.endswith("/scoreboard") and "events" in data:
+            evs = []
+            for ev in data.get("events") or []:
+                comps = []
+                for c in ev.get("competitions") or []:
+                    comps.append({"id": c.get("id"), "date": c.get("date"), "status": c.get("status"),
+                                  "competitors": [{"id": t.get("id"), "homeAway": t.get("homeAway"),
+                                                   "score": t.get("score"), "winner": t.get("winner"),
+                                                   "team": {k: (t.get("team") or {}).get(k) for k in _TEAM_KEEP}}
+                                                  for t in c.get("competitors") or []]})
+                evs.append({"id": ev.get("id"), "date": ev.get("date"), "name": ev.get("name"),
+                            "shortName": ev.get("shortName"), "season": ev.get("season"), "status": ev.get("status"),
+                            "competitions": comps})
+            return {"events": evs}
+        if "gamepackageJSON" in data:
+            gp = data.get("gamepackageJSON") or {}
+            return {"gamepackageJSON": {"boxscore": gp.get("boxscore"), "header": gp.get("header")}}
+    except Exception:                                           # noqa: BLE001 -- an odd shape stays as it was
+        return data
+    return data
+
+
 def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
     """_get_json, but de-duplicated within this process — see _response_cache above. One lock PER URL: on opening night
     eight workers ask for the same scoreboard month at the same moment, and without it each would download it."""
@@ -121,7 +153,7 @@ def _get_json_cached(url: str, params: Optional[Dict] = None) -> Optional[Dict]:
         lock = _key_locks.setdefault(key, threading.Lock())
     with lock:
         if key not in _response_cache:
-            _response_cache[key] = _get_json(url, params)
+            _response_cache[key] = _slim(url, _get_json(url, params))
     return _response_cache[key]
 
 
