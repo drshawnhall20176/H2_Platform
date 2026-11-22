@@ -314,6 +314,35 @@ def _sport_results(sport: str, day: str, cache: Dict) -> tuple:
     return cache[sport]
 
 
+DNP_SPORTS = ("NBA", "NCAAMB", "WNBA", "NHL")
+
+
+def finished_games(sport: str, day: str, cache: Dict) -> List[tuple]:
+    """[(away name, home name)] of the day's FINISHED games (the engine's schedule), cached per sport."""
+    k = ("final", sport)
+    if k not in cache:
+        out = []
+        try:
+            import sports
+            for g in sports.get(sport).engine.get_schedule(day) or []:
+                done = g.get("status_state") == "post" or g.get("final") is True
+                if done and g.get("away_name") and g.get("home_name"):
+                    out.append((str(g["away_name"]).lower(), str(g["home_name"]).lower()))
+        except Exception:                                       # noqa: BLE001
+            pass
+        cache[k] = out
+    return cache[k]
+
+
+def dnp_void(r: Dict, day: str, cache: Dict) -> bool:
+    """Nov 22 (health check: Tatum, P.J. Washington never graded): a player missing from the final box score of a
+    FINISHED game didn't play -- the books void that prop, and so does the ledger."""
+    if r.get("sport") not in DNP_SPORTS or " @ " not in str(r.get("game") or ""):
+        return False
+    away, home = [x.strip().lower() for x in str(r["game"]).split(" @ ", 1)]
+    return any(a == away and h == home for a, h in finished_games(r["sport"], day, cache))
+
+
 def grade_games(day: str, rows_: Sequence[Dict], recs: Optional[Dict] = None) -> None:
     import todays_best as TB
     if recs is None:
@@ -439,6 +468,8 @@ def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=No
                 g = grade_prop(r, res, act)
                 if g:
                     r["result"] = g
+                elif res and dnp_void(r, day, cache):
+                    r["result"] = "void"
                 if not r.get("close_checked"):                  # Nov 21: the close, from the last pre-game read
                     c = prop_close(r, _snap_closes(r.get("sport") or sp, day, cache))
                     if c:
