@@ -35,3 +35,19 @@ def test_run_collects_everything_without_saving():
     rec = DC.run("2026-11-21", bets=[_bet()], results=lambda sp, d: {7: {"pts": 11.0}},
                  ledger_load=lambda k, s, d: {"rows": {}, "graded_at": None}, save=False)
     assert rec["errors"] >= 1 and any(i["check"] == "settlement" for i in rec["issues"])
+
+
+def test_a_game_model_leaning_home_raises_a_warning():
+    """Nov 22: the college model rated home teams 7.2 too high in close games for days unnoticed."""
+    import data_checks as DC
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 22, 15, 0, tzinfo=timezone.utc)
+    past = [{"kickoff": f"2026-11-{d:02d}T23:00:00Z", "model_margin": 8.0 + (i % 3), "home_spread": -2.0,
+             "final_home": 70 + (i % 5), "final_away": 69} for i, d in enumerate([15, 16, 17, 18, 19, 20, 21] * 6)]
+    upcoming = [{"kickoff": "2026-11-22T23:00:00Z", "model_margin": 6.0, "home_spread": -2.0} for _ in range(14)]
+    out = DC.check_bias("2026-11-22", load=lambda lg: past + upcoming if lg == "NCAAMB" else [], now=now)
+    text = " ".join(i["detail"] for i in out)
+    assert "NCAAMB game model rates home teams" in text and "leans home on 14 of 14" in text
+    fair = [dict(r, final_home=r["final_away"] + r["model_margin"] + (1 if i % 2 else -1)) for i, r in enumerate(past)]
+    mixed = [dict(r, model_margin=6.0 if i % 2 else -6.0) for i, r in enumerate(upcoming)]
+    assert DC.check_bias("2026-11-22", load=lambda lg: fair + mixed if lg == "NCAAMB" else [], now=now) == []
