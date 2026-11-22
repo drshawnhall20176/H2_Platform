@@ -23,6 +23,11 @@ and no DISCORD_WEBHOOK_URL it refuses rather than locking calls it can't publish
     python analyst_publisher.py                         # dry run, every enabled sport
     python analyst_publisher.py --post                  # lock, grade, post
     python analyst_publisher.py --post --sports NBA NFL --book fanduel
+    python analyst_publisher.py --lock                  # Nov 22: lock and grade the record, post nothing (analyst-lock.yml)
+
+NOV 22 AUDIT: the publisher's schedule was never created, so calls were locked only when the owner opened the Desk for a
+sport -- 24 of 43 days, one or two sports a day, nothing after Nov 10. analyst-lock.yml now runs --lock before each
+part of the day's slate, so every covered sport's calls are locked every day whether or not anyone opens the page.
 
 The page (views/39_Analyst_Desk.py) and this module build calls the same way (A.scan over the same board, offers,
 game environment and matchups); test_analyst_publisher.py pins the shared behaviour.
@@ -139,14 +144,16 @@ def _published_recap_rows(sport_key: str, today_str: str) -> Optional[str]:
 
 
 def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str, Callable], *, book: str,
-                  webhook: Optional[str], post: bool, send: Optional[Callable] = None) -> Dict:
+                  webhook: Optional[str], post: bool, send: Optional[Callable] = None, lock: bool = False) -> Dict:
     """Run one sport end to end. Returns {sport, locked, picks: 'posted'|'already posted'|'nothing to post'|
-    'dry run'|'failed: …', recap: …, graded, notes, text}. With post=False nothing is written or sent."""
+    'dry run'|'failed: …', recap: …, graded, notes, text}. With post=False and lock=False nothing is written or sent;
+    lock=True (Nov 22) grades, locks and marks the record but sends nothing."""
+    write = post or lock
     short = sports.get(sport_key).label.split(" — ")[0]
     book_name = O.book_label(book)
     out: Dict = {"sport": sport_key, "locked": 0, "graded": 0, "picks": "nothing to post", "recap": "nothing to post",
                  "notes": [], "text": {}}
-    if post:
+    if write:
         res = AL.settle_open_days(sport_key, AL.unsettled_dates(sport_key, today_str),
                                   lambda d: deps["results"](sport_key, d), max_days=SETTLE_PER_RUN)
         out["graded"] += res["settled"]
@@ -157,7 +164,7 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
     out["notes"] = built["notes"]
     cards = [c for c in built["calls"] if c["book_state"] == A.STATE_POSTED and AL.loggable(c, today_str)
              and not c.get("cold")]
-    if post and cards:
+    if write and cards:
         out["locked"] = AL.record_calls(cards, today_str)
         try:
             AL.mark_calls(cards, today_str)
@@ -170,7 +177,7 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
         text = AT.discord_picks_text(cards, sport_label=short, date_str=date_str, book_label=book_name, extra_line=fp)
         out["text"]["picks"] = text
         if not post:
-            out["picks"] = "dry run"
+            out["picks"] = "locked, not posted" if lock else "dry run"
         elif AL.claim_post("picks", sport_key, date_str):
             try:
                 AT.post_to_discord(webhook, text, post=send)
@@ -196,7 +203,7 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
         if text:
             out["text"]["recap"] = text
             if not post:
-                out["recap"] = "dry run"
+                out["recap"] = "not posted" if lock else "dry run"
             elif AL.claim_post("recap", sport_key, day):
                 try:
                     AT.post_to_discord(webhook, text, post=send)
@@ -219,7 +226,7 @@ def default_sports() -> List[str]:
 
 def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional[str] = None, post: bool = False,
         webhook: Optional[str] = None, deps: Optional[Dict[str, Callable]] = None, send: Optional[Callable] = None,
-        out=print, require_shared_db: bool = True) -> int:
+        out=print, require_shared_db: bool = True, lock: bool = False) -> int:
     """Run every sport; returns a process exit code (1 when any sport errored or a post failed)."""
     today = today_eastern()
     date_str = date_str or today
@@ -227,8 +234,8 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
     if post and not (webhook or "").strip():
         out("Refusing to run with --post: DISCORD_WEBHOOK_URL is not set, so calls would be locked that can't be published.")
         return 1
-    if post and require_shared_db and not AL.USING_POSTGRES:
-        out("Refusing to run with --post: DATABASE_URL is not set. Without the shared database the record and the "
+    if (post or lock) and require_shared_db and not AL.USING_POSTGRES:
+        out("Refusing to write the record: DATABASE_URL is not set. Without the shared database the record and the "
             "'already posted' claims live in a file that disappears when this job ends, so the same card would be "
             "posted again on every run and the public record would not see these calls.")
         return 1
@@ -236,7 +243,7 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
     bad = 0
     for key in sport_keys:
         try:
-            r = publish_sport(key, date_str, today, deps, book=book, webhook=webhook, post=post, send=send)
+            r = publish_sport(key, date_str, today, deps, book=book, webhook=webhook, post=post, send=send, lock=lock)
         except Exception as exc:                               # noqa: BLE001 — one sport never stops the others
             out(f"{key}: ERROR {type(exc).__name__}: {str(exc)[:160]}")
             bad += 1
@@ -245,7 +252,7 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
             + (f" · {'; '.join(r['notes'])}" if r["notes"] else ""))
         if r["picks"].startswith("failed") or r["recap"].startswith("failed"):
             bad += 1
-        if not post:
+        if not post and not lock:
             for kind, text in r["text"].items():
                 out(f"--- {key} {kind} (dry run) ---\n{text}\n")
     return 1 if bad else 0
@@ -254,13 +261,14 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Lock, grade and post the Analyst Desk's daily card and recap.")
     ap.add_argument("--post", action="store_true", help="write the record and post to Discord (default: dry run)")
+    ap.add_argument("--lock", action="store_true", help="grade and lock the record, post nothing (the scheduled run)")
     ap.add_argument("--sports", nargs="*", help="sport keys (default: every enabled sport with projections)")
     ap.add_argument("--date", help="slate date YYYY-MM-DD (default: today, US/Eastern)")
     ap.add_argument("--book", help="sportsbook key (default: ANALYST_BOOK or the platform default)")
     args = ap.parse_args(argv)
     keys = [k.upper() for k in (args.sports or os.environ.get("ANALYST_SPORTS", "").replace(",", " ").split())] or default_sports()
     return run(keys, date_str=args.date, book=args.book, post=args.post,
-               webhook=os.environ.get("DISCORD_WEBHOOK_URL"))
+               webhook=os.environ.get("DISCORD_WEBHOOK_URL"), lock=args.lock)
 
 
 if __name__ == "__main__":
