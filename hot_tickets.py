@@ -131,7 +131,8 @@ def _price(p) -> str:
 
 def _time(r: Dict) -> str:
     t = str(r.get("time") or "").strip()
-    return f" · {t} ET" if t else ""
+    g = str(r.get("game") or "").strip()                       # Nov 22 (owner): the game on every pick
+    return (f" · {g}" if g else "") + (f", {t} ET" if t and g else f" · {t} ET" if t else "")
 
 
 def _book(r: Dict) -> str:
