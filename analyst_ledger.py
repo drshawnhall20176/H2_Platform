@@ -258,6 +258,12 @@ def loggable(call: Dict, today_str: str, now: Optional[datetime] = None) -> bool
     kickoff is known — still in the future."""
     if str(call.get("date") or "") < today_str:
         return False
+    try:                                       # Nov 22 audit: a market grading can't settle (NFL First / Last TD Scorer:
+        import retro                           # weekly stats can't say who scored first) would only ever be a void
+        if call.get("market") and call["market"] not in retro.MARKET_STAT:
+            return False
+    except Exception:                          # noqa: BLE001
+        pass
     gd = call.get("game_date")
     if gd and len(str(gd)) > 10:
         try:
