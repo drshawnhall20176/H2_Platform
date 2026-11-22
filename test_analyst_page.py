@@ -786,7 +786,7 @@ def test_line_movement_is_read_in_one_query_for_the_whole_sport_not_one_per_play
     at = desk()
     assert not at.exception, [e.value for e in at.exception]
     assert len(calls) == 1 and calls[0][0] == "NBA"                              # one read…
-    assert calls[0][1] == (datetime.now(ET) - timedelta(days=14)).strftime("%Y-%m-%d")      # …bounded to the last two weeks
+    assert calls[0][1] == (datetime.now(ET) - timedelta(days=2)).strftime("%Y-%m-%d")       # …bounded to two days (Nov 21: memory)
     desk()
     assert len(calls) == 1                                                       # and a second visit within minutes reuses it
     (row,) = AL.fetch_calls(db_path=desk.db)

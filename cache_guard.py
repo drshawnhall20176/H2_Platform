@@ -60,6 +60,21 @@ def limit_mb() -> float:
         return 1800.0
 
 
+def clear_module_caches() -> int:
+    """Nov 21 (page audit): the engines' own in-process response caches (ncaamb_engine._response_cache grew past 1 GB
+    on one college basketball page) -- emptied with the data caches."""
+    import sys
+    n = 0
+    for name in ("nba_engine", "ncaamb_engine", "wnba_engine", "nhl_engine", "nfl_engine", "ncaaf_engine",
+                 "basketball_engine"):
+        m = sys.modules.get(name)
+        c = getattr(m, "_response_cache", None) if m else None
+        if isinstance(c, dict):
+            n += len(c)
+            c.clear()
+    return n
+
+
 def watchdog(now: float | None = None, rss=None, clear=None) -> bool:
     """Clear the data caches if memory is over the limit. True when it cleared."""
     now = time.time() if now is None else now
@@ -70,6 +85,7 @@ def watchdog(now: float | None = None, rss=None, clear=None) -> bool:
         import streamlit as st
         clear = st.cache_data.clear
     clear()
+    clear_module_caches()
     gc.collect()
     _STATE["last"] = now
     _STATE["clears"] += 1

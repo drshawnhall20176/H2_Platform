@@ -835,6 +835,14 @@ def slate_reads_for(sport_key: str, date_str: str, meta: List[Dict], offers: Lis
     or there are no book lines to read against."""
     if sport_key not in PROPS_MODEL_SPORTS or not offers or not meta:
         return None
+    # Nov 21 (page audit: Long Shots on NCAA Football peaked at 4.1 GB): in the app, every caller reads the warm job's
+    # saved reads first, and the heavy sports never compute them here.
+    if _heavy_guard():
+        _saved = saved_reads(sport_key, date_str)
+        if _saved:
+            return _saved
+        if sport_key in HEAVY_BOARDS:
+            return None
     import json
     import position_data as PD
     import position_lines as PL
@@ -947,6 +955,15 @@ def _save_reads(sport_key: str, date_str: str, reads) -> None:
             SS.save(READS_KEY.format(sport=sport_key), date_str, reads)
     except Exception:                                           # noqa: BLE001
         pass
+
+
+def props_team_ids(sport_key: str, date_str: str) -> Optional[set]:
+    """Nov 21 (page audit): the team ids of the games the books posted player props for, from the warm job's saved
+    board -- a big slate's pages (college basketball: 300 teams) work on these only. None without a saved board."""
+    sb = saved_board(sport_key, date_str, O.DEFAULT_BOOK)
+    if not sb or not sb[1]:
+        return None
+    return {str(m.get(k)) for m in sb[1] for k in ("home_id", "away_id") if m.get(k) is not None}
 
 
 def saved_reads(sport_key: str, date_str: str) -> Optional[Dict]:

@@ -24,6 +24,7 @@ from datetime import datetime
 import pytz
 
 import sports
+import best_bets_data as BBD
 import odds_api as O
 import form_policy as FPol
 from streamlit_page_cache import compute_once, invalidate_page
@@ -80,6 +81,14 @@ def load_board(sport_key: str, date_str: str):
     rows, meta = E.build_slate(date_str)
     if not rows:
         return [], 0, {}, {}
+    # Nov 21 (page audit: college basketball's 2,200 players and 300 teams took 1.5 GB and broke the table): only the
+    # games the books posted player props for -- the warm job's saved board lists them
+    if sport_key in BBD.BIG_SLATE_SPORTS:
+        _ids = BBD.props_team_ids(sport_key, date_str) or set()
+        rows = [r for r in rows if str(r.get("_team_id")) in _ids]
+        meta = [m for m in meta if str(m.get("home_id")) in _ids]
+        if not rows:
+            return [], 0, {}, {}
 
     opp_ids = sorted({r["_opp_id"] for r in rows if r.get("_opp_id") is not None})
     opp_allowed = {oid: E.get_team_recent_allowed_stats(oid, date_str) for oid in opp_ids}
@@ -326,6 +335,9 @@ for _c in _cols:
         _vdf[_c] = None
 df = _vdf[_cols].rename(columns={"Opp Allows": "Opp Team Total", "Recent Avg": "Form"})
 df["Fatigue"] = df["Fatigue"].fillna("").replace("", "—")
+if len(df) > 600:                                               # Nov 21: the styled table's cell limit
+    st.caption(f"Showing the 600 strongest of {len(df):,} props (sorted by chance).")
+    df = df.head(600)
 st.dataframe(
     df.style.format({"Form": "{:.1f}", "Opp Team Total": "{:.1f}", "Opp Pace": "{:.1f}",
                      "Opp Allows /100 Poss": "{:.1f}", "Slate Avg /100 Poss": "{:.1f}",
