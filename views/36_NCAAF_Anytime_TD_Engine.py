@@ -117,7 +117,11 @@ st.markdown(f"**{len(filtered)} players · {len({r['GameLabel'] for r in all_row
 
 filtered = MV.attach_td(filtered, MV.cached_reads("NCAAF", date_str), own_key="ModelProb")
 filtered.sort(key=lambda b: (b["Model TD %"] is None, -(b["Model TD %"] or 0), -(b["ModelProb"] or 0)))
-df = pd.DataFrame(filtered)[["Player", "Team", "Position", "Opp", "Game", "Model TD %", "Book TD %", "Model call",
+# Nov 22 (owner: "TD engine does not have times"): each player's kickoff, New York time
+_kick = {(r.get("Player"), r.get("Team")): r.get("_game_date") for r in all_rows}
+for b in filtered:
+    b["Time"] = sports.et_clock(_kick.get((b.get("Player"), b.get("Team"))))
+df = pd.DataFrame(filtered)[["Time", "Player", "Team", "Position", "Opp", "Game", "Model TD %", "Book TD %", "Model call",
                               "Use", "ModelProb", "Agrees", "TDGames", "GamesPlayed", "Why"]]
 df = df.rename(columns={"ModelProb": "Recent scoring rate"})
 st.caption(MV.EXPLAIN)

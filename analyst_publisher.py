@@ -143,8 +143,32 @@ def _published_recap_rows(sport_key: str, today_str: str) -> Optional[str]:
     return max(days) if days else None
 
 
-SLOT_SPORTS = ("NFL", "NCAAF")
+SLOT_SPORTS = ("NFL", "NCAAF", "NBA", "NHL", "NCAAMB", "WNBA")
+# Nov 22 (owner: "how do we handle NBA and NHL?"): the same per-window cards; basketball and hockey from Nov 23 (today's
+# single cards had already gone out)
+SLOT_FROM = {"NFL": "2026-11-22", "NCAAF": "2026-11-22"}
+SLOT_FROM_DEFAULT = "2026-11-23"
 SLOTS = [("early", "Early games"), ("afternoon", "Afternoon games"), ("night", "Night games")]
+COURT_SLOTS = [("early", "Afternoon games"), ("afternoon", "Evening games"), ("night", "Late games")]
+FOOTBALL = ("NFL", "NCAAF")
+
+
+def slotted(sport_key: str, date_str: str) -> bool:
+    return sport_key in SLOT_SPORTS and date_str >= SLOT_FROM.get(sport_key, SLOT_FROM_DEFAULT)
+
+
+def game_slot(sport_key: str, start) -> str:
+    """Football: early (before 2:30 PM New York) / afternoon (to 7 PM) / night. Basketball and hockey: early = before
+    5 PM (matinees), afternoon = 5-8:59 PM (the main slate), night = 9 PM and later (the West Coast games)."""
+    if sport_key in FOOTBALL:
+        return football_slot(start)
+    dt = sports.game_dt(start)
+    if dt is None:
+        return "afternoon"
+    import pytz
+    h = dt.astimezone(pytz.timezone("US/Eastern")).hour
+    return "early" if h < 17 else "afternoon" if h < 21 else "night"
+PER_GAME = 3                   # Nov 22: at most 3 calls from one game on a football card
 SLOT_AHEAD = 4.0               # hours before a window's first start that its card may go out
 
 
@@ -177,7 +201,7 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
 
     # Once the card is out the angles can't change what was posted; a later run only needs the book's current lines (for
     # the closing-line marks), so it skips the heavy evidence reads and the credits they cost.
-    _kinds = ["picks"] + ([f"picks:{sl}" for sl, _ in SLOTS[1:]] if sport_key in SLOT_SPORTS else [])
+    _kinds = ["picks"] + ([f"picks:{sl}" for sl, _ in SLOTS[1:]] if slotted(sport_key, date_str) else [])
     built = build_calls(sport_key, date_str, book, deps,
                         evidence=not (post and all(AL.posted(k, sport_key, date_str) for k in _kinds)))
     out["notes"] = built["notes"]
@@ -196,7 +220,8 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
     # SLOT_AHEAD hours of its first start; other sports post one card a day, as before.
     def _post_card(kind: str, subset: List[Dict], label: str) -> str:
         fp = AT.fingerprint_line(AL.fetch_calls())
-        text = AT.discord_picks_text(subset, sport_label=label, date_str=date_str, book_label=book_name, extra_line=fp)
+        text = AT.discord_picks_text(subset, sport_label=label, date_str=date_str, book_label=book_name, extra_line=fp,
+                                     per_game=PER_GAME if slotted(sport_key, date_str) else None)
         out["text"][kind] = text
         if not post:
             return "locked, not posted" if lock else "dry run"
@@ -213,11 +238,11 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
             pass
         return "posted"
 
-    if cards and sport_key in SLOT_SPORTS:
+    if cards and slotted(sport_key, date_str):
         res = []
         now_ = now or datetime.now(timezone.utc)
-        for slot, label in SLOTS:
-            subset = [c for c in cards if football_slot(c.get("start")) == slot]
+        for slot, label in (SLOTS if sport_key in FOOTBALL else COURT_SLOTS):
+            subset = [c for c in cards if game_slot(sport_key, c.get("start")) == slot]
             if not subset:
                 continue
             first = min((sports.game_dt(c.get("start")) for c in subset if sports.game_dt(c.get("start"))), default=None)

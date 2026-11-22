@@ -404,3 +404,12 @@ def test_football_posts_a_card_per_kickoff_window():
     assert PUB.football_slot("2026-11-22T21:25:00Z") == "afternoon"      # 4:25 PM
     assert PUB.football_slot("2026-11-23T01:20:00Z") == "night"          # 8:20 PM
     assert PUB.football_slot(None) == "early"
+
+
+def test_basketball_and_hockey_get_windows_from_nov_23():
+    """Nov 22 (owner): how do we handle NBA and NHL? -- matinee / main slate / West Coast cards."""
+    assert not PUB.slotted("NBA", "2026-11-22") and PUB.slotted("NBA", "2026-11-23") and PUB.slotted("NFL", "2026-11-22")
+    assert PUB.game_slot("NBA", "2026-11-23T20:30:00Z") == "early"          # 3:30 PM
+    assert PUB.game_slot("NBA", "2026-11-24T00:00:00Z") == "afternoon"      # 7:00 PM
+    assert PUB.game_slot("NHL", "2026-11-24T03:00:00Z") == "night"          # 10:00 PM
+    assert not PUB.slotted("MLB", "2026-11-23")
