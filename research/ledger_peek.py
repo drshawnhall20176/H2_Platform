@@ -1,3 +1,4 @@
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json, pick_ledger as PL
 for kind, sp in (("strong","ALL"),("money","NBA"),("money","NCAAMB"),("games","NCAAMB")):
     for day in ("2026-11-21","2026-11-22"):
