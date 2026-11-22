@@ -1,7 +1,11 @@
 # Lock the Analyst Record every day (Nov 22 audit). The Desk locked calls only when the owner opened it for a sport --
 # 24 of 43 days, one or two sports a day, nothing after Nov 10 -- because this schedule was never created. Each run
 # grades earlier days, locks every covered sport's calls for games that haven't started (first sighting wins, never
-# rewritten) and notes the latest line on calls already locked. It posts nothing to Discord.
+# rewritten) and notes the latest line on calls already locked.
+#
+# Nov 22 (owner: yes to posting the Desk's daily card): when the DISCORD_WEBHOOK_URL secret is set, the run also posts
+# each sport's card (up to 8 calls) once a day and the recap of the last fully graded published day, and stamps the
+# posted calls "published" -- the audience record. Without the secret it only locks (nothing is posted).
 name: analyst-lock
 
 on:
@@ -36,4 +40,11 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
-        run: python -u analyst_publisher.py --lock
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+            python -u analyst_publisher.py --post
+          else
+            echo "DISCORD_WEBHOOK_URL not set: locking only, nothing posted"
+            python -u analyst_publisher.py --lock
+          fi

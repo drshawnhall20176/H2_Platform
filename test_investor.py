@@ -68,3 +68,33 @@ def test_desk_scans_props_model_rows_only_when_present():
         A.DETECTORS.clear()
         A.DETECTORS.update(orig)
     assert seen == ["A"]
+
+
+def test_the_current_record_counts_from_the_era_and_keeps_the_lists_apart(monkeypatch):
+    import investor as I
+    import pick_ledger as PL
+    seen = []
+
+    def since(kind, sport, start, end, get=None):
+        seen.append((kind, sport, start))
+        if kind == "strong":
+            return {"hits": 6, "misses": 4, "units": 1.5, "priced": 10, "needed": 0.52, "clv_beat": 5, "clv_lost": 3,
+                    "clv_pct_sum": 4.0, "clv_pct_n": 8}
+        if (kind, sport) in (("money", "NBA"), ("games", "NCAAMB")):
+            return {"hits": 2, "misses": 2, "units": -0.2, "priced": 4, "needed": 0.5, "clv_beat": 1, "clv_lost": 1,
+                    "clv_pct_sum": 0.0, "clv_pct_n": 2}
+        return None
+    monkeypatch.setattr(PL, "since_record", since)
+    r = I.current_record("2026-11-25")
+    assert {s for _, _, s in seen} == {I.ERA} and r["since"] == I.ERA
+    assert r["strong"]["n"] == 10 and r["strong"]["beat_rate"] == 5 / 8
+    assert r["money"]["hits"] == 4 and r["money"]["misses"] == 4 and abs(r["money"]["units"] + 0.4) < 1e-9
+    assert "all" not in r
+
+
+def test_real_money_can_start_at_the_era():
+    import investor as I
+    bets = [{"slate_date": "2026-11-01", "entry_odds": -110, "stake": 1, "result": "win", "market": "Points"},
+            {"slate_date": "2026-11-21", "entry_odds": -110, "stake": 1, "result": "loss", "market": "Points"}]
+    assert I.real_money(bets, since=I.ERA)["first"] == "2026-11-21"
+    assert I.real_money(bets)["first"] == "2026-11-01"
