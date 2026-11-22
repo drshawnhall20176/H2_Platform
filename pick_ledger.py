@@ -242,7 +242,8 @@ def record_games(day: str, rows_: Sequence[Dict], now: Optional[datetime] = None
             continue
         rec = r.get("_rec") or {}
         g = dict(r, game_id=rec.get("game_id"), kickoff=rec.get("kickoff"), pick=r.get("money_pick"),
-                 price=r.get("money_price"), chance=r.get("money_chance"),
+                 price=r.get("money_price"), book=r.get("price_book") or "",    # Nov 22: was the row's number
+ chance=r.get("money_chance"),
                  stake=PE.stake_units(r.get("money_chance"), r.get("money_price"), day=day)
                  if r.get("money_price") is not None else None)
         if started(day, g, now):
@@ -359,7 +360,7 @@ def grade_games(day: str, rows_: Sequence[Dict], recs: Optional[Dict] = None) ->
                 r["result"] = res
             if not r.get("close_checked"):                      # Nov 21: the close, the record's last capture
                 try:
-                    c = game_close(r, p)
+                    c = watched_close(day, r) or game_close(r, p)
                 except Exception:                               # noqa: BLE001
                     c = None
                 if c:
@@ -417,6 +418,24 @@ def _snap_closes(sport: str, day: str, cache: Dict) -> Dict:
     return cache[k]
 
 
+def watched_close(day: str, r: Dict, cache: Optional[Dict] = None) -> Optional[Dict]:
+    """Nov 22: the close captured minutes before the start (ledger_close.py, close_watch.py), when one landed."""
+    import ledger_close as LC
+    cache = {} if cache is None else cache
+    if ("caps", day) not in cache:
+        cache[("caps", day)] = LC.load(day)
+    c = LC.captured(day, r.get("_key") or row_key(r), r.get("book"), cache[("caps", day)])
+    if not c:
+        return None
+    if r.get("money_market"):
+        kind = "ml" if r["money_market"] == "Moneyline" else "spread"
+        out = close_mark(kind, None, r.get("money_line") if kind == "spread" else None, r.get("price"),
+                         c.get("line") if kind == "spread" else None, c.get("price"))
+    else:
+        out = close_mark("prop", r.get("side"), r.get("line"), r.get("price"), c.get("line"), c.get("price"))
+    return dict(out, close_src="watch", close_at=c.get("at"))
+
+
 def prop_close(r: Dict, snaps: Dict) -> Optional[Dict]:
     import pick_records as PRK
     import props_engine as PE
@@ -471,7 +490,7 @@ def grade_day(day: str, kinds=("money", "strong", "games"), sports_=None, get=No
                 elif res and dnp_void(r, day, cache):
                     r["result"] = "void"
                 if not r.get("close_checked"):                  # Nov 21: the close, from the last pre-game read
-                    c = prop_close(r, _snap_closes(r.get("sport") or sp, day, cache))
+                    c = watched_close(day, r, cache) or prop_close(r, _snap_closes(r.get("sport") or sp, day, cache))
                     if c:
                         r.update(c)
                     r["close_checked"] = True
