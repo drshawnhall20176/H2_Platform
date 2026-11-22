@@ -159,3 +159,18 @@ st.write(f"ticks={LU.tick_grid(df, ['✓ Money', '✓ Pick'], 'g')}")
     assert "ticks=[]" in " ".join(m.value for m in at.markdown)
     at.checkbox(key="g__all_✓ Money").check().run()
     assert "ticks=[(0, '✓ Money'), (1, '✓ Money'), (2, '✓ Money')]" in " ".join(m.value for m in at.markdown)
+
+
+def test_the_book_columns_star_the_models_side():
+    """Nov 22 (owner): the preferred pick in the multi-column tick table."""
+    import pandas as pd
+    import hoops_games_page as HG
+    g = {"home": "Nebraska", "away": "Butler", "home_spread": -12.5, "model_margin": 19.0, "line_total": 140.5,
+         "model_total": 136.0, "model_p": 0.90, "fair_home": 0.86, "best_home": -900, "best_away": 600}
+    df = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "Gap (pts)": 6.5}]), [g], after="Gap (pts)")
+    assert df.loc[0, "Book spread"] == "⭐ Home: Nebraska -12.5"
+    assert df.loc[0, "Book total"] == "140.5 · ⭐ Under" and df.loc[0, "Book ML"].endswith("· ⭐ Home")
+    g2 = dict(g, model_margin=8.0, model_total=150.0, model_p=0.80)
+    df2 = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "Gap (pts)": 4.5}]), [g2], after="Gap (pts)")
+    assert df2.loc[0, "Book spread"] == "⭐ Away: Butler +12.5" and df2.loc[0, "Book total"].endswith("⭐ Over")
+    assert df2.loc[0, "Book ML"].endswith("⭐ Away")
