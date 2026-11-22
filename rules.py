@@ -58,8 +58,8 @@ RULES: Dict[str, List[Dict]] = {
     "hot": [
         {"v": 1, "from": "2026-11-22", "what": "🔥 Hot Tickets: the 3 most probable picks by earned chance (one per "
                                               "game), only where the earned chance clears the price, no worse than "
-                                              "-200; a 2-leg parlay of the top two; weekend Pick of the Week",
-         "fp": "8428f8a3ff"},
+                                              "-300; a 2-leg parlay of the top two; weekend Pick of the Week",
+         "fp": "be3f296815"},
     ],
     "shutoff": [
         {"v": 1, "from": "2026-11-21", "what": "a sport x market loses its 💰 / 🔒 / strongest-list place after 150+ "
