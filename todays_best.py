@@ -105,8 +105,15 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
         import sports
         when = {m.get("label"): sports.game_dt(m.get("game_date")) for m in (meta or [])}
         timed = []
+        now = datetime.now(timezone.utc)
         for p in plays or []:
             dt = when.get(p.get("Game"))
+            # Nov 22 (owner: "NFL Command Center only has strongest picks in the 1pm timeslot"): the weekly NFL board
+            # still lists games that have kicked off, and their picks filled the top-8 cap all afternoon -- the 4 PM and
+            # 8:20 PM games never made the list. A started game's picks are kept from the earlier save (keep_started);
+            # only games still to come compete for the places.
+            if dt is not None and dt <= now:
+                continue
             timed.append(dict(p, Time=p.get("Time") or (dt.strftime("%I:%M %p").lstrip("0") if dt else "")))
         MS.save_setting(KEY.format(sport=sport, date=date_str),
                         {"at": datetime.now(timezone.utc).isoformat(),
