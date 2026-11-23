@@ -40,6 +40,8 @@ WORKFLOWS = WORKFLOWS + tuple(INPUTS)
 DELAY = 8           # minutes after a due time before stepping in
 GRACE = 40          # minutes after a due time when it's let go
 RUN_FOR = 340       # minutes one clockwork run stays up
+RELOAD = 10         # minutes between re-reading the schedules from main (Nov 23)
+HANDOFF = 8         # minutes before stopping that a run starts its successor (Nov 23)
 WF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".github", "workflows")
 
 
@@ -127,6 +129,25 @@ def recent_runs() -> Dict[str, datetime]:
     return out
 
 
+def live_crons(names, fetch=None) -> Dict[str, List[str]]:
+    """Nov 23 (owner: "these schedule misses are a real problem"): the schedules as they are on main NOW, read through
+    the API. A run used to read them once from its own checkout and keep them ~5.5 hours, so the 7:41 / 8:41 AM board
+    rebuilds added that morning were unknown to the run already going, and both were missed. Falls back to the
+    checkout's copy for any file the API can't give."""
+    import base64
+    fetch = fetch or (lambda path: _api("GET", f"contents/{path}", params={"ref": "main"}))
+    out = {}
+    for wf in names:
+        try:
+            text = base64.b64decode(fetch(f".github/workflows/{wf}.yml")["content"]).decode()
+            cs = re.findall(r'-\s*cron:\s*"([^"]+)"', text)
+        except Exception:                                       # noqa: BLE001
+            cs = crons_of(wf)
+        if cs:
+            out[wf] = cs
+    return out
+
+
 def dispatch(wf: str, ref: str = "main") -> None:
     body = {"ref": ref}
     if INPUTS.get(wf):
@@ -135,13 +156,26 @@ def dispatch(wf: str, ref: str = "main") -> None:
 
 
 def main() -> int:
-    crons = {wf: crons_of(wf) for wf in WORKFLOWS}
-    crons = {k: v for k, v in crons.items() if v}
+    crons = live_crons(WORKFLOWS)
     print("watching:", ", ".join(f"{k} ({len(v)} cron)" for k, v in crons.items()), flush=True)
     stop = time.time() + RUN_FOR * 60
     sent: Dict[str, datetime] = {}
+    loaded, handed = time.time(), False
     while time.time() < stop:
         now = datetime.now(timezone.utc)
+        if time.time() - loaded >= RELOAD * 60:                 # Nov 23: schedule changes reach a running watch
+            new = live_crons(WORKFLOWS)
+            if new and new != crons:
+                print(f"{now:%H:%M} UTC schedules changed on main: reloaded", flush=True)
+                crons = new
+            loaded = time.time()
+        if not handed and stop - time.time() <= HANDOFF * 60:   # Nov 23: start the next watch before this one ends --
+            try:                                                # a dispatched run is never skipped the way the
+                dispatch("clockwork")                           # schedule's starts are, so the watch never lapses
+                handed = True
+                print(f"{now:%H:%M} UTC started the next clockwork run", flush=True)
+            except Exception as exc:                            # noqa: BLE001
+                print(f"{now:%H:%M} UTC couldn't start the next run: {exc}", flush=True)
         try:
             runs = recent_runs()
             for wf, t in sent.items():                          # a dispatch just sent counts as a run
