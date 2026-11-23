@@ -19,6 +19,7 @@ import cache_guard as _CG
 _CG.install()             # Nov 20: cap every cache before any module defines one
 import table_style as _TS
 _TS.install()             # Nov 23 (owner): every table's columns centered, headers included
+_TS.install_phone()       # Nov 23 (owner): phones get cards instead of wide tables
 from pathlib import Path
 
 sports = _CG.safe_import("sports")   # Nov 20: survives a code reload landing mid-import
@@ -170,6 +171,24 @@ html, body, [class*="st-"] { font-feature-settings: "tnum" 1, "cv11" 1; }
 [data-testid="stDataFrame"] { font-variant-numeric: tabular-nums; }
 [data-testid="stCaptionContainer"] { color: #9aa4b2; }
 h1 { letter-spacing: -0.02em; } h2, h3, h4 { letter-spacing: -0.01em; }
+/* Nov 23 (owner: "unusable, especially on a phone"): phone-sized spacing. The banner drops its logo and shrinks,
+   metric tiles and tick-box rows go two to a row instead of one per line, headings and padding tighten. */
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"], .block-container { padding: 0.75rem 0.8rem 3rem !important; }
+  .h2-hero { padding: 12px 14px !important; gap: 10px !important; }
+  .h2-hero img { display: none !important; }
+  .h2-hero h1 { font-size: 20px !important; line-height: 1.2 !important; }
+  .h2-hero p { font-size: 13px !important; }
+  h1 { font-size: 1.45rem !important; } h2 { font-size: 1.2rem !important; } h3 { font-size: 1.05rem !important; }
+  [data-testid="stMetricValue"] { font-size: 1.15rem !important; }
+  [data-testid="stMetricLabel"] p, [data-testid="stMetricLabel"] { font-size: 0.66rem !important; }
+  [data-testid="stCaptionContainer"] { font-size: 0.8rem !important; }
+  [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"], [data-testid="stCheckbox"]):not(:has([data-testid="stDataFrame"], [data-testid="stPlotlyChart"], [data-testid="stVegaLiteChart"], [data-testid="stImage"])) {
+    flex-wrap: wrap !important; gap: 0.2rem 0.75rem !important; }
+  [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"], [data-testid="stCheckbox"]):not(:has([data-testid="stDataFrame"], [data-testid="stPlotlyChart"], [data-testid="stVegaLiteChart"], [data-testid="stImage"])) > [data-testid="stColumn"] {
+    flex: 1 1 calc(50% - 0.75rem) !important; min-width: calc(50% - 0.75rem) !important; width: auto !important; }
+  [data-testid="stBaseButton-pills"], [data-testid="stBaseButton-pillsActive"] { padding: 0 9px !important; min-height: 1.75rem !important; font-size: 0.8rem !important; }
+}
 </style>
 """
 
@@ -239,6 +258,10 @@ def run():
         st.sidebar.toggle("👀 Preview the commercial layout", key=NL.PREVIEW_KEY,
                           help="Shows what a paying customer would see: a Today front page, four sections, owner tools hidden. "
                                "Layout only: pages still show your own log boxes while you preview.")
+    # Nov 23 (owner: phones and tablets): every build -- Auto picks cards on a phone; anyone can switch
+    st.sidebar.segmented_control("📱 Layout", ["Auto", "Phone", "Full"], key=_TS.LAYOUT_KEY, default="Auto",
+                                 help="Auto: cards on a phone, tables everywhere else. Phone: always cards (good on a "
+                                      "small tablet). Full: always the full tables.")
     commercial = NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
     if commercial and audience == "owner":
         st.sidebar.caption("👀 Previewing the commercial layout")

@@ -37,13 +37,23 @@ def selectable(df: pd.DataFrame, key: str, **kw) -> List[int]:
         return []
 
 
-def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> List[tuple]:
+def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, _phone_ok: bool = True, **kw) -> List[tuple]:
     """Nov 18: a table with tick boxes in chosen columns (placed by the caller, next to what they bet on) instead of one
     box per row. Returns [(row position, ticked column)] in table order. The public build gets the table without
     the boxes."""
     import components as C
     cols = [c for c in tick_cols if c in df.columns]
     helps = kw.pop("tick_help", None) or {}                     # Nov 23: a tooltip on each tick column
+    try:                                                        # Nov 23 (owner: phones): cards first, the tick table
+        import table_style as TS                                # one tap away
+        phone = _phone_ok and TS.phone_mode() and C.is_owner() and len(df.columns) >= TS.PHONE_MIN_COLS and len(df)
+    except Exception:                                           # noqa: BLE001
+        phone = False
+    if phone:
+        st.markdown(TS.cards_html(df.drop(columns=cols), TS.centered(df, kw.get("column_config")) or {}),
+                    unsafe_allow_html=True)
+        with st.expander("☑️ Tick to log (full table — scroll sideways)"):
+            return tick_grid(df, tick_cols, key, _phone_ok=False, tick_help=helps, **kw)
     if not C.is_owner():
         st.dataframe(df.drop(columns=cols), **kw)
         return []
