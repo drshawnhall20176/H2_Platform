@@ -43,11 +43,12 @@ def tick_grid(df: pd.DataFrame, tick_cols: Sequence[str], key: str, **kw) -> Lis
     the boxes."""
     import components as C
     cols = [c for c in tick_cols if c in df.columns]
+    helps = kw.pop("tick_help", None) or {}                     # Nov 23: a tooltip on each tick column
     if not C.is_owner():
         st.dataframe(df.drop(columns=cols), **kw)
         return []
     cfg = dict(kw.pop("column_config", None) or {})
-    cfg.update({c: st.column_config.CheckboxColumn(c, default=False) for c in cols})   # sized to the header
+    cfg.update({c: st.column_config.CheckboxColumn(c, default=False, help=helps.get(c)) for c in cols})
     # Nov 20 (owner: "missing the select all tick box for each of the selectable columns"): one per tick column
     alls = []
     if len(df) > 1 and cols:

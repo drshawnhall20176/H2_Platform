@@ -567,7 +567,7 @@ def test_genius_leagues_record_results_and_wait_for_enough_games(tmp_path):
 def _previews(at):
     """Nov 20: the Game Lab's preview table (the Money · Pick · Winner board now comes first)."""
     for d in at.dataframe:
-        if "✓ Money" not in d.value.columns:
+        if "✓ Money" not in d.value.columns and "Money pick (best value)" not in d.value.columns:
             return d.value
     return at.dataframe[0].value
 
