@@ -76,7 +76,7 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     assert not at.exception
     owner = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
     # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
-    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", "Use", "Model has", "Market has"]
+    assert list(owner.columns[:6]) == ["Tip (ET)", "Game", GP.blow_col("NCAAMB"), "Use", "Model has", "Market has"]
     assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
     assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and not any(x.startswith("No bet") for x in owner[GP.SIDE])   # the Use column says it
     assert any("Previews, not picks" in i.value for i in at.info)
@@ -126,6 +126,16 @@ def test_ncaaf_game_lab_lists_previews_with_form(monkeypatch):
     tables = [d.value for d in at.dataframe if "Form (30 days)" in d.value.columns]
     assert tables, [str(e.value)[:200] for e in at.exception]
     t = tables[0]
-    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Tracking pick", "Model has", "Market has"]
+    assert list(t.columns[:6]) == ["Kickoff (ET)", "Game", GP.blow_col("NCAAF"), "Tracking pick", "Model has", "Market has"]
     assert [x.split("· ")[-1] for x in t[GP.SIDE]] == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
     assert list(t["Game"]) == ["A1 @ H1", "A2 @ H2 (neutral)"] and list(t["Tracking pick"]) == ["H1 -3", "—"]
+
+
+def test_blowout_risk_reads_the_market_spread():
+    """Nov 23 (owner): a blowout-risk column, left of Use. From the market's spread (the model's mismatch margins run
+    small): a 30-point spread is high, a pick'em low."""
+    big = {"home": "H", "away": "A", "home_spread": -30.0, "model_margin": 18.0, "line_total": 140.0, "game_id": "b"}
+    even = dict(big, home_spread=-1.0, model_margin=1.0, game_id="e")
+    assert GP.blowout("NCAAMB", big).startswith("🟥") and GP.blowout("NCAAMB", even).startswith("🟩")
+    assert GP.blowout("NCAAMB", {"home": "H", "away": "A"}) == "—"
+    assert GP.blow_col("NCAAMB") == "Blowout risk (15+ pts)" and GP.blow_col("NHL") == "Blowout risk (3+ goals)"

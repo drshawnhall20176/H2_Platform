@@ -93,6 +93,37 @@ TOTAL = "Total points (model / market)"
 WIN = "Win chance (model / market)"
 
 
+def blow_col(league: str) -> str:
+    """'Blowout risk (15+ pts)' -- the header names the size, per sport (game_sim.BLOWOUT)."""
+    import game_sim as GS
+    fam = GS.family(league)
+    return f"Blowout risk ({GS.BLOWOUT[fam]}+ {'goals' if fam == 'hockey' else 'pts'})"
+
+
+def blowout(league: str, p: Dict) -> str:
+    """Nov 23 (owner: "does the game lab table have a blow out risk indicator column?"): the chance the game is decided
+    by game_sim.BLOWOUT[family]+ (15+ points in basketball, 14+ in football, 3+ goals in hockey), simulated around the
+    MARKET's spread and total -- the market sizes margins better than our model, whose mismatch margins run small.
+    Checked on 768 college basketball games (Nov 5-22): spreads 8-12 said 33%, 33% happened; 18-25 said 71%, 70%."""
+    import game_sim as GS
+    hs = PR._num(p.get("home_spread"))
+    m = -hs if hs is not None else PR._num(p.get("model_margin"))
+    t = PR._num(p.get("line_total")) or PR._num(p.get("model_total"))
+    if m is None or t is None:
+        return "—"
+    try:
+        sim = GS.simulate(league, m, t, key=f"blow-{p.get('game_id') or p.get('home')}", n=4000)
+    except Exception:                                           # noqa: BLE001
+        sim = None
+    if not sim:
+        return "—"
+    x = sim["blowout"]
+    return f"{'🟥' if x >= BLOW_HIGH else '🟨' if x >= BLOW_MID else '🟩'} {x:.0%}"
+
+
+BLOW_HIGH, BLOW_MID = 0.60, 0.35
+
+
 def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
     """The table's key as bullets (it was one long paragraph). `extra`: bullets a page adds (Use, ticks, backtest)."""
     b = [
@@ -108,6 +139,10 @@ def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
         f"**{TOTAL}** — the model's projected combined score next to the market's total. Model higher → it favors the "
         "Over; lower → the Under.",
         "**Gap (pts)** — how far the model's margin is from the market's spread.",
+        "**Blowout risk** — the chance the game is decided by the size in the header (15+ points in basketball, 14+ in "
+        "football, 3+ goals in hockey), from the market's spread: 🟥 60%+ · 🟨 35-60% · 🟩 under 35%. It runs off the "
+        "market because the market sizes margins better than our model. Use it for props (starters sit late in "
+        "blowouts) and big-spread picks; on the season, the model's spread picks at big gaps were only a coin flip.",
         "**⭐ = model favors** — in each market column, the star marks the team (or Over / Under) the model's numbers "
         "favor against that line. Like the column above, a lean, not a final pick.",
         f"**Form (30 days)** — how the model's favored side did on games with a gap this size in the last 30 days: "
@@ -159,7 +194,8 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
             mv = {}
         move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
                                     if mv.get("spread_move_why") else "") if x)
-        out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}", **lead,
+        out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
+                    blow_col(league): blowout(league, p), **lead,            # Nov 23 (owner): left of the Use column
                     **says_parts(p, playable, tagged=bool(use)),
                     TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Gap (pts)": None if e is None else round(abs(e), 1),
