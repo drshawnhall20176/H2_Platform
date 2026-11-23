@@ -394,6 +394,12 @@ def ncaamb_day(day: date, fetch: Callable = _http) -> List[Dict]:
 
 NEUTRAL_URL = {"NCAAMB": (NCAAMB_URL, {"groups": 50, "limit": 500}),
                "NFL": ("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", {})}
+# Nov 23 (owner: no "Fordham Anomaly" anywhere): the pro leagues' neutral sites too -- the NBA Cup's Las Vegas
+# knockout games, NBA / NHL / WNBA international games. Their results already carry ESPN's flag, so the ratings
+# learn without home court there; this keeps a neutral game's projection from giving the listed "home" team one.
+for _lg in ("NBA", "NHL", "WNBA"):
+    if _lg in ESPN_LEAGUE_URL:
+        NEUTRAL_URL[_lg] = (ESPN_LEAGUE_URL[_lg], {"limit": 100})
 
 
 def espn_neutral(league: str, day: date, fetch: Callable = _http) -> List[tuple]:
