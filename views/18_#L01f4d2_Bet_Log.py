@@ -73,6 +73,11 @@ if _active.key in ("NBA", "WNBA", "NCAAMB"):
 elif _active.key in ("NFL", "NCAAF"):                     # Position Matchups' football Player props markets
     import football_props as _FP
     MARKETS = [m for m in _FP.MARKETS if m not in MARKETS[:-1]] + [m for m in MARKETS if m not in _FP.MARKETS]
+# Nov 23 (owner): game lines too -- a spread, total or moneyline typed in here (e.g. a game already under way, which
+# the Game Lab no longer lists) settles itself: the capture matches it to its game by date and the Away @ Home teams.
+# Game: "Away @ Home"; Side: the team (spread / moneyline) or Over / Under (total); leave Player blank.
+if _active.key in ("NBA", "NCAAMB", "NHL", "NFL", "NCAAF", "WNBA"):
+    MARKETS = ["Spread", "Total", "Moneyline"] + [m for m in MARKETS if m not in ("Spread", "Total", "Moneyline")]
  
 # --- Log a bet --------------------------------------------------------------
 with st.expander("➕ Log a bet", expanded=False):

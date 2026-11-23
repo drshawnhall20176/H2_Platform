@@ -654,3 +654,33 @@ def test_pro_leagues_look_up_neutral_sites_too():
                 {"homeAway": "home", "team": {"displayName": "A"}}, {"homeAway": "away", "team": {"displayName": "B"}}]}]}]}
     assert I.espn_neutral("NHL", date(2026, 12, 18), fetch) == [("Ottawa Senators", "Chicago Blackhawks")]
     assert "hockey/nhl" in seen[0]
+
+
+def test_hand_typed_game_line_bets_link_to_their_game_and_settle(tmp_path, monkeypatch):
+    """Nov 23 (owner): game-line singles typed into the Bet Log -- as Spread/Total, or as Other when the form had no
+    game-line markets -- are matched to their game by date and teams, corrected, and settled."""
+    import betlog as B
+    db, bdb = str(tmp_path / "m.db"), str(tmp_path / "b.db")
+    monkeypatch.setattr(B, "list_bets", lambda *a, _l=B.list_bets, **k: _l(db_path=bdb, **{x: y for x, y in k.items() if x != "db_path"}))
+    monkeypatch.setattr(B, "add_bet", lambda *a, _a=B.add_bet, **k: _a(bdb, **k))
+    monkeypatch.setattr(B, "update_bet", lambda bid, _u=B.update_bet, **k: _u(bid, bdb, **k))
+    rec = {"sport": "NCAAMB", "game_id": "n1", "kickoff": "2026-11-23T16:00:00+00:00", "home": "Davidson Wildcats",
+           "away": "Northern Iowa Panthers", "line": 5.5, "edge": 0.3, "home_spread": -5.5, "line_total": 145.5,
+           "best_home": -220, "best_away": 190, "model_p": 0.55}
+    MS.save_game_picks([rec], db_path=db)
+    g = "Northern Iowa Panthers @ Davidson Wildcats"
+    base = {"slate_date": "2026-11-23", "sport": "NCAAMB", "game": g, "player": None, "entry_odds": -110, "stake": 2.7}
+    B.add_bet(**base, market="Other", side="Northern Iowa Panthers", line=5.5, notes="Spread NIU +5.5 (single)")
+    B.add_bet(**base, market="Other", side="Under", line=145.5)
+    B.add_bet(**base, market="Spread", side="Davidson", line=-5.5)
+    B.add_bet(**dict(base, game="Somebody @ Else"), market="Other", side="Under", line=130.5)     # no such game
+    B.add_bet(**dict(base, player="Some Guard"), market="Other", side="Over", line=12.5)          # a prop: untouched
+    assert IP.settle_logged("NCAAMB", db_path=db) == 0                                             # linked, not final
+    got = {b["id"]: b for b in B.list_bets()}
+    assert {(b["market"], b["side"]) for b in got.values() if "gl:NCAAMB:n1" in str(b.get("notes"))} == {
+        ("Spread", "Northern Iowa Panthers"), ("Total", "Under"), ("Spread", "Davidson Wildcats")}
+    MS.grade_game_pick("NCAAMB", "n1", 70, 72, "home", db_path=db)                                 # Davidson by 2
+    assert IP.settle_logged("NCAAMB", db_path=db) == 3
+    res = {(b["market"], b["side"]): b.get("result") for b in B.list_bets() if b.get("result")}
+    assert res == {("Spread", "Northern Iowa Panthers"): "win", ("Total", "Under"): "win",
+                   ("Spread", "Davidson Wildcats"): "loss"}
