@@ -660,13 +660,15 @@ def hoops_capture(league: str, api_key: str, fetch: Callable = _http, now: Optio
     saved = MS.save_game_picks(recs, db_path=db_path)
     graded = hoops_grade(league, MS.load_results(league, since=(now.date() - timedelta(days=10)).isoformat(),
                                                  db_path=db_path), db_path=db_path)
+    ERRORS.clear()
     try:
         settled = settle_logged(league, db_path=db_path)
-    except Exception:                                           # noqa: BLE001 -- settling never blocks a capture
+    except Exception as exc:                                    # noqa: BLE001 -- settling never blocks a capture
         settled = 0
+        ERRORS.append(f"{type(exc).__name__}: {exc}"[:160])
     return {"archive_added": added, "season_games": len(games), "rated": r is not None,
             "hfa": None if not r else round(r["hfa"], 2), "events": len(future),
-            "bets_settled": settled,
+            "bets_settled": settled, **({"settle_errors": ERRORS[-3:]} if ERRORS else {}),
             "priced": len(recs), "unmatched": missed[:40], "picks": sum(1 for x in recs if x["pick"]), "saved": saved,
             "graded": graded}
 
@@ -776,13 +778,25 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     # same game, market, side and line (the college totals parlay of Nov 7 sat open for that reason)
     by_bet = {(b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(), b.get("line")): _link(b)
               for b in every if _link(b)}
-    recs_all = None
+    recs_all: List = []
     for b in [x for x in every if not x.get("result")]:
+        try:                                                    # Nov 23: one odd row never stops the rest settling
+            n += _settle_one(b, league, graded, by_bet, _link, B, MS, db_path, recs_all)
+        except Exception as exc:                                # noqa: BLE001
+            ERRORS.append(f"{type(exc).__name__}: {exc}"[:160])
+    return n
+
+
+ERRORS: List[str] = []
+
+
+def _settle_one(b, league, graded, by_bet, _link, B, MS, db_path, recs_all) -> int:
+    if True:
         link = _link(b) or by_bet.get((b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(),
                                        b.get("line")))
         if not link and str(b.get("sport") or "") == BET_SPORT.get(league, league):   # Nov 23: typed in by hand
-            if recs_all is None:
-                recs_all = MS.load_game_picks(league, db_path=db_path)
+            if not recs_all:
+                recs_all.extend(MS.load_game_picks(league, db_path=db_path))
             fix = link_manual(b, league, recs_all)
             if fix:
                 notes = ",".join(x for x in (str(b.get("notes") or "").strip() or None, fix["notes"]) if x)
@@ -790,13 +804,13 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
                 b = dict(b, notes=notes, market=fix["market"], side=fix["side"])
                 link = fix["notes"]
         if not link:
-            continue
+            return 0
         p = graded.get(link.split(":", 2)[2])
         r = bet_result(b, p) if p else None
         if r:
             B.update_bet(int(b["id"]), result=r)
-            n += 1
-    return n
+            return 1
+    return 0
 
 
 def _team_is(a: str, b: str, loose: bool = False) -> bool:
