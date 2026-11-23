@@ -31,3 +31,18 @@ def test_every_listed_workflow_has_crons_and_none_are_force_on_dispatch():
     assert not {"daily-review", "tuning-report", "capture-ufc-odds"} & set(CW.WORKFLOWS)
     assert {"close-watch", "analyst-lock", "hot-tickets", "backup"} <= set(CW.WORKFLOWS)     # Nov 22: skipped today
     assert "morning-brief" in CW.WORKFLOWS and CW.INPUTS["morning-brief"] == {"kind": "auto"}
+
+
+def test_schedules_are_read_from_main_and_fall_back_to_the_checkout():
+    """Nov 23: a running watch learns schedule changes (it kept its start-time copy for ~5.5 hours)."""
+    import base64
+    import clockwork as CW
+    yml = 'on:\n  schedule:\n    - cron: "41 12-23 * * *"\n'
+
+    def fetch(path):
+        if "warm-slates" in path:
+            return {"content": base64.b64encode(yml.encode()).decode()}
+        raise RuntimeError("no network")
+    got = CW.live_crons(["warm-slates", "analyst-lock"], fetch)
+    assert got["warm-slates"] == ["41 12-23 * * *"]
+    assert got["analyst-lock"] == CW.crons_of("analyst-lock")              # the checkout's copy
