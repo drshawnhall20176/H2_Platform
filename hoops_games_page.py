@@ -346,6 +346,9 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         cols = [c for c in df.columns if c != GP.WIN]
         cols.insert(cols.index(GP.SIDE) + 1, GP.WIN)
         df = df[cols]
+    df, use_note = GP.collapse_use(df)                          # Nov 23: a Use column that's ⚪ on every row goes
+    if use_note:
+        st.caption(use_note)
     with st.expander("📖 How to read this table — every column and symbol", expanded=False):
         extra = [] if cust else [
             "**Market spread / total / moneyline** — the sportsbooks' lines; ⭐ marks what the model favors, and the tick "

@@ -202,6 +202,10 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                    .get(show, "Nothing to show."))
         return
     df = frame(rows, past, show_sport)
+    import game_previews as _GP
+    df, _note = _GP.collapse_use(df)                           # Nov 23: a Use column that's ⚪ on every row goes
+    if _note:
+        st.caption(_note)
     with st.expander("📖 How to read this board — the three picks and every column", expanded=False):
         st.markdown(LEGEND)
     if C.is_owner() and not past:
