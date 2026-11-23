@@ -611,7 +611,7 @@ def test_nfl_neutral_sites_come_from_espn_too():
         return data
     assert I.espn_neutral("NFL", date(2026, 11, 15), fetch) == [("Miami Dolphins", "Washington Commanders")]
     assert "football/nfl" in seen["url"] and seen["params"]["dates"] == "20261115"
-    assert I.espn_neutral("NHL", date(2026, 11, 15), fetch) == []
+    assert I.espn_neutral("EUROLEAGUE", date(2026, 11, 15), fetch) == []     # Nov 23: NHL has its lookup now
 
 
 def test_rescoring_history_replaces_the_old_numbers_and_keeps_them():
@@ -635,3 +635,22 @@ def test_rescoring_history_replaces_the_old_numbers_and_keeps_them():
     assert s["v1"]["model_margin"] == 20.0 and s["v1"]["edge"] == 14.0            # the old numbers kept
     assert s["model_margin"] != 20.0 and s["neutral"] is True                      # re-projected, neutral from the result
     assert s["final_home"] == 70 and s["result"] == "home" and s["home_spread"] == -6.0   # line and result untouched
+
+
+def test_pro_leagues_look_up_neutral_sites_too():
+    """Nov 23 (owner: no 'Fordham Anomaly' anywhere): NBA / NHL neutral-site games (NBA Cup in Las Vegas, international
+    games) get no home edge in the projection, like college basketball and the NFL."""
+    import intl_hoops as I
+    from datetime import date
+    assert {"NBA", "NHL", "NCAAMB", "NFL"} <= set(I.NEUTRAL_URL)
+    seen = []
+
+    def fetch(url, params):
+        seen.append(url)
+        return {"events": [{"competitions": [{"neutralSite": True, "competitors": [
+            {"homeAway": "home", "team": {"displayName": "Ottawa Senators"}},
+            {"homeAway": "away", "team": {"displayName": "Chicago Blackhawks"}}]}]},
+            {"competitions": [{"neutralSite": False, "competitors": [
+                {"homeAway": "home", "team": {"displayName": "A"}}, {"homeAway": "away", "team": {"displayName": "B"}}]}]}]}
+    assert I.espn_neutral("NHL", date(2026, 12, 18), fetch) == [("Ottawa Senators", "Chicago Blackhawks")]
+    assert "hockey/nhl" in seen[0]
