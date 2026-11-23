@@ -55,3 +55,123 @@ def install() -> None:
         setattr(DG, name, wrap)
     st.dataframe = st._main.dataframe                           # the module-level calls were bound before the patch
     st.data_editor = st._main.data_editor
+
+
+# --------------------------------------------------------------------------- phones (Nov 23)
+# Owner, Nov 23: "The site is not scalable for a device other than a laptop ... especially on a phone." On a phone
+# a 15-20 column table shows two columns and the rest scrolls sideways inside the grid. On a phone, every wide table
+# (PHONE_MIN_COLS+ columns, not a row-selection table) is drawn as stacked cards -- one per row, the left-most
+# (most important) columns first -- with the full table one tap away. Desktop is untouched; anything unexpected falls
+# back to the normal table.
+import html as _html
+import math as _math
+
+PHONE_MIN_COLS = 5
+CARD_FIELDS = 10
+CARD_ROWS = 40
+LAYOUT_KEY = "h2_layout"                 # "Auto" / "Phone" / "Full"
+_TIME = ("Time", "Tip (ET)", "Kickoff (ET)", "Kickoff", "Start", "When")
+_TITLE = ("Game", "Pick", "Player", "Matchup", "Bet", "Team", "Market", "Name")
+CARD_CSS = """<style>
+.h2c{background:#1a1f2b;border:1px solid #2d3344;border-radius:10px;padding:8px 11px;margin:0 0 7px}
+.h2c-t{font-weight:600;font-size:.92rem;line-height:1.25;margin-bottom:5px;color:#e6e6e6}
+.h2c-t span{color:#9aa4b2;font-weight:500;margin-right:6px}
+.h2c-g{display:grid;grid-template-columns:minmax(84px,40%) 1fr;gap:2px 10px;font-size:.82rem;line-height:1.3}
+.h2c-k{color:#9aa4b2}.h2c-v{color:#e6e6e6;overflow-wrap:anywhere}
+</style>"""
+
+
+def is_phone(ua: str) -> bool:
+    ua = ua or ""
+    return "iPhone" in ua or "iPod" in ua or ("Android" in ua and "Mobile" in ua) or "Windows Phone" in ua
+
+
+def phone_mode() -> bool:
+    """The layout choice ('Phone' / 'Full'), else the device: a phone's browser says so in its user agent."""
+    import streamlit as st
+    try:
+        choice = st.session_state.get(LAYOUT_KEY, "Auto")
+        if choice == "Phone":
+            return True
+        if choice == "Full":
+            return False
+        return is_phone(st.context.headers.get("User-Agent", ""))
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def _fmt(v, cfg) -> str:
+    if v is None or (isinstance(v, float) and _math.isnan(v)):
+        return ""
+    if isinstance(v, bool):
+        return ""
+    fmt = ((cfg or {}).get("type_config") or {}).get("format") if isinstance(cfg, dict) else None
+    if isinstance(v, (int, float)):
+        if fmt == "percent":
+            return f"{v:.0%}"
+        if isinstance(v, float):
+            return f"{v:.2f}".rstrip("0").rstrip(".")
+    s = str(v).strip()
+    return "" if s in ("—", "-", "nan", "None") else s
+
+
+def cards_html(frame, column_config: Optional[Dict] = None, limit: int = CARD_ROWS) -> str:
+    cfg = column_config or {}
+    cols = [c for c in frame.columns if isinstance(c, str) and cfg.get(c, ...) is not None]
+    t_col = next((c for c in _TIME if c in cols), None)
+    m_col = next((c for c in _TITLE if c in cols), None) or next((c for c in cols if c != t_col), None)
+    rest = [c for c in cols if c not in (t_col, m_col)]
+    out = []
+    for _, row in frame.head(limit).iterrows():
+        title = _html.escape(_fmt(row.get(m_col), cfg.get(m_col)) if m_col else "")
+        when = _html.escape(_fmt(row.get(t_col), cfg.get(t_col))) if t_col else ""
+        fields = []
+        for c in rest:
+            v = _fmt(row.get(c), cfg.get(c))
+            if v:
+                label = cfg.get(c, {}).get("label") if isinstance(cfg.get(c), dict) else None
+                fields.append(f'<div class="h2c-k">{_html.escape(str(label or c))}</div>'
+                              f'<div class="h2c-v">{_html.escape(v)}</div>')
+            if len(fields) >= CARD_FIELDS:
+                break
+        out.append(f'<div class="h2c"><div class="h2c-t">{f"<span>{when}</span>" if when else ""}{title}</div>'
+                   f'<div class="h2c-g">{"".join(fields)}</div></div>')
+    return CARD_CSS + "".join(out)
+
+
+def _as_frame(data):
+    import pandas as pd
+    if type(data).__name__ == "Styler":
+        return data.data
+    if isinstance(data, pd.DataFrame):
+        return data
+    return None
+
+
+def install_phone() -> None:
+    """On a phone, wide st.dataframe tables become cards (the data editors keep their table: they're for ticking)."""
+    from streamlit.delta_generator import DeltaGenerator as DG
+    import streamlit as st
+    if getattr(DG.dataframe, "_h2_phone", False):
+        return
+    orig = DG.dataframe
+
+    def wrap(self, data=None, *args, **kw):
+        try:
+            frame = _as_frame(data)
+            if (frame is not None and len(frame.columns) >= PHONE_MIN_COLS and not kw.get("on_select")
+                    and kw.get("selection_mode") is None and len(frame) and phone_mode()):
+                cfg = centered(frame, kw.get("column_config")) or {}
+                self.markdown(cards_html(frame, cfg), unsafe_allow_html=True)
+                more = len(frame) - CARD_ROWS
+                exp = self.expander(f"Full table ({len(frame)} rows, scroll sideways)" if more <= 0 else
+                                    f"+{more} more — open the full table ({len(frame)} rows)")
+                orig(exp, data, *args, **kw)
+                return None
+        except Exception:                                       # noqa: BLE001 -- a phone never gets a broken page
+            pass
+        return orig(self, data, *args, **kw)
+    wrap._h2_phone = True
+    wrap._h2_centered = getattr(orig, "_h2_centered", False)
+    setattr(DG, "dataframe", wrap)
+    st.dataframe = st._main.dataframe
