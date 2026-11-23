@@ -4,7 +4,7 @@ name: warm-slates
 # saved copy instead of rebuilding from hundreds of ESPN requests after every restart (warm_slates.py, slate_store.py).
 on:
   schedule:
-    - cron: "41 14-23 * * *"   # ~10:41am-7:41pm ET
+    - cron: "41 12-23 * * *"   # ~7:41am-7:41pm ET (Nov 23: from 7:41, so 11 AM college tips and Hot Tickets have props)
     - cron: "41 0-3 * * *"     # ~8:41-11:41pm ET
   workflow_dispatch:
     inputs:

@@ -10,6 +10,7 @@ name: analyst-lock
 
 on:
   schedule:
+    - cron: "23 15 * * *"   # ~10:23am ET -- Nov 23: before 11 AM college tips (holiday tournaments)
     - cron: "23 16 * * *"   # ~11:23am ET -- before noon / early-afternoon starts
     - cron: "23 20 * * *"   # ~3:23pm ET  -- the late-afternoon and evening slate
     - cron: "23 23 * * *"   # ~6:23pm ET  -- late games, and the latest lines on calls already locked
