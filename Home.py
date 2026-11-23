@@ -90,6 +90,9 @@ if True:
                        label_visibility="collapsed")
     _show = _c2.radio("Show", ["🔒 Locks only", "💰 Money picks", "All playable"], horizontal=True,
                       key="home_best_show", label_visibility="collapsed",
+                      # Nov 23 (owner): say what each choice shows
+                      format_func={"🔒 Locks only": "🔒 Only Locks", "💰 Money picks": "💰 Only Money picks",
+                                   "All playable": "All playable picks"}.get,
                       help=_PE_H.MONEY_HELP)
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Reloads each props sport's board. Boards are rebuilt every hour on the server (Nov 20: "
@@ -450,14 +453,13 @@ if True:
                         # Nov 20: the Money Score's side, on games scoring +4% or better (money_score.BAND)
                         "money": r.get("money_result") if (r.get("money_score") or -1) >= _MSC.BAND[0] else None,
                         "money_chance": r.get("money_chance")} for r in _ws]
-            C.hit_miss_pair([("Pick result", _gproxy, "pick", "pick_chance"),
-                             ("Winner result", _gproxy, "winner", "winner_chance"),
-                             ("Money result (score +4%+)", _gproxy, "money", "money_chance")],
-                            key="home_win_hm", title="Game lines: how the picks, the likely winners and the money "
-                                                     "picks did")
+            C.hit_miss_pair([("Line pick result", _gproxy, "pick", "pick_chance"),
+                             ("Winner pick result", _gproxy, "winner", "winner_chance"),
+                             ("Money pick result (score +4%+)", _gproxy, "money", "money_chance")],
+                            key="home_win_hm", title="Game lines: how the Line picks, Winner picks and Money picks did")
             _, _ws = C.show_filter(_gproxy, "pick", key="home_win_hm_show", apply_to=_ws,
-                                   by={"Pick result": "pick", "Winner result": "winner",
-                                       "Money result": "money"})
+                                   by={"Line pick result": "pick", "Winner pick result": "winner",
+                                       "Money pick result": "money"})
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"],
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
@@ -518,18 +520,22 @@ if True:
                         "🔒 Locks only": "No 🔒 game lines" + (" today" if not _past else "") + " — switch to All "
                                          "playable to see every game."}.get(_show, "No tested game-line picks today."))
         else:
-            st.caption("☑️ Tick **Pick**, **Winner** or **Money** on any row to log that bet — each box sits beside "
-                       "what it bets on.")
-            _ticks_l = _LU.tick_grid(_wdf, ["✓ Pick", "✓ Winner", "✓ Money"], "home_win_ticks", hide_index=True,
-                                     width="stretch",
-                         column_config={"Chance": st.column_config.NumberColumn(format="percent"),
+            import game_lines_table as _GLT
+            with st.expander("📖 How to read the game lines — the three picks and every column", expanded=False):
+                st.markdown(_GLT.LEGEND)
+            st.caption("☑️ Tick **Line pick**, **Winner pick** or **Money pick** on any row to log that bet — each box "
+                       "sits right before the bet it logs.")
+            _ticks_l = _GLT.back(_LU.tick_grid(
+                _GLT.display(_wdf), [_GLT.DISPLAY[t] for t in ("✓ Pick", "✓ Winner", "✓ Money")], "home_win_ticks",
+                hide_index=True, width="stretch", tick_help=_GLT.TICK_HELP,
+                         column_config=_GLT.config({"Chance": st.column_config.NumberColumn(format="percent"),
                                         "Value": st.column_config.NumberColumn(format="percent"),
                                         "Money score": st.column_config.NumberColumn(
                                             format="percent", help="What the price pays: expected return per $1 at "
                                             "the best price, from a chance that trusts the model only as far as its "
                                             "record against the books has earned. 💰 = college basketball, +4% to "
                                             "+12% with a 40%+ chance (what made money in testing)."),
-                                        "Backtest cover": st.column_config.NumberColumn(format="percent")})
+                                        "Backtest cover": st.column_config.NumberColumn(format="percent")})))
             _sel_lines = _line_items(_ws[:LEANS_CAP], _ticks_l)
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})

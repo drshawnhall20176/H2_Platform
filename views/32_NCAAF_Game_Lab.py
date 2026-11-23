@@ -138,13 +138,17 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                                 f"{r['Gap (pts)']:.1f} points from the book. Leans of this size: {r['Form (30 days)']}.")
             if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
                 _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
-            _cols = ["Tip (ET)", "Game", "Tracking pick", "Model has", "Book has", "Leans", "Gap (pts)", "Form (30 days)",
-                     "Total: model / book", "News check"]
+            # Nov 23 (owner): the total beside the model's read, plainer headers, and a bulleted key
+            _cols = ["Tip (ET)", "Game", "Tracking pick", "Model has", "Book has", GPV.SIDE, GPV.TOTAL, "Gap (pts)",
+                     "Form (30 days)", "News check"]
+            with st.expander("📖 How to read this table — every column and symbol", expanded=False):
+                st.markdown(GPV.legend_md([
+                    "**Tracking pick** — the model's side when it's far enough off the book to track; tracked, not a "
+                    "tested bet (⚠️ held = news the model can't see).",
+                    "**News check** — quarterback changes or a line moving against the pick since it opened.",
+                    "**(neutral)** after a game = played at a neutral site, so no home field."]))
             st.dataframe(pd.DataFrame(_prev)[_cols].rename(columns={"Tip (ET)": "Kickoff (ET)"}), hide_index=True,
                          width="stretch")
-            st.caption(f"Previews, not picks: form is how leans of that size have done over the last 30 days "
-                       f"({GPV.HOT} 55%+ of 20 or more games, {GPV.EVEN} about break-even, {GPV.COLD} losing, "
-                       f"{GPV.NEW} fewer than 20). Recent results, not a tested edge.")
         _h = GP.summary(_gp, held=True)
         if _h["graded"]:
             st.caption(f"Held picks (news flags, not in the record above): {_h['record']}.")

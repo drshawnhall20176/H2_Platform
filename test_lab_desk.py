@@ -27,7 +27,7 @@ def test_labs_show_their_games(monkeypatch, key):
     at.session_state["sport"] = key
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("Money · Pick · Winner" in m.value for m in at.markdown)
+    assert any("Money pick · Line pick · Winner pick" in m.value for m in at.markdown)
 
 
 def test_ufc_shows_the_card(monkeypatch):

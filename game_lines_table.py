@@ -25,6 +25,51 @@ ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winne
          "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Spread", "Total", "Model",
          "Spread move", "Weather", "League"]
+# Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
+# internal names; display() renames for the screen and back() maps a ticked column back.
+DISPLAY = {
+    "✓ Money": "✓ Money pick", "Money pick": "Money pick (best value)", "Money score": "Money score (return per $1)",
+    "✓ Pick": "✓ Line pick", "Pick": "Line pick (model's side)", "Use": "Line pick: use",
+    "Chance": "Line pick: chance", "Price": "Line pick: price", "Value": "Line pick: value",
+    "✓ Winner": "✓ Winner pick", "Likely winner": "Winner pick (chance, price)",
+    "Record (30d)": "Line picks like it: last 30 days", "Backtest cover": "Line picks like it: backtest",
+    "Spread": "Book spread", "Total": "Book total", "Model": "Model's numbers",
+    "Money result": "Money pick result", "Pick result": "Line pick result", "Winner result": "Winner pick result",
+}
+SHOW = {"💰 Money picks": "💰 Only games with a Money pick", "🔒 Locks only": "🔒 Only games with a Lock",
+        "All games": "All games", "All playable": "All games"}
+LEGEND = "\n".join("- " + x for x in [
+    "Each game can carry **three different bets**, each with its own tick box right before it:",
+    "&nbsp;&nbsp;**💰 Money pick** — the bet whose **price** pays best for its chance (the Money score = expected return "
+    "per $1). 💰 marks one that meets the tested rule.",
+    "&nbsp;&nbsp;**Line pick** — the model's side of the **spread or total** (where it disagrees with the book most).",
+    "&nbsp;&nbsp;**Winner pick** — the team the model has **winning outright**, with its chance and moneyline.",
+    "They can point at **different sides of the same game** (the Money pick often takes the other side of a big model "
+    "lean, because those leans have lost in testing). **Pick one per game.**",
+    "**Line pick: use** — 🔒 Most probable · 🎟️ Parlay + Single · 🎯 Single only · ⚪ No edge (information, not a bet).",
+    "**Line picks like it** — how the model's side has done on leans of this kind and size: last 30 days, and in the "
+    "long-run backtest. 52.4% breaks even at −110.",
+    "**Book spread / Book total** — the books' lines; **Model's numbers** — the model's own score.",
+    "**Game** is listed **Away @ Home**.",
+    "Stakes: a flat 1u per 💰 pick until the edge is proven, scaled so a day's 💰 picks total 5u at most.",
+])
+
+
+def display(df: pd.DataFrame) -> pd.DataFrame:
+    return df.rename(columns=DISPLAY)
+
+
+def config(cfg: Dict) -> Dict:
+    return {DISPLAY.get(k, k): v for k, v in cfg.items()}
+
+
+def back(ticks) -> List[tuple]:
+    rev = {v: k for k, v in DISPLAY.items()}
+    return [(i, rev.get(c, c)) for i, c in ticks]
+
+
+TICK_HELP = {"✓ Money pick": "Log the Money pick (the next column)", "✓ Line pick": "Log the Line pick (the next "
+             "column)", "✓ Winner pick": "Log the Winner pick's moneyline (the next column)"}
 MONEY_HELP = ("What the price pays: expected return per $1 at the best price, from a chance that trusts the model only "
               "as far as its record against the books has earned (refit every morning). 💰 = college basketball, +4% "
               "to +12% with a 40%+ chance (what made money in testing).")
@@ -129,8 +174,8 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
             PL.record_games(date_str, rows)
         except Exception:                                       # noqa: BLE001
             pass
-    show = st.radio("Show", ["💰 Money picks", "🔒 Locks only", "All games"], index=2, horizontal=True,
-                    key=f"{key}_show", label_visibility="collapsed")
+    show = st.radio("Which games to show", ["💰 Money picks", "🔒 Locks only", "All games"], index=2, horizontal=True,
+                    key=f"{key}_show", format_func=lambda o: SHOW.get(o, o))
     if show.startswith("💰"):
         rows = [r for r in rows if r.get("money")]
     elif show.startswith("🔒"):
@@ -144,33 +189,32 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                   "winner": r.get("winner_result"), "winner_chance": r.get("chance"),
                   "money": r.get("money_result") if (r.get("money_score") or -1) >= MSC.BAND[0] else None,
                   "money_chance": r.get("money_chance")} for r in rows]
-        C.hit_miss_pair([("Money result (score +4%+)", proxy, "money", "money_chance"),
-                         ("Pick result", proxy, "pick", "pick_chance"),
-                         ("Winner result", proxy, "winner", "winner_chance")],
-                        key=f"{key}_hm", title="How the money picks, the picks and the likely winners did")
+        C.hit_miss_pair([("Money pick result (score +4%+)", proxy, "money", "money_chance"),
+                         ("Line pick result", proxy, "pick", "pick_chance"),
+                         ("Winner pick result", proxy, "winner", "winner_chance")],
+                        key=f"{key}_hm", title="How the Money picks, Line picks and Winner picks did")
         _, rows = C.show_filter(proxy, "money", key=f"{key}_hmshow", apply_to=rows,
-                                by={"Money result": "money", "Pick result": "pick", "Winner result": "winner"})
+                                by={"Money pick result": "money", "Line pick result": "pick",
+                                    "Winner pick result": "winner"})
     if not rows:
         st.caption({"💰 Money picks": "No 💰 game lines for this date — choose All games to see every game.",
                     "🔒 Locks only": "No 🔒 game lines for this date — choose All games to see every game."}
                    .get(show, "Nothing to show."))
         return
     df = frame(rows, past, show_sport)
+    with st.expander("📖 How to read this board — the three picks and every column", expanded=False):
+        st.markdown(LEGEND)
     if C.is_owner() and not past:
-        st.caption("☑️ Tick **Money**, **Pick** or **Winner** on any row to log that bet — each box sits beside what "
-                   "it bets on.")
-    ticks = LU.tick_grid(df, TICKS, key=f"{key}_ticks", hide_index=True, width="stretch",
-                         column_config={"Chance": st.column_config.NumberColumn(format="percent"),
-                                        "Value": st.column_config.NumberColumn(format="percent"),
-                                        "Backtest cover": st.column_config.NumberColumn(format="percent"),
-                                        "Money score": st.column_config.NumberColumn(format="percent",
-                                                                                     help=MONEY_HELP)})
+        st.caption("☑️ Tick **Money pick**, **Line pick** or **Winner pick** on any row to log that bet — each box sits "
+                   "right before the bet it logs.")
+    ticks = back(LU.tick_grid(display(df), [DISPLAY[t] for t in TICKS], key=f"{key}_ticks", hide_index=True,
+                              width="stretch", tick_help=TICK_HELP,
+                              column_config=config({"Chance": st.column_config.NumberColumn(format="percent"),
+                                                    "Value": st.column_config.NumberColumn(format="percent"),
+                                                    "Backtest cover": st.column_config.NumberColumn(format="percent"),
+                                                    "Money score": st.column_config.NumberColumn(format="percent",
+                                                                                                 help=MONEY_HELP)})))
     LU.panel(line_items(rows, ticks), f"{key}_log", date_str, past=past)
-    st.caption("**Money** = what the price pays (the Money Score); **Pick** = the model's side of the line; **Winner** = "
-               "who the model has winning. They can point at different sides of the same game — in college basketball "
-               "the Money pick often takes the other side of a big model lean, because those leans have lost. Pick one "
-               "per game. Stakes are a flat 1u a 💰 pick (until the edge is proven), scaled so the day's 💰 picks total 5u "
-               "at most.")
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)
@@ -186,7 +230,7 @@ def lab_section(league: str, key: Optional[str] = None, day=None) -> None:
     import components as C
     key = key or f"glt_{league}"
     today = datetime.now(pytz.timezone("US/Eastern")).date()
-    C.section_header("🧾", "The board: Money · Pick · Winner")
+    C.section_header("🧾", "Game board: 💰 Money pick · Line pick · Winner pick")
     if day is None:
         day = st.date_input("Board date", today, key=f"{key}_date", format="MM/DD/YYYY")
     try:
