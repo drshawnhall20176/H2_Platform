@@ -137,6 +137,7 @@ def check_ledgers(day: str, load: Optional[Callable] = None) -> List[Dict]:
 # each morning: league -> (a "close game" is within this many points on the spread, the bias that raises a warning).
 BIAS_LEAGUES = {"NCAAMB": (10.0, 3.0), "NBA": (10.0, 3.0), "NFL": (7.0, 3.0), "NCAAF": (7.0, 3.5), "NHL": (1.5, 0.5)}
 BIAS_DAYS = 14
+CONFIRM_DAYS = 28         # a home-bias warning must show over this longer window too, or it's reported as a streak
 TOTAL_LIMIT = {"NCAAMB": 4.0, "NBA": 4.0, "NFL": 3.5, "NCAAF": 4.0, "NHL": 0.5}
 SLOPE_OFF = 0.2           # actual margins 20%+ bigger or smaller than the model's, at 2.5+ standard errors
 SHOWN_DAYS = 14
@@ -206,6 +207,28 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
             se = sd / len(errs) ** 0.5 if sd else None
             if abs(m) > limit and se and abs(m) / se >= 2.5:
                 side = "home" if m > 0 else "road"
+                # Nov 23: a 14-day run of home losses (NHL, Nov 9-22: home teams -0.35 goals a game) is a streak, not a
+                # model problem, unless the longer window agrees. Walk-forward refits matched the saved projections.
+                lo = (date.fromisoformat(today) - timedelta(days=CONFIRM_DAYS)).isoformat()
+                long_ = []
+                for r in recs or []:
+                    if str(r.get("kickoff") or "")[:10] < lo or r.get("final_home") is None or r.get("model_margin") is None:
+                        continue
+                    ref = r.get("home_spread")
+                    if (abs(float(ref)) if ref is not None else abs(float(r["model_margin"]))) <= close:
+                        long_.append(float(r["model_margin"]) - (float(r["final_home"]) - float(r["final_away"])))
+                lm = sum(long_) / len(long_) if long_ else 0.0
+                lsd = (sum((e - lm) ** 2 for e in long_) / (len(long_) - 1)) ** 0.5 if len(long_) > 1 else 0.0
+                lse = lsd / len(long_) ** 0.5 if lsd else None
+                confirmed = lse and lm * m > 0 and abs(lm) > limit and abs(lm) / lse >= 2.0
+                if not confirmed:
+                    out.append(_issue("model bias", "info",
+                                      f"{lg}: {side} teams have run {abs(m):.1f} below the model in close games over the "
+                                      f"last {BIAS_DAYS} days ({len(errs)} games), but the last {CONFIRM_DAYS} days "
+                                      f"({len(long_)} games, {lm:+.1f}) don't confirm a model problem -- likely a streak; "
+                                      "watching"))
+                    m = 0.0
+            if abs(m) > limit and se and abs(m) / se >= 2.5:
                 out.append(_issue("model bias", "warn",
                                   f"{lg} game model rates {side} teams {abs(m):.1f} too high in close games "
                                   f"(last {BIAS_DAYS} days, {len(errs)} games, ±{se:.1f}) -- check its home court and "
