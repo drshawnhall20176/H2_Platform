@@ -717,6 +717,49 @@ def bet_result(bet: Dict, p: Dict) -> Optional[str]:
     return None
 
 
+GAME_MARKETS = ("Spread", "Total", "Moneyline")
+
+
+def link_manual(b: Dict, league: str, recs: Sequence[Dict]) -> Optional[Dict]:
+    """Nov 23 (owner): a game-line bet typed into the Bet Log by hand -- or filed as "Other" when the form had no
+    game-line markets -- has no game link, so it never settled. Match it to its game by date and the "Away @ Home"
+    teams; return {"notes", "market", "side"} to store (the link, the market a bet filed as Other really is, and the
+    side as the record spells the team), or None when it isn't a game-line bet or no game matches."""
+    import math
+    player = b.get("player")
+    if isinstance(player, float) and math.isnan(player):
+        player = None
+    if player not in (None, "", "Game total") or b.get("ticket"):
+        return None
+    mk, side, line = b.get("market"), str(b.get("side") or "").strip(), b.get("line")
+    if isinstance(line, float) and math.isnan(line):
+        line = None
+    if mk not in GAME_MARKETS + ("Other",) or " @ " not in str(b.get("game") or ""):
+        return None
+    away_t, home_t = [x.strip() for x in str(b["game"]).split(" @ ", 1)]
+    day = str(b.get("slate_date") or "")[:10]
+    loose = league != "NCAAMB"
+    for p in recs:
+        k = str(p.get("kickoff") or "")[:10]
+        try:
+            if day and abs((date.fromisoformat(k) - date.fromisoformat(day)).days) > 1:
+                continue
+        except ValueError:
+            continue
+        if not (_team_is(away_t, p["away"], loose) and _team_is(home_t, p["home"], loose)):
+            continue
+        if side.lower() in ("over", "under"):
+            if mk not in ("Total", "Other") or line is None:
+                return None
+            return {"notes": f"{TAG}:{league}:{p['game_id']}", "market": "Total", "side": side.title()}
+        team = p["home"] if _team_is(side, p["home"], loose) else p["away"] if _team_is(side, p["away"], loose) else None
+        if team is None:
+            return None
+        m = mk if mk in ("Spread", "Moneyline") else ("Spread" if line is not None else "Moneyline")
+        return {"notes": f"{TAG}:{league}:{p['game_id']}", "market": m, "side": team}
+    return None
+
+
 def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     """Settle open Bet Log bets that were logged from a Game Lab page, once their game is graded here."""
     import betlog as B
@@ -733,9 +776,19 @@ def settle_logged(league: str, db_path: Optional[str] = None) -> int:
     # same game, market, side and line (the college totals parlay of Nov 7 sat open for that reason)
     by_bet = {(b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(), b.get("line")): _link(b)
               for b in every if _link(b)}
+    recs_all = None
     for b in [x for x in every if not x.get("result")]:
         link = _link(b) or by_bet.get((b.get("slate_date"), b.get("game"), b.get("market"), str(b.get("side")).lower(),
                                        b.get("line")))
+        if not link and str(b.get("sport") or "") == BET_SPORT.get(league, league):   # Nov 23: typed in by hand
+            if recs_all is None:
+                recs_all = MS.load_game_picks(league, db_path=db_path)
+            fix = link_manual(b, league, recs_all)
+            if fix:
+                notes = ",".join(x for x in (str(b.get("notes") or "").strip() or None, fix["notes"]) if x)
+                B.update_bet(int(b["id"]), notes=notes, market=fix["market"], side=fix["side"])
+                b = dict(b, notes=notes, market=fix["market"], side=fix["side"])
+                link = fix["notes"]
         if not link:
             continue
         p = graded.get(link.split(":", 2)[2])

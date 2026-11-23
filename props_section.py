@@ -63,9 +63,13 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
     st.markdown(f"##### {title}")
     saved, rows, _judged = _load(sport, day)
     if not rows:
-        st.info("No player props saved for today yet. They're priced when the books post them (the board refreshes "
-                "hourly and again before the afternoon picks note); college props are thinner than the pros — many "
-                "games have none.")
+        # Nov 23 (owner, Monday Madness): "none saved" read like a broken page. Say what this list holds and why
+        # it's empty: only props with an edge are listed, and pick'em-app lines alone don't carry one.
+        st.info("**No player props with an edge yet today.** This list shows only props the model rates playable "
+                "(🔒 / 🎟️ / 🎯 / 💰). Early in the day most college props are pick'em-app lines (Underdog, Pick6), "
+                "and those haven't earned an edge in testing — they said 57–59% and hit 44–52% — so they're scored "
+                "as coin flips. Sportsbook props usually post late morning; the board refreshes every hour and "
+                "anything with an edge appears here. Every prop, edge or not, is on the Best Bets page.")
         return
     js = C.by_kickoff(_judged, lambda j: j.get("time"))
     games = sorted({j.get("game") for j in js if j.get("game")})

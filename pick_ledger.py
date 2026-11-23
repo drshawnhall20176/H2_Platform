@@ -518,7 +518,8 @@ def game_close(r: Dict, full: Dict) -> Optional[Dict]:
     return close_mark("spread", None, r.get("money_line"), r.get("price"), it.get("bet_line"), it.get("price"))
 
 
-def grade_day(day: str, kinds=("money", "strong", "games", "hot"), sports_=None, get=None, save=None) -> Dict[str, str]:
+def grade_day(day: str, kinds=("money", "strong", "games", "hot", "cand"), sports_=None, get=None,
+              save=None) -> Dict[str, str]:
     """Grades every ledger of `day` and stores the results. {ledger key: "w-l (ungraded u)"}."""
     out: Dict[str, str] = {}
     cache: Dict = {}
@@ -526,13 +527,14 @@ def grade_day(day: str, kinds=("money", "strong", "games", "hot"), sports_=None,
     targets = [("strong", "ALL")] * ("strong" in kinds) + [("hot", "ALL")] * ("hot" in kinds)   # Nov 22: Hot Tickets
     targets += [("money", s) for s in sp_list] * ("money" in kinds)
     targets += [("games", s) for s in sp_list] * ("games" in kinds)
+    targets += [("cand", s) for s in sp_list] * ("cand" in kinds)    # Nov 23: candidate rules (candidate_rules.py)
     for kind, sp in targets:
         key = KEY.format(kind=kind, sport=sp, day=day)
         cur = _get(key, get)
         rs = cur.get("rows") or {}
         if not rs or (cur.get("graded_at") and all(r.get("result") and r.get("close_checked") for r in rs.values())):
             continue                                            # nothing to grade, or already finished
-        if kind == "games":
+        if kind in ("games", "cand"):
             grade_games(day, list(rs.values()))
         else:
             gm = [r for r in rs.values() if r.get("money_market")]          # Nov 21: game lines on the strong list
