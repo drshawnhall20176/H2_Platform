@@ -124,6 +124,24 @@ def blowout(league: str, p: Dict) -> str:
 BLOW_HIGH, BLOW_MID = 0.60, 0.35
 
 
+USE_NOTE = ("**Use:** every game here reads ⚪ No edge — no game-line rule for this league has passed testing yet, so the "
+            "model's leans are information, not bets. The Use column comes back on its own the day a rule earns a tag.")
+
+
+def collapse_use(df, col: str = "Use"):
+    """Nov 23 (owner: "if the Use column shows no edge for everything is it useful?"): a Use column with one value on
+    every row says nothing per game -- drop it and return a one-line note instead. (df, note or None)."""
+    try:
+        if col not in df.columns or df.empty:
+            return df, None
+        vals = {str(v).strip() for v in df[col]}
+        if len(vals) == 1 and next(iter(vals)) in ("⚪ No edge", "⛔ Pass", "—", "", "None"):
+            return df.drop(columns=[col]), USE_NOTE
+    except Exception:                                           # noqa: BLE001
+        pass
+    return df, None
+
+
 def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
     """The table's key as bullets (it was one long paragraph). `extra`: bullets a page adds (Use, ticks, backtest)."""
     b = [

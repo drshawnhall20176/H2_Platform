@@ -521,6 +521,10 @@ if True:
                                          "playable to see every game."}.get(_show, "No tested game-line picks today."))
         else:
             import game_lines_table as _GLT
+            import game_previews as _GPV
+            _wdf, _unote = _GPV.collapse_use(_wdf)               # Nov 23: a Use column that's ⚪ on every row goes
+            if _unote:
+                st.caption(_unote)
             with st.expander("📖 How to read the game lines — the three picks and every column", expanded=False):
                 st.markdown(_GLT.LEGEND)
             st.caption("☑️ Tick **Line pick**, **Winner pick** or **Money pick** on any row to log that bet — each box "
