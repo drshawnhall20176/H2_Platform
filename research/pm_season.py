@@ -18,4 +18,4 @@ while d <= date(2026, 11, 22):
                     "fm": f["final_home"] - f["final_away"], "mod": f.get("model_margin")})
     d += timedelta(days=1)
 print("N", len(out))
-print("JSON" + json.dumps(out))
+for i in range(0, len(out), 40): print("JSON" + json.dumps(out[i:i+40]))
