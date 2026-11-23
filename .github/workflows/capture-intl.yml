@@ -45,6 +45,12 @@ jobs:
           TRIGGER: ${{ github.event_name }}
         run: |
           python intl_picks.py "${SPORTS:-TENNIS,EUROLEAGUE,EUROCUP,BCL,FEC,EUROCUPW,NKL,ICELAND,BAHRAIN,ESTONIA1,QATAR,NBL,NCAAMB,NBA,NHL,NFL}"
+      # Nov 23: candidate game-line rules, recorded pre-game and tracked forward (candidate_rules.py)
+      - name: Record candidate rules
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python candidate_rules.py record || true
       # Nov 13: the Soccer Lab (soccer_picks.py) -- results from ESPN (a ~13-month backfill the first run), one Odds API
       # call per league with a match on (Pinnacle + the US books, 3 credits), grading and bet settling.
       - name: Capture soccer

@@ -348,7 +348,12 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         df = df[cols]
     df, use_note = GP.collapse_use(df)                          # Nov 23: a Use column that's ⚪ on every row goes
     if use_note:
-        st.caption(use_note)
+        try:
+            import candidate_rules as CR
+            cand = CR.status_line(league, str(day))
+        except Exception:                                       # noqa: BLE001
+            cand = ""
+        st.caption(use_note + ("  \n" + cand if cand else ""))
     with st.expander("📖 How to read this table — every column and symbol", expanded=False):
         extra = [] if cust else [
             "**Market spread / total / moneyline** — the sportsbooks' lines; ⭐ marks what the model favors, and the tick "
