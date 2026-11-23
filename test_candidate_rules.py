@@ -1,0 +1,53 @@
+"""candidate_rules (Nov 23): the close-gap rule recorded pre-game, graded with the ledgers, shown as a forward record."""
+from datetime import datetime, timezone
+
+import pytest
+
+import candidate_rules as CR
+import game_previews as GP
+import pick_ledger as PL
+
+NOW = datetime(2026, 11, 23, 14, 0, tzinfo=timezone.utc)          # 9 AM New York
+
+
+def _g(gid, hs, mm, ko="2026-11-23T16:00:00+00:00", home="H", away="A"):
+    return {"game_id": gid, "kickoff": ko, "home": home, "away": away, "home_spread": hs, "model_margin": mm}
+
+
+def test_only_close_unstarted_games_today_qualify_on_the_models_side():
+    recs = [_g("a", -5.0, 4.3), _g("b", 3.5, -2.2), _g("c", -10.0, 4.0), _g("d", -5.0, 5.0),
+            _g("e", -5.0, 4.3, ko="2026-11-23T13:00:00+00:00"), _g("f", -5.0, 4.3, ko="2026-11-24T16:00:00+00:00")]
+    got = {p["game_id"]: p for p in CR.picks(recs, "2026-11-23", NOW)}
+    assert set(got) == {"a", "b"}                                   # c: 6 apart; d: no side; e: started; f: tomorrow
+    assert got["a"]["pick"] == "A +5" and got["a"]["money_side"] == "away" and got["a"]["money_line"] == 5.0
+    assert got["b"]["pick"] == "H +3.5" and got["b"]["money_side"] == "home"
+
+
+@pytest.fixture
+def store(monkeypatch):
+    s = {}
+    import model_store as MS
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None: s.get(k, d))
+    monkeypatch.setattr(MS, "save_setting", lambda k, v: s.__setitem__(k, v))
+    return s
+
+
+def test_recorded_once_graded_and_shown_as_a_forward_record(store):
+    recs = [_g("a", -5.0, 4.3)]
+    assert CR.record("2026-11-23", NOW, load=lambda sp: recs) == 1
+    assert CR.record("2026-11-23", NOW, load=lambda sp: recs) == 0          # first sighting wins
+    key = PL.KEY.format(kind=CR.KIND, sport="NCAAMB", day="2026-11-23")
+    rows = store[key]["rows"]
+    PL.grade_games("2026-11-23", list(rows.values()), recs={"a": dict(recs[0], final_home=70, final_away=72)})
+    store[key] = dict(store[key], graded_at="x")
+    assert list(rows.values())[0]["result"] == "win"                        # A +5, lost by 2
+    line = CR.status_line("NCAAMB", "2026-11-23")
+    assert "1–0" in line and "Not a bet yet" in line and "200 graded games" in line
+    assert CR.status_line("NHL", "2026-11-23") == ""
+
+
+def test_the_agreement_column():
+    assert GP.agreement(_g("a", -5.0, 4.3)) == "✅ Agree"
+    assert GP.agreement(_g("a", -5.0, 9.0)) == "🟨 Same winner · 4.0 pts apart"
+    assert GP.agreement(_g("a", -5.0, -2.0)) == "⚠️ Model has A winning"
+    assert GP.agreement({"home": "H"}) == "—"
