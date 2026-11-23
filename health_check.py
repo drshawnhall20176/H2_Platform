@@ -44,8 +44,13 @@ def check_jobs(runs: Sequence[Dict], now: datetime) -> List[Dict]:
             failed[r.get("name")] = failed.get(r.get("name"), 0) + 1
     for name, n in sorted(failed.items()):
         ok = sum(1 for r in recent if r.get("name") == name and r.get("conclusion") == "success")
-        out.append(_item("jobs", "error" if not ok else "warn",
-                         f"{name}: {n} failed run(s) in the last 24 hours" + (f" ({ok} succeeded)" if ok else "")))
+        # Nov 23: a failure a later run of the same job has already made good (GitHub's own outage at 4:15 PM on Nov 22
+        # cancelled three jobs at once) is a note, not a warning; a job whose latest run failed still warns
+        mine = sorted((r for r in recent if r.get("name") == name and r.get("conclusion")), key=lambda r: str(r.get("created_at")))
+        recovered = bool(mine) and mine[-1].get("conclusion") == "success"
+        out.append(_item("jobs", "error" if not ok else "info" if recovered else "warn",
+                         f"{name}: {n} failed run(s) in the last 24 hours" + (f" ({ok} succeeded)" if ok else "")
+                         + ("; the latest run succeeded" if recovered else "")))
     ran = {r.get("name") for r in recent if r.get("conclusion") == "success"}
     for name in KEY_JOBS:
         if name not in ran and name not in failed:

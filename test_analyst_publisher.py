@@ -10,6 +10,16 @@ import analyst_publisher as PUB
 import analyst_tools as AT
 import sports
 
+
+@pytest.fixture(autouse=True)
+def _whole_day_cards(monkeypatch, request):
+    """Nov 23: from today basketball and hockey cards go out per time slot (analyst_publisher.SLOT_FROM_DEFAULT). These
+    tests run on the real date and cover the whole-day card, so they keep it; the slot tests set their own dates."""
+    if "window" in request.node.name:
+        return
+    monkeypatch.setattr(PUB, "SLOT_FROM_DEFAULT", "2099-01-01")
+    monkeypatch.setattr(PUB, "SLOT_FROM", {})
+
 ET = pytz.timezone("US/Eastern")
 HOOK = "https://discord.com/api/webhooks/1/abc"
 

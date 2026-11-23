@@ -73,3 +73,25 @@ def test_shown_picks_running_high_warn():
     load = lambda kind, sp, day: {"rows": rows} if (kind, day) == ("strong", "2026-11-20") else {"rows": {}}
     text = " ".join(i["detail"] for i in DC.check_shown("2026-11-22", load))
     assert "NBA pick'em picks shown said 57% and hit 40%" in text
+
+
+def test_a_short_home_streak_the_longer_window_doesnt_confirm_is_a_note():
+    import data_checks as DC
+    from datetime import datetime, timezone
+
+    def recs_for(older_actual):
+        out = []
+        for d in range(1, 29):                               # Oct 26 .. Nov 22, 4 games a day
+            day = datetime(2026, 11, 23, tzinfo=timezone.utc).toordinal() - d
+            ds = datetime.fromordinal(day).strftime("%Y-%m-%d")
+            for k in range(4):
+                act = (-0.6 if d <= 14 else older_actual) + (1.0 if k % 2 else -1.0)
+                out.append({"kickoff": ds + "T23:00:00Z", "home_spread": -1.5, "model_margin": 0.2,
+                            "final_home": 3 + act, "final_away": 3.0})
+        return out
+    now = datetime(2026, 11, 23, 15, 0, tzinfo=timezone.utc)
+    streak = DC.check_bias("2026-11-23", load=lambda lg: recs_for(1.0) if lg == "NHL" else [], now=now)
+    assert [i["level"] for i in streak if "close games" in i["detail"]] == ["info"]
+    assert "likely a streak" in " ".join(i["detail"] for i in streak)
+    real = DC.check_bias("2026-11-23", load=lambda lg: recs_for(-0.6) if lg == "NHL" else [], now=now)
+    assert [i["level"] for i in real if "close games" in i["detail"]] == ["warn"]
