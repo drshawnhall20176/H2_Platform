@@ -1073,7 +1073,7 @@ def simulate_nfl_game(home_scoring: Optional[Dict[str, float]],
                       away_allowed: Optional[Dict[str, float]],
                       league_avg_scoring: Optional[float],
                       n_sims: int = DEFAULT_NFL_GAME_SIMS,
-                      seed: Optional[int] = None) -> Optional[Dict]:
+                      seed: Optional[int] = None, hfa: float = 0.0) -> Optional[Dict]:
     """Monte Carlo NFL game simulation: moneyline win probability, projected spread, projected
     total. Identical method to ncaaf_projections.simulate_ncaaf_game -- Normal distribution
     for scores, odds-ratio blend for projected points. See that function's own docstring for
@@ -1084,6 +1084,7 @@ def simulate_nfl_game(home_scoring: Optional[Dict[str, float]],
         return None
     home_proj = _nfl_blend_score(home_scoring["recent_avg"], away_allowed["recent_avg"], league_avg_scoring)
     away_proj = _nfl_blend_score(away_scoring["recent_avg"], home_allowed["recent_avg"], league_avg_scoring)
+    home_proj, away_proj = home_proj + hfa / 2.0, away_proj - hfa / 2.0      # Nov 22: home field (full edge, points)
     home_std = max(_NFL_GAME_DEFAULT_STD, abs(home_scoring["recent_avg"] - home_scoring["season_avg"]))
     away_std = max(_NFL_GAME_DEFAULT_STD, abs(away_scoring["recent_avg"] - away_scoring["season_avg"]))
     rng = np.random.default_rng(seed)

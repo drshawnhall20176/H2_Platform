@@ -69,6 +69,36 @@ def _season_results(league: str, day: str):
             if str(g.get("date") or "") >= (f"{season}-07-01" if league != "WNBA" else f"{season}-01-01")]
 
 
+def prior_label(league: str, day: str) -> str:
+    """Last season's name as the league writes it: "2025-26" for winter leagues, "2025" for the WNBA."""
+    prev = int(I.season_of(league, day)) - 1
+    return str(prev) if league == "WNBA" else f"{prev}-{str(prev + 1)[2:]}"
+
+
+def prior_season_games(league: str, day: str, results) -> list:
+    """Owner, Nov 22: every Game Lab gets the prior-year baseline the football labs have. Last season's finished
+    games only."""
+    prev = int(I.season_of(league, day)) - 1
+    return [g for g in results or [] if I.season_of(league, str(g.get("date") or "")[:10] or "1900-01-01") == str(prev)]
+
+
+def baseline_projection(league: str, p: Dict, games) -> Optional[Dict]:
+    """The game projected from last season's ratings alone (every game weighted equally, the same home-court prior
+    and neutral-site rule as the live model): {"model_margin","model_total","model_p"} or None when a team has no
+    rating from last season (a new program, or a name the archive doesn't match)."""
+    r = I.ratings_weighted(games, [1.0] * len(games), hfa_prior=I.HFA_PRIOR.get(league))
+    m = I.project(r, p.get("home"), p.get("away"), bool(p.get("neutral")), loose=league != "NCAAMB")
+    if not m:
+        return None
+    return {"model_margin": m["margin"], "model_total": m["total"], "model_p": I.win_prob(m["margin"], league=league)}
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _prior_games(league: str, day: str):
+    prev = int(I.season_of(league, day)) - 1
+    return prior_season_games(league, day, MS.load_results(league, since=f"{prev - 1}-07-01"))
+
+
 def _scoring_side(col, label, ctx, noun):
     with col:
         st.markdown(f"**{label}**")
@@ -82,7 +112,8 @@ def _scoring_side(col, label, ctx, noun):
                   delta=None if abs(ds) < 0.05 else f"{ds:+.1f} vs season", delta_color="normal")
         st.metric("Recent avg allowed", f"{a['recent_avg']:.1f}",
                   delta=None if abs(da) < 0.05 else f"{da:+.1f} vs season", delta_color="inverse")
-        st.caption(f"{ctx['games']} game{'s' if ctx['games'] != 1 else ''} this season")
+        st.caption(f"{ctx['games']} game{'s' if ctx['games'] != 1 else ''} "
+                   f"{'last season' if st.session_state.get('_hg_prior_on') else 'this season'}")
 
 
 def _one_game(league, upcoming, day):
@@ -96,12 +127,32 @@ def _one_game(league, upcoming, day):
     labels = {f"{_tip(p)} — {p['away']} @ {p['home']}": p for p in ordered}
     p = labels[st.selectbox("Game to simulate", list(labels), key=f"hg_sim_game_{league}")]
     home, away, noun = p["home"], p["away"], GS.unit(league)
+    prior = prior_label(league, str(day))
+    use_prior = st.checkbox(f"📊 Use {prior} season baseline", value=False, key=f"hg_prior_{league}",
+                            help="Scoring context, projection and simulation from last season's games only. The live "
+                                 "model already counts last season (at a discount); this shows last season by itself.")
+    base, live = None, p
+    if use_prior:
+        try:
+            results = _prior_games(league, str(day))
+            base = baseline_projection(league, p, results) if results else None
+        except Exception:                                       # noqa: BLE001
+            results = []
+        st.info(f"📊 **Using {prior} season data.** Scoring context, projection and simulation below use last season's "
+                "games only; the tables above stay on the live model. Rosters turn over (in college especially), so "
+                "treat this as a reference point, not the pick.")
+        if base is None:
+            st.caption(f"No {prior} rating for one of these teams, so the projection below stays on the live model.")
+        else:
+            p = dict(p, **base)
 
+    st.session_state["_hg_prior_on"] = bool(use_prior)
     C.section_header("📊", "Team scoring context")
-    try:
-        results = _season_results(league, str(day))
-    except Exception:                                           # noqa: BLE001
-        results = []
+    if not use_prior:
+        try:
+            results = _season_results(league, str(day))
+        except Exception:                                       # noqa: BLE001
+            results = []
     c1, c2 = st.columns(2)
     loose = league != "NCAAMB"                                  # the same team matching the ratings model uses
     hc, ac = GS.scoring_context(results, home, loose), GS.scoring_context(results, away, loose)
@@ -115,9 +166,10 @@ def _one_game(league, upcoming, day):
     # Nov 17: the same one-line answer as the table above, so this close-up never reads as a separate pick
     try:
         import game_previews as GP
-        t = _tag(league, p) or {}
+        t = _tag(league, live) or {}
         playable = t.get("use") in (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
-        st.markdown(f"**{t.get('use') or ''}** {GP.says(p, playable)}")
+        st.markdown(f"**{t.get('use') or ''}** {GP.says(live, playable)}"
+                    + (" _(the live model's read; the numbers below are last season's)_" if base else ""))
     except Exception:                                           # noqa: BLE001
         pass
     sim = GS.simulate(league, p.get("model_margin"), p.get("model_total"), key=p.get("game_id"))

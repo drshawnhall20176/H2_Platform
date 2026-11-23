@@ -179,7 +179,7 @@ def load_slate_meta(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)
-def load_game(date_str: str, stats_date_str: str, home_name: str, away_name: str):
+def load_game(date_str: str, stats_date_str: str, home_name: str, away_name: str, hfa: float = 0.0):
     """All signals for one specific game -- cached per game so switching games reuses data.
 
     TWO DIFFERENT DATES, same real pattern as QB Lab/Matchup Lab/Player Lines: date_str picks
@@ -200,7 +200,7 @@ def load_game(date_str: str, stats_date_str: str, home_name: str, away_name: str
     away_allowed = E.get_team_points_allowed(away_name, stats_date_str)
 
     game_result = P.simulate_ncaaf_game(home_scoring, away_scoring, home_allowed, away_allowed,
-                                        league_avg)
+                                        league_avg, hfa=hfa)
 
     home_period = E.get_team_period_scoring(home_name, stats_date_str)
     away_period = E.get_team_period_scoring(away_name, stats_date_str)
@@ -269,9 +269,14 @@ show_period = st.checkbox(
         "CFBD field names cross-confirmed from third-party sources, not CFBD's own official schema "
         "directly. The moneyline section above uses schedule data only and is always reliable.")
 
+# Nov 22 (owner): home field in the scoring-rate model too -- the ratings model's own backtested 2.5 points, none at a
+# neutral site
+import game_picks as _GPm
+_NEUTRAL = str(selected.get("neutral_site")).lower() in ("true", "1")
+_HFA = 0.0 if _NEUTRAL else float(_GPm.FIXED_HFA)
 with st.spinner(f"Simulating {away_name} @ {home_name}..."):
     game_result, period_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg = load_game(
-        date_str, stats_date_str, home_name, away_name)
+        date_str, stats_date_str, home_name, away_name, _HFA)
 
 # Nov 18 -- one model, one answer: when the ratings model (v2, above) has this game, the moneyline / spread / total
 # below is simulated around ITS projection (game_sim.py, the same as every other Game Lab) instead of the older
@@ -286,7 +291,7 @@ try:
                 _v2_rec = _p
 except NameError:
     _v2_rec = None
-if _v2_rec is not None:
+if _v2_rec is not None and not show_2025_baseline:          # Nov 22: the 2025 box now switches the projection too
     import game_sim as _GS
     import todays_best as _TB
     _sim = _GS.simulate("NCAAF", _v2_rec["model_margin"], _v2_rec["model_total"], key=_v2_rec.get("game_id") or game_label)
@@ -332,9 +337,8 @@ with col2:
                  delta_color="inverse")
 
 st.caption("Recent = last 4 games (n=4). Delta vs season shown; positive delta on scoring is good "
-          "(trending up), negative delta on allowed is good (trending tighter). Note: no "
-          "home-field advantage adjustment in this model — a real, acknowledged simplification "
-          "for v1. Worth adding once graded results can validate the magnitude.")
+          "(trending up), negative delta on allowed is good (trending tighter). Raw points, not adjusted for "
+          "opponents or home field; the projection below does both.")
 
 # --- Moneyline / spread / total (Tier 1, schedule-based) --------------------
 st.divider()
@@ -364,8 +368,9 @@ else:
         st.caption(f"Proj: {away_name} **{game_result['proj_away_score']:.1f}** — "
                   f"{home_name} **{game_result['proj_home_score']:.1f}** · "
                   f"Std: {game_result['away_std']:.1f} / {game_result['home_std']:.1f} · "
-                  f"{game_result['n_sims']:,} sims · scoring-rate model (the ratings model has no projection for "
-                  "this game)")
+                  f"{game_result['n_sims']:,} sims · scoring-rate model"
+                  + (" on 2025 scoring rates" if show_2025_baseline else " (the ratings model has no projection for this game)")
+                  + (" · neutral site, no home field" if _NEUTRAL else f" · home field {_HFA:.1f} pts"))
 
     with st.expander("What the win probability means — and what it doesn't"):
         st.markdown(f"""
@@ -378,7 +383,7 @@ opponent's recent defensive performance, via an odds-ratio blend (the same math 
 matchup projections on this platform).
 
 **What it does NOT reflect:**
-- Home-field advantage (not modeled in v1)
+- (Home field IS included: 2.5 points to the home team, none at a neutral site)
 - Injuries, weather, travel, or scheme-specific adjustments
 - Quarterback-specific passing game — this is team-level aggregate offense/defense, not
   QB-grade
@@ -440,7 +445,7 @@ if show_period:
                     "for this specific team/matchup — worth flagging rather than choosing one.",
                     icon="🔍")
 
-st.caption("v1 — no home-field advantage, no weather/travel/injury adjustment, "
+st.caption("Home field: 2.5 points (none at a neutral site), the same as the ratings model. No weather/travel/injury adjustment, "
           "schedule-based std is a simplification. Quarter/half section additionally depends on "
           "unverified drive cache field names. Compare against the market's own de-vigged "
           "moneyline (Command Center → Show de-vigged moneylines) before acting on this.")

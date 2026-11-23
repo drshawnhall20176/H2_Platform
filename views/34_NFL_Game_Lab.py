@@ -60,7 +60,7 @@ def load_slate_meta(date_str: str):
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)
-def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str):
+def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str, hfa: float = 1.7):
     """All game-level signals for one matchup -- cached per game.
     Two dates: date_str picks the game; stats_date_str picks which season's scoring rates power
     the simulation -- the same two-dates pattern QB Lab, Matchup Lab, Player Lines, and NCAAF
@@ -77,7 +77,7 @@ def load_game(date_str: str, stats_date_str: str, home_abbr: str, away_abbr: str
     away_allowed = E.get_team_points_allowed(away_abbr, stats_date_str)
 
     game_result = P.simulate_nfl_game(home_scoring, away_scoring, home_allowed, away_allowed,
-                                      league_avg)
+                                      league_avg, hfa=hfa)
 
     # Injury report uses the CURRENT date's week, not stats_date_str -- we want this week's
     # real injury status, not last season's. date_str drives this, always.
@@ -188,12 +188,27 @@ if not game_options:
 import game_previews as GPV
 
 
+NFL_HFA = 1.7      # Nov 22 (owner): the NFL ratings model's home-field prior (intl_hoops.HFA_PRIOR), full edge in points
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def is_neutral(date_str: str, home: str, away: str) -> bool:
+    """An international / neutral-site game (nflverse's schedule location), where home field is 0."""
+    try:
+        for g in E.get_schedule(E._infer_season(date_str)) or []:
+            if g.get("home_team") == home and g.get("away_team") == away and str(g.get("game_date"))[:10] == date_str:
+                return str(g.get("location") or "").lower() == "neutral"
+    except Exception:                                           # noqa: BLE001
+        pass
+    return False
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def slate_previews(date_str: str, games: tuple):
     out = []
     for label, kick, home, away in games:
         try:
-            res = load_game(date_str, "2026-02-01", home, away)[0]
+            res = load_game(date_str, "2026-02-01", home, away, 0.0 if is_neutral(date_str, home, away) else NFL_HFA)[0]
         except Exception:                                       # noqa: BLE001 -- one bad game never hides the slate
             res = None
         out.append(GPV.sim_row(label, kick, home, away, res))
@@ -219,7 +234,7 @@ if len(_slate) >= 4 and _tight:                                 # a short slate 
 st.dataframe(pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in _slate]),
              hide_index=True, width="stretch")
 st.caption("Previews, not picks: nothing in the NFL has tested profitable yet. Projections use last season's scoring "
-           "rates (the default below) with no home-field edge and no book lines. Pick a game for the injury report "
+           "rates (the default below) with a 1.7-point home-field edge (none at international games) and no book lines. Pick a game for the injury report "
            "and the full breakdown.")
 
 game_label = st.selectbox("Game", list(game_options.keys()))
@@ -231,6 +246,7 @@ away_name = selected["away_name"]
 # nfl_engine.build_slate's own meta dict construction (home_abbr / away_abbr keys)
 home_abbr = selected.get("home_abbr") or selected.get("home_name")
 away_abbr = selected.get("away_abbr") or selected.get("away_name")
+_HFA = 0.0 if is_neutral(date_str, home_abbr, away_abbr) else NFL_HFA      # Nov 22: home field
 
 # 2025-BASELINE TOGGLE — same real mechanism as every other NCAAF/NFL page this session.
 # "2026-02-01" resolves to the 2025 NFL season via _infer_season's own confirmed Jan/Feb rule.
@@ -249,7 +265,7 @@ if show_2025_baseline:
 
 with st.spinner(f"Simulating {away_name} @ {home_name} + loading injury reports..."):
     game_result, home_scoring, away_scoring, home_allowed, away_allowed, league_avg, \
-    home_injuries, away_injuries = load_game(date_str, stats_date_str, home_abbr, away_abbr)
+    home_injuries, away_injuries = load_game(date_str, stats_date_str, home_abbr, away_abbr, _HFA)
 
 st.markdown(f"## {away_name} @ {home_name}")
 st.caption(f"20,000 simulations · Normal score distribution · Odds-ratio blend · "
@@ -327,9 +343,8 @@ with col2:
                  delta_color="inverse")
 
 st.caption("Recent = last 4 games. Positive delta on scoring is good (trending up), "
-          "negative delta on allowed is good (trending tighter). No home-field advantage "
-          "adjustment in v1 — a real, acknowledged simplification worth adding once graded "
-          "results exist to validate the magnitude.")
+          "negative delta on allowed is good (trending tighter). Raw points, not adjusted for opponents or "
+          "home field; the projection below does both.")
 
 # --- Moneyline / spread / total ---------------------------------------------
 st.divider()
@@ -353,7 +368,8 @@ else:
     st.caption(f"Proj: {away_name} **{game_result['proj_away_score']:.1f}** — "
               f"{home_name} **{game_result['proj_home_score']:.1f}** · "
               f"Std: {game_result['away_std']:.1f} / {game_result['home_std']:.1f} · "
-              f"{game_result['n_sims']:,} sims")
+              f"{game_result['n_sims']:,} sims · "
+              + ("neutral site, no home field" if _HFA == 0 else f"home field {_HFA:.1f} pts"))
 
     with st.expander("How this works — and what it doesn't account for"):
         st.markdown(f"""
@@ -367,11 +383,13 @@ defensive performance. The injury report above is a real, separate signal — a 
 isn't yet factored into the scoring rates unless their absence already showed up in recent
 games.
 
-**What it does NOT reflect:** home-field advantage, weather, specific scheme matchups, or the
+**Home field:** {_HFA:.1f} points to the home team (the NFL ratings model's own figure; none at a neutral site).
+
+**What it does NOT reflect:** weather, specific scheme matchups, or the
 market's own price. Use the de-vigged moneylines section in Command Center to compare this
 model's own probability against what DraftKings actually implies.
         """)
 
-st.caption("v1 — no home-field advantage, no quarter/half breakdown (NFL drive data not yet "
+st.caption("v1 — no quarter/half breakdown (NFL drive data not yet "
           "available via nflreadpy for period-level simulation, unlike NCAAF's own drives cache "
           "built this session). Injury report reflects nflreadpy's most recent fetch.")
