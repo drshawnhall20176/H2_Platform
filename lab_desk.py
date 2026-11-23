@@ -127,4 +127,4 @@ def render(sport, day: str) -> None:
         return
     import game_lines_table as GLT
     GLT.render(games, f"cc_lab_{sport.key}", day, past=False, show_sport=False,
-               title="Today's games: Money · Pick · Winner")
+               title="Today's games: 💰 Money pick · Line pick · Winner pick")

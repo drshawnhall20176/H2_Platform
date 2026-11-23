@@ -62,7 +62,7 @@ def test_a_fair_only_league_starts_at_the_fair_line_with_no_price():
     assert HG.side_item(F, "Spread", "away")["bet_line"] == 5.0
     assert HG.side_item(F, "Total", "under")["bet_line"] == 161.5
     assert HG.side_item(F, "Moneyline", "away")["pick"] == "Trento moneyline"
-    got = HG.ticked_items([F, G], [(0, "✓ Away ML"), (1, "✓ Under"), (5, "✓ Over"), (0, "nope")])
+    got = HG.ticked_items([F, G], [(0, HG.T_AML), (1, HG.T_U), (5, HG.T_O), (0, "nope")])
     assert [x["pick"] for x in got] == ["Trento moneyline", "Under 176.5 (KK Crvena zvezda @ Real Madrid)"]
 
 
@@ -80,8 +80,9 @@ def test_book_tick_columns_sit_next_to_what_they_bet():
     import pandas as pd
     df = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "The model says": "y", "Why": "z"}]), [G], after="The model says")
     cols = list(df.columns)
-    assert cols.index("✓ Home spread") == cols.index("Book spread") + 1 and cols[-1] == "Why"
-    assert df.loc[0, "Book ML"] == "Real Madrid -250 / +200"
+    assert cols.index(HG.T_HS) == cols.index(HG.BOOK_SPREAD) + 1 and cols[-1] == "Why"
+    assert df.loc[0, HG.BOOK_ML].endswith("Real Madrid -250 · KK Crvena zvezda +200") or \
+        df.loc[0, HG.BOOK_ML].endswith("KK Crvena zvezda +200 · Real Madrid -250")     # Nov 23: each team's own price
 
 
 def test_game_lines_board_logs_pick_winner_or_money_from_their_own_tick_boxes():
@@ -168,12 +169,13 @@ def test_the_book_columns_star_the_models_side():
     g = {"home": "Nebraska", "away": "Butler", "home_spread": -12.5, "model_margin": 19.0, "line_total": 140.5,
          "model_total": 136.0, "model_p": 0.90, "fair_home": 0.86, "best_home": -900, "best_away": 600}
     df = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "Gap (pts)": 6.5}]), [g], after="Gap (pts)")
-    assert df.loc[0, "Book spread"] == "⭐ Home: Nebraska -12.5"
-    assert df.loc[0, "Book total"] == "140.5 · ⭐ Under" and df.loc[0, "Book ML"].endswith("· ⭐ Home")
+    # Nov 23 (owner): the star names the team, never "Away" / "Home"
+    assert df.loc[0, HG.BOOK_SPREAD] == "⭐ Nebraska -12.5"
+    assert df.loc[0, HG.BOOK_TOTAL] == "140.5 · ⭐ Under" and df.loc[0, HG.BOOK_ML] == "⭐ Nebraska -900 · Butler +600"
     g2 = dict(g, model_margin=8.0, model_total=150.0, model_p=0.80)
     df2 = HG.with_book_ticks(pd.DataFrame([{"Game": "x", "Gap (pts)": 4.5}]), [g2], after="Gap (pts)")
-    assert df2.loc[0, "Book spread"] == "⭐ Away: Butler +12.5" and df2.loc[0, "Book total"].endswith("⭐ Over")
-    assert df2.loc[0, "Book ML"].endswith("⭐ Away")
+    assert df2.loc[0, HG.BOOK_SPREAD] == "⭐ Butler +12.5" and df2.loc[0, HG.BOOK_TOTAL].endswith("⭐ Over")
+    assert df2.loc[0, HG.BOOK_ML] == "⭐ Butler +600 · Nebraska -900"
 
 
 def test_prior_season_baseline_projects_from_last_seasons_games_only():

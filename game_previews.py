@@ -81,7 +81,41 @@ def says(p: Dict, playable: bool = False) -> str:
     book = "pick'em" if bm == 0 else _by(home, bm) if bm > 0 else _by(away, -bm)
     lean = _lean(p)
     head = "" if playable else "No bet — "
-    return f"{head}model: {model} · book: {book} → leans {lean}"
+    return f"{head}model: {model} · market: {book} → model favors {lean}"
+
+
+# Nov 23 (owner: members couldn't tell what "Leans" meant or where to look): plainer headers, the win chance and
+# total beside the model's read instead of at the far right, and a bulleted "How to read this table"
+# Nov 23 (owner): "Model" and "Market" -- not "book" and "model's side" ("does that mean the model's final pick?")
+SIDE = "Model favors (spread)"
+MARKET = "Market has"
+TOTAL = "Total points (model / market)"
+WIN = "Win chance (model / market)"
+
+
+def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
+    """The table's key as bullets (it was one long paragraph). `extra`: bullets a page adds (Use, ticks, backtest)."""
+    b = [
+        "**Model** = our projection. **Market** = the sportsbooks' line. Every column compares the two.",
+        "**Game** is listed **Away @ Home** — the team after the @ is the home team.",
+        f"**Model has / {MARKET}** — who each one has winning, and by how many points.",
+        f"**{SIDE}** — the side of the market's spread the model's number points to. Example: the market has Davidson "
+        "by 5, the model has Davidson by only 0.3 → the model favors **Northern Iowa +5** (it thinks Northern Iowa "
+        "keeps it closer than 5). It is a lean, not a bet: \"No bet\" in front means no tested rule backs it, and "
+        "the Use column says when one does.",
+        f"**{WIN}** — the chance the named team wins: the model's, then the market's (its price with the books' cut "
+        "taken out). A big gap is where the model disagrees most about the winner.",
+        f"**{TOTAL}** — the model's projected combined score next to the market's total. Model higher → it favors the "
+        "Over; lower → the Under.",
+        "**Gap (pts)** — how far the model's margin is from the market's spread.",
+        "**⭐ = model favors** — in each market column, the star marks the team (or Over / Under) the model's numbers "
+        "favor against that line. Like the column above, a lean, not a final pick.",
+        f"**Form (30 days)** — how the model's favored side did on games with a gap this size in the last 30 days: "
+        f"{HOT} won 55%+ of 20+ graded games · {EVEN} about break-even · {COLD} losing · {NEW} fewer than 20 games. A "
+        "−110 spread needs 52.4% to break even.",
+    ]
+    out = "\n".join(f"- {x}" for x in b + list(extra or []))
+    return out + (f"\n- **Rules for this league:** {rules}" if rules else "")
 
 
 def says_parts(p: Dict, playable: bool = False, tagged: bool = False) -> Dict[str, str]:
@@ -90,14 +124,14 @@ def says_parts(p: Dict, playable: bool = False, tagged: bool = False) -> Dict[st
     a Use column, which already says whether it's a bet; otherwise a game without a tested rule reads "No bet"."""
     hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
     if hs is None or mm is None:
-        return {"Model has": "—", "Book has": "—", "Leans": "—"}
+        return {"Model has": "—", MARKET: "—", SIDE: "—"}
     home, away = p.get("home"), p.get("away")
     model = "a toss-up" if abs(mm) < 0.5 else _by(home, round(mm, 1)) if mm > 0 else _by(away, round(-mm, 1))
     bm = -hs
     book = "pick'em" if bm == 0 else _by(home, bm) if bm > 0 else _by(away, -bm)
     lean = _lean(p)
-    return {"Model has": model, "Book has": book,
-            "Leans": lean if (playable or tagged) else f"No bet (leans {lean})"}
+    return {"Model has": model, MARKET: book,
+            SIDE: lean if (playable or tagged) else f"No bet · {lean}"}
 
 
 def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Callable[[Dict], str],
@@ -127,10 +161,10 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
                                     if mv.get("spread_move_why") else "") if x)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}", **lead,
                     **says_parts(p, playable, tagged=bool(use)),
+                    TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Gap (pts)": None if e is None else round(abs(e), 1),
                     **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
-                    "Total: model / book": f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     **(extras(p) if extras else {}),
                     "_lean": _lean(p), "_playable": playable, "_move": mv.get("spread_move") or "",
                     "_form": form_of(w, n) if b is not None else NEW, "_i": len(out)})

@@ -17,6 +17,8 @@ import re
 import streamlit as st
 import cache_guard as _CG
 _CG.install()             # Nov 20: cap every cache before any module defines one
+import table_style as _TS
+_TS.install()             # Nov 23 (owner): every table's columns centered, headers included
 from pathlib import Path
 
 sports = _CG.safe_import("sports")   # Nov 20: survives a code reload landing mid-import
