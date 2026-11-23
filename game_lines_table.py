@@ -29,11 +29,11 @@ ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winne
 # internal names; display() renames for the screen and back() maps a ticked column back.
 DISPLAY = {
     "✓ Money": "✓ Money pick", "Money pick": "Money pick (best value)", "Money score": "Money score (return per $1)",
-    "✓ Pick": "✓ Line pick", "Pick": "Line pick (model's side)", "Use": "Line pick: use",
+    "✓ Pick": "✓ Line pick", "Pick": "Line pick (model favors)", "Use": "Line pick: use",
     "Chance": "Line pick: chance", "Price": "Line pick: price", "Value": "Line pick: value",
     "✓ Winner": "✓ Winner pick", "Likely winner": "Winner pick (chance, price)",
     "Record (30d)": "Line picks like it: last 30 days", "Backtest cover": "Line picks like it: backtest",
-    "Spread": "Book spread", "Total": "Book total", "Model": "Model's numbers",
+    "Spread": "Market spread", "Total": "Market total", "Model": "Model",
     "Money result": "Money pick result", "Pick result": "Line pick result", "Winner result": "Winner pick result",
 }
 SHOW = {"💰 Money picks": "💰 Only games with a Money pick", "🔒 Locks only": "🔒 Only games with a Lock",
@@ -42,14 +42,14 @@ LEGEND = "\n".join("- " + x for x in [
     "Each game can carry **three different bets**, each with its own tick box right before it:",
     "&nbsp;&nbsp;**💰 Money pick** — the bet whose **price** pays best for its chance (the Money score = expected return "
     "per $1). 💰 marks one that meets the tested rule.",
-    "&nbsp;&nbsp;**Line pick** — the model's side of the **spread or total** (where it disagrees with the book most).",
+    "&nbsp;&nbsp;**Line pick** — the side of the **spread or total** the model favors (where it disagrees with the market most).",
     "&nbsp;&nbsp;**Winner pick** — the team the model has **winning outright**, with its chance and moneyline.",
     "They can point at **different sides of the same game** (the Money pick often takes the other side of a big model "
     "lean, because those leans have lost in testing). **Pick one per game.**",
     "**Line pick: use** — 🔒 Most probable · 🎟️ Parlay + Single · 🎯 Single only · ⚪ No edge (information, not a bet).",
-    "**Line picks like it** — how the model's side has done on leans of this kind and size: last 30 days, and in the "
+    "**Line picks like it** — how the model's favored side has done on leans of this kind and size: last 30 days, and in the "
     "long-run backtest. 52.4% breaks even at −110.",
-    "**Book spread / Book total** — the books' lines; **Model's numbers** — the model's own score.",
+    "**Model** = our projection; **Market** = the sportsbooks' line. **Market spread / Market total** — the books' lines; **Model** — the model's own score.",
     "**Game** is listed **Away @ Home**.",
     "Stakes: a flat 1u per 💰 pick until the edge is proven, scaled so a day's 💰 picks total 5u at most.",
 ])

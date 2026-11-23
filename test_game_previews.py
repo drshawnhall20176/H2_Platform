@@ -23,7 +23,7 @@ def test_preview_rows_describe_the_game_without_calling_it_a_pick():
                            lambda p: {"use": PE.USE_PASS})
     a, b = rows
     # Nov 17: one sentence instead of Model leans / Model's winner / Book line / Model line
-    assert a["Game"] == "A1 @ H1" and (a["Model has"], a["Book has"], a[GP.SIDE]) == ("H1 by 6.1", "H1 by 5", "No bet · H1 -5")
+    assert a["Game"] == "A1 @ H1" and (a["Model has"], a["Market has"], a[GP.SIDE]) == ("H1 by 6.1", "H1 by 5", "No bet · H1 -5")
     assert "Model's winner" not in a and "Book line" not in a and "Model leans" not in a
     assert a["_lean"] == "H1 -5" and a["Gap (pts)"] == 1.1 and a["Form (30 days)"] == "❄️ Cold · 10–12 (45%)"
     assert b["_lean"] == "A2 +36.5" and b["Gap (pts)"] == 19.1 and b["Form (30 days)"] == "🔥 Hot · 15–9 (62%)"
@@ -76,7 +76,7 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     assert not at.exception
     owner = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
     # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
-    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", "Use", "Model has", "Book has"]
+    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", "Use", "Model has", "Market has"]
     assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
     assert list(owner["Use"]) == [PE.USE_PASS, PE.USE_PASS] and not any(x.startswith("No bet") for x in owner[GP.SIDE])   # the Use column says it
     assert any("Previews, not picks" in i.value for i in at.info)
@@ -126,6 +126,6 @@ def test_ncaaf_game_lab_lists_previews_with_form(monkeypatch):
     tables = [d.value for d in at.dataframe if "Form (30 days)" in d.value.columns]
     assert tables, [str(e.value)[:200] for e in at.exception]
     t = tables[0]
-    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Tracking pick", "Model has", "Book has"]
+    assert list(t.columns[:5]) == ["Kickoff (ET)", "Game", "Tracking pick", "Model has", "Market has"]
     assert [x.split("· ")[-1] for x in t[GP.SIDE]] == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
     assert list(t["Game"]) == ["A1 @ H1", "A2 @ H2 (neutral)"] and list(t["Tracking pick"]) == ["H1 -3", "—"]

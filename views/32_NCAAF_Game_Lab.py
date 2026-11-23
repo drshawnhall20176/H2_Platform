@@ -135,11 +135,11 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
                 st.markdown("**Worth a look first**")
                 for r in _top:
                     st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): a tracking pick; the model is "
-                                f"{r['Gap (pts)']:.1f} points from the book. Leans of this size: {r['Form (30 days)']}.")
+                                f"{r['Gap (pts)']:.1f} points from the market. Leans of this size: {r['Form (30 days)']}.")
             if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
                 _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
             # Nov 23 (owner): the total beside the model's read, plainer headers, and a bulleted key
-            _cols = ["Tip (ET)", "Game", "Tracking pick", "Model has", "Book has", GPV.SIDE, GPV.TOTAL, "Gap (pts)",
+            _cols = ["Tip (ET)", "Game", "Tracking pick", "Model has", GPV.MARKET, GPV.SIDE, GPV.TOTAL, "Gap (pts)",
                      "Form (30 days)", "News check"]
             with st.expander("📖 How to read this table — every column and symbol", expanded=False):
                 st.markdown(GPV.legend_md([

@@ -182,9 +182,9 @@ def _one_game(league, upcoming, day):
     m2.metric(f"{home} ML", "—" if mp is None else f"{mp:.1%}")
     fav, by = (home, sim["proj_spread"]) if sim["proj_spread"] > 0 else (away, -sim["proj_spread"])
     m3.metric("Projected spread", f"{fav} -{by:.1f}",
-              delta=None if p.get("home_spread") is None else f"book: {home} {p['home_spread']:+g}", delta_color="off", delta_arrow="off")
+              delta=None if p.get("home_spread") is None else f"market: {home} {p['home_spread']:+g}", delta_color="off", delta_arrow="off")
     m4.metric("Projected total", f"{sim['proj_total']:.1f}",
-              delta=None if p.get("line_total") is None else f"book: {p['line_total']:g}", delta_color="off", delta_arrow="off")
+              delta=None if p.get("line_total") is None else f"market: {p['line_total']:g}", delta_color="off", delta_arrow="off")
     st.caption(f"Proj: {away} **{sim['proj_away_score']:.1f}** — {home} **{sim['proj_home_score']:.1f}** · "
                f"{sim['n_sims']:,} simulated games")
     r1, r2, r3, r4 = st.columns(4)
@@ -293,7 +293,8 @@ def _star_ml(p) -> str:
 
 
 # Nov 23 (owner: "make it very clear what is being selected"): headers that say what they hold
-BOOK_SPREAD, BOOK_TOTAL, BOOK_ML = "Book spread (⭐ model's side)", "Book total (⭐ model's side)", "Book moneyline (⭐ model's side)"
+BOOK_SPREAD, BOOK_TOTAL, BOOK_ML = ("Market spread (⭐ = model favors)", "Market total (⭐ = model favors)",
+                                   "Market moneyline (⭐ = model favors)")
 T_HS, T_AS, T_O, T_U, T_HML, T_AML = ("✓ Home team spread", "✓ Away team spread", "✓ Over", "✓ Under",
                                       "✓ Home team ML", "✓ Away team ML")
 TICK_HELP = {T_HS: "Log the HOME team (after the @) against the spread", T_AS: "Log the AWAY team (before the @) "
@@ -321,7 +322,7 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
     if no_rule:
         st.info(GP.NOTE)
     by_gap = st.toggle("Biggest disagreements first", value=False, key=f"hg_bygap_{league}",
-                       help="Off: earliest games first. On: the games where the model is furthest from the book.")
+                       help="Off: earliest games first. On: the games where the model is furthest from the market.")
     ordered = C.by_kickoff(upcoming)
     rows = GP.preview_rows(
         league, ordered, lean_recs, _tip, lambda p: _tag(league, p),
@@ -337,7 +338,7 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         for r in top:
             why = "a tested pick" if r.get("_playable") else f"the spread is moving its way {r.get('Spread move', '')}"
             st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): {why}; the model is "
-                        f"{r['Gap (pts)']:.1f} points from the book.")
+                        f"{r['Gap (pts)']:.1f} points from the market.")
     if by_gap:
         rows = sorted(rows, key=lambda r: -(r["Gap (pts)"] or 0))
     df = pd.DataFrame(GP.public(rows))
@@ -347,12 +348,13 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         df = df[cols]
     with st.expander("📖 How to read this table — every column and symbol", expanded=False):
         extra = [] if cust else [
-            "**Book spread / total / moneyline** — the books' lines; ⭐ marks the model's side, and the tick boxes right "
-            "after each one log that market (home team = after the @, away team = before it).",
+            "**Market spread / total / moneyline** — the sportsbooks' lines; ⭐ marks what the model favors, and the tick "
+            "boxes right after each one log that bet, either side (home team = after the @, away team = before it).",
             "**Long backtest** — how often the model's side covered in the long-run test.",
             "**Use** — 🔒 Most probable = 60%+ with a tested edge · 🎟️ Parlay + Single = 60%+ · 🎯 Single only = 55-60%, "
             "or a tracked rule · ⚪ No edge = no tested edge for this league or gap size.",
-            "**Spread move** — 📈 our way = the line has moved toward the model's side since it opened; 📉 against = away."]
+            "**Spread move** — 📈 our way = the market's line has moved toward what the model favors since it opened; "
+            "📉 against = away from it."]
         st.markdown(GP.legend_md(extra, rules="" if cust else _rules_text(rules or {})))
     if cust:
         st.dataframe(df, hide_index=True, width="stretch")
