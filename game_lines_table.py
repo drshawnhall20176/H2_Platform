@@ -187,6 +187,16 @@ def bet(r: Dict) -> str:
     return GP.game_bet(lg, False, False, ag)
 
 
+def league_of(r: Dict) -> str:
+    """Nov 24 (owner: every table like NCAAMB's): the League column -- the sport's own key (NCAAMB, NBA, NHL...), or the
+    league's name where one sport holds many (international hoops: EuroLeague; soccer: Premier League). A college
+    tournament's name goes after the key ("NCAAMB · Maui Invitational") so the column never just repeats the sport."""
+    sp, lg = str(r.get("sport") or ""), str(r.get("league") or "")
+    if sp in ("INTL", "SOCCER", "TENNIS"):
+        return lg or sp
+    return sp if (not lg or lg == sp) else f"{sp} · {lg}"
+
+
 def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.DataFrame:
     """The board as a table, columns in ORDER; empty columns dropped."""
     import pick_records as PR
@@ -209,12 +219,11 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
         "Record (30d)": r.get("lean_record") or "—",
         "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
         "Spread": r.get("spread_txt") or "", "Total": r.get("total_txt") or "",
-        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": r.get("league")} for r in rows])
+        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": league_of(r)} for r in rows])
     if df.empty:
         return df
     drop = [] if past else ["Final", "Money result", "Pick result", "Winner result"]
-    if not show_sport:
-        drop.append("Sport")
+    drop.append("Sport")                                        # Nov 24: League (first) names the sport
     for c in ("Chance", "Price", "Value", "Backtest cover", "Money score", "Spread", "Total", "Model", "Spread move"):
         if c in df and not df[c].replace("", None).notna().any():
             drop.append(c)
