@@ -36,7 +36,8 @@ def bars(values: List[float], line: Optional[float], side: str) -> List[Dict]:
     for i, v in enumerate(vals):
         back = n - i
         out.append({"Game": "Last" if back == 1 else f"{back} ago", "Order": i, "Value": v,
-                    "Cleared": (line is not None and side in ("Over", "Under") and cleared(v, line, side))})
+                    # no line (e.g. a King of the Court PRA read): every game in H2 blue, nothing to clear
+                    "Cleared": True if line is None else (side in ("Over", "Under") and cleared(v, line, side))})
     return out
 
 
