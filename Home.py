@@ -222,11 +222,13 @@ if True:
         if _r.get("money"):
             _r["record"] = _money_rec(_r.get("sport"))
     _hidden = [r for r in _rows if r.get("verdict") in _PR.HIDE]
-    _show_losing = st.toggle(f"Show losing pick types ({len(_hidden)} hidden)", value=False, key="home_best_losing",
+    # Nov 24 (owner): every pick shows; a losing pick type reads "Info only · ⚠️ losing pick type" in Bet? and can be
+    # hidden with the switch
+    _hide_losing = st.toggle(f"Hide losing pick types ({len(_hidden)})", value=False, key="home_best_losing",
                              disabled=not _hidden,
                              help="Pick types whose last-30-day record is under 50% (or 40% and under: the other "
-                                  "side has been winning). They come back on their own when the record recovers.")
-    if not _show_losing:                                        # a 💰 pick is judged by its own record, not its tag's
+                                  "side has been winning). They're marked ⚠️ in the Bet? column.")
+    if _hide_losing:                                            # a 💰 pick is judged by its own record, not its tag's
         _rows = [r for r in _rows if r.get("verdict") not in _PR.HIDE or r.get("money")]
     # Nov 17: is the market moving toward the model's side since the first price today? (NBA, NFL; tracking signal)
     if not _past:
@@ -264,8 +266,10 @@ if True:
                                                    r) == _SHOWBET[_show]]
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Game": r.get("game"),
-                              "Bet?": _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
-                                                    + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r),
+                              "Bet?": ("Info only · ⚠️ losing pick type"
+                                       if r.get("verdict") in _PR.HIDE and not r.get("money") else
+                                       _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
+                                                     + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r)),
                               "Pick": r["pick"],
                               "Use": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
                                      + (r.get("use") or ""),
@@ -475,9 +479,11 @@ if True:
         _t1, _t2 = st.columns(2)
         _only_tested = _t1.toggle("Tested picks only", value=False, key="home_win_tested")
         _lhid = [r for r in _w if not r.get("best_tested") and r.get("lean_verdict") in _PR.HIDE]
-        _lshow = _t2.toggle(f"Show losing lean types ({len(_lhid)} hidden)", value=False, key="home_win_losing",
-                            disabled=not _lhid, help="Untested leans in a market where the model's lean has lost "
-                                                     "more than it won over the last 30 days.")
+        # Nov 24 (owner: show every game): losing lean types are listed and marked ⚠️ in Bet?; the switch hides them
+        _lshow = not _t2.toggle(f"Hide losing lean types ({len(_lhid)})", value=False, key="home_win_losing",
+                                disabled=not _lhid, help="Untested leans in a market where the model's lean has lost "
+                                                         "more than it won over the last 30 days — marked "
+                                                         "\"Info only · ⚠️ losing lean type\" in the Bet? column.")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
         _gours = [r for r in _ws if r.get("spread_move") == "📈 our way"]
         if _gours and st.toggle(f"📈 Spread moving our way only ({len(_gours)})", value=False, key="home_win_moves",
