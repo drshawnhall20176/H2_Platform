@@ -26,12 +26,12 @@ BLOW, AGREE = "Blowout risk", "Model & market agree?"
 # spread move beside it (the tested tiebreaker), then the Money pick, then the Winner
 # Nov 24 (owner): "Model & market agree to the right of Bet, followed by blowout risk, then close gap and spread move,
 # then line pick etc -- this will give me all the indicators up front"
-ORDER = ["Time", "Sport", "Game", "Bet?", AGREE, BLOW, "Close gap (pts)", "Spread move",
+ORDER = ["League", "Time", "Sport", "Game", "Bet?", AGREE, BLOW, "Close gap (pts)", "Spread move",
          "Final", "Pick result", "Money result", "Winner result",
          "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
          "✓ Money", "Money pick", "Money score",
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
-         "Weather", "League"]
+         "Weather"]
 # Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
 # internal names; display() renames for the screen and back() maps a ticked column back.
 DISPLAY = {

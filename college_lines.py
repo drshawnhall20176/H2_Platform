@@ -105,7 +105,7 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
             seen.add(key)
             ic = list(dict.fromkeys(i for i in icons if i))
             tested = any(i in ic for i in ("💰", "🔒", "🎟️", "🎯"))
-            out.append({"Time": r.get("time") or "", "Game": r.get("game"),
+            out.append({"League": r.get("league") or league, "Time": r.get("time") or "", "Game": r.get("game"),
                         "Bet?": GP.BET_YES if tested else GP.BET_TRACK if kind == CLOSE or (
                             league == "NCAAMB" and "✅" in ic and kind != WINNER) else GP.BET_INFO,
                         GP.AGREE: agree, "Blowout risk": blow, GP.GAP: gap, "Spread move": move,
@@ -254,15 +254,16 @@ def _soccer(day: str, rows=None, flags=None) -> List[Dict]:
             flags = []
     out = []
     for f in flags:
-        out.append({"Time": f.get("time") or "", "Game": f.get("game"), "Bet?": GP.BET_TRACK,
+        out.append({"League": f.get("league"), "Time": f.get("time") or "", "Game": f.get("game"), "Bet?": GP.BET_TRACK,
                     "Use": "📈", "Pick type": "Price above the sharp line", "Market": f.get("market") or "",
                     "Pick": f.get("pick"), "Price": f.get("price"), "Chance": f.get("chance"),
-                    "League": f.get("league"), "_ev": f.get("ev"), "_kick": (f.get("_rec") or {}).get("kickoff")})
+                    "_ev": f.get("ev"), "_kick": (f.get("_rec") or {}).get("kickoff")})
     for r in rows:
-        out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Bet?": GP.BET_INFO, "Use": "",
+        out.append({"League": r.get("league"), "Time": r.get("time") or "", "Game": r.get("game"), "Bet?": GP.BET_INFO,
+                    "Use": "",
                     "Pick type": "Model's most likely result", "Market": "Moneyline (3-way)",
                     "Pick": r.get("winner"), "Price": r.get("price"), "Chance": r.get("chance"),
-                    "League": r.get("league"), "_ev": None, "_kick": (r.get("_rec") or {}).get("kickoff")})
+                    "_ev": None, "_kick": (r.get("_rec") or {}).get("kickoff")})
     import components as C
     return C.by_kickoff(out, lambda x: x.get("_kick") or x.get("Time"))
 
