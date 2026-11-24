@@ -74,3 +74,9 @@ def test_prop_forward_record_and_status(store):
     line = CR.prop_status_line("NFL")
     assert "1–1" in line and "Not a bet yet" in line and "NFL player-prop Unders" in line
     assert CR.prop_status_line("NBA") == ""
+def test_hockey_agreement_compares_win_chances_not_the_puck_line():
+    g = {"home": "NJ", "away": "CBJ", "home_spread": -1.5, "model_margin": 1.1}
+    assert GP.agreement(dict(g, model_p=0.683, fair_home=0.646), "NHL") == "✅ Agree"
+    assert GP.agreement(dict(g, model_p=0.681, fair_home=0.591), "NHL") == "🟨 Same favorite · win chance 9 pts apart"
+    assert GP.agreement(dict(g, model_p=0.42, fair_home=0.58), "NHL") == "⚠️ Model has CBJ winning"
+    assert GP.agreement(g, "NHL") == "—"
