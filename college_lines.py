@@ -90,6 +90,12 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
         except Exception:                                       # noqa: BLE001
             last = "—"
         cg = cand.get(r.get("game"))
+        try:
+            gap = GP.gap_text(full, league) if full else "—"
+        except Exception:                                       # noqa: BLE001
+            gap = "—"
+        move = " ".join(x for x in (r.get("spread_move") or "",
+                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x)
         seen = set()
 
         def add(market, pick, price, chance, icons, kind):
@@ -102,9 +108,10 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
             out.append({"Time": r.get("time") or "", "Game": r.get("game"),
                         "Bet?": GP.BET_YES if tested else GP.BET_TRACK if kind == CLOSE or (
                             league == "NCAAMB" and "✅" in ic and kind != WINNER) else GP.BET_INFO,
+                        GP.AGREE: agree, "Blowout risk": blow, GP.GAP: gap, "Spread move": move,
                         "Use": " ".join(ic), "Pick type": kind,
                         "Market": market, "Pick": pick, "Price": price, "Chance": chance,
-                        "Blowout risk": blow, GP.AGREE: agree, "Last meetings": last,
+                        "Last meetings": last,
                         "_kick": (r.get("_rec") or {}).get("kickoff")})
 
         money_same = r.get("money_pick") and r.get("best") and r.get("money_pick") == r.get("best")

@@ -24,8 +24,11 @@ TICKS = ["✓ Pick", "✓ Money", "✓ Winner"]
 BLOW, AGREE = "Blowout risk", "Model & market agree?"
 # Nov 24 (owner: "Line pick would be the first selectable item, not money pick"): the Line pick block first, with the
 # spread move beside it (the tested tiebreaker), then the Money pick, then the Winner
-ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Pick result", "Money result", "Winner result",
-         "✓ Pick", "Pick", "Use", "Spread move", "Chance", "Price", "Value", BLOW, AGREE,
+# Nov 24 (owner): "Model & market agree to the right of Bet, followed by blowout risk, then close gap and spread move,
+# then line pick etc -- this will give me all the indicators up front"
+ORDER = ["Time", "Sport", "Game", "Bet?", AGREE, BLOW, "Close gap (pts)", "Spread move",
+         "Final", "Pick result", "Money result", "Winner result",
+         "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
          "✓ Money", "Money pick", "Money score",
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
          "Weather", "League"]
@@ -139,9 +142,12 @@ def extras(r: Dict) -> Dict:
     lg = r.get("league") or r.get("sport") or ""
     try:
         return {BLOW: GP.blowout(lg, p) if p else "—", AGREE: GP.agreement(p, lg) if p else "—",
+                GP.GAP: GP.gap_text(p, lg) if p else "—",
+                "Spread move": " ".join(x for x in (r.get("spread_move") or "",
+                                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
                 GP.LAST: GP._last(lg, p) if p else "—"}
     except Exception:                                           # noqa: BLE001
-        return {BLOW: "—", AGREE: "—", "Last meetings": "—"}
+        return {BLOW: "—", AGREE: "—", "Close gap (pts)": "—", "Spread move": "", "Last meetings": "—"}
 
 
 def bet(r: Dict) -> str:
@@ -191,7 +197,7 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
     drop = [] if past else ["Final", "Money result", "Pick result", "Winner result"]
     if not show_sport:
         drop.append("Sport")
-    for c in ("Chance", "Price", "Value", "Backtest cover", "Money score", "Spread", "Total", "Model"):
+    for c in ("Chance", "Price", "Value", "Backtest cover", "Money score", "Spread", "Total", "Model", "Spread move"):
         if c in df and not df[c].replace("", None).notna().any():
             drop.append(c)
     df = df.drop(columns=[c for c in drop if c in df.columns])

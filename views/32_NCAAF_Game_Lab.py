@@ -139,8 +139,8 @@ with st.expander("📐 Ratings model v2 — college spreads (tracking)", expande
             if st.toggle("Biggest disagreements first", value=False, key="ncaaf_v2_bygap"):
                 _prev = sorted(_prev, key=lambda r: -(r["Gap (pts)"] or 0))
             # Nov 23 (owner): the total beside the model's read, plainer headers, and a bulleted key
-            _cols = ["Tip (ET)", "Game", GPV.BET, GPV.blow_col("NCAAF"), GPV.AGREE, "Tracking pick", "Model has", GPV.MARKET, GPV.SIDE, GPV.TOTAL, "Gap (pts)",
-                     "Form (30 days)", GPV.LAST, "News check"]
+            _cols = ["Tip (ET)", "Game", GPV.BET, GPV.AGREE, GPV.blow_col("NCAAF"), "Gap (pts)", "Tracking pick",
+                     "Model has", GPV.MARKET, GPV.SIDE, GPV.TOTAL, "Form (30 days)", GPV.LAST, "News check"]
             with st.expander("📖 How to read this table — every column and symbol", expanded=False):
                 st.markdown(GPV.legend_md([
                     "**Tracking pick** — the model's side when it's far enough off the book to track; tracked, not a "
