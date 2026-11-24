@@ -638,3 +638,12 @@ def test_model_split_counts_a_tracking_pick_logged_from_a_board_as_with_the_mode
             {"model_prob": None, "category": "OFF", "stake": 1.0, "entry_odds": -110, "result": "loss", "market": "Spread"}]
     s = B.model_split(bets)
     assert (s["with"]["wins"], s["own"]["losses"]) == (1, 1)
+
+
+def test_model_split_puts_info_only_leans_in_their_own_group():
+    import betlog as B
+    mk = lambda notes, res: {"model_prob": None, "category": "H2", "notes": notes, "stake": 1.0, "entry_odds": -110,
+                             "result": res, "market": "Spread"}
+    s = B.model_split([mk("platform-test,close-gap-test", "win"), mk("platform-test,lean", "loss"),
+                       mk("platform-test,lean", "loss")])
+    assert (s["with"]["wins"], s["lean"]["losses"], s["own"]["settled"]) == (1, 2, 0)

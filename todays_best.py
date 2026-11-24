@@ -734,7 +734,12 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
                 bf = IP.bet_fields
             f = bf(it["_rec"], it["bet_market"], it["bet_side"], it.get("bet_line"), float(price), stake, real,
                               it.get("best_chance") if it.get("best_tested") else None)
-            f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
+            # Nov 24 (owner: "how are we handling Info only picks should those be selected?"): what kind of call it was,
+            # so the Bet Log can split tested / tracked picks from the model's info-only leans
+            kind = ("close-gap-test" if it.get("tracking") else
+                    "money-pick" if str(it.get("note") or "").startswith("💰") else
+                    None if it.get("best_tested") else "lean")
+            f["notes"] = ",".join(x for x in (tag, kind, f.get("notes")) if x)
             out.append(f)
             continue
         if it.get("sport") == "UFC" and it.get("market") in ("Moneyline", "Fight Duration") and it.get("side"):
