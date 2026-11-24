@@ -320,14 +320,14 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
 LAST = "Last meetings"
 # Nov 24 (owner: "is there a 'bet' column so I can identify these easily"): one column that says what a row is for.
 BET = "Bet?"
-BET_YES, BET_TRACK, BET_INFO = "✅ Bet", "🧪 Tracking", "Info only"
-BET_NOTE = ("**Bet?** — ✅ Bet = a tag from a rule that has made money in testing (💰 / 🔒 / 🎟️ / 🎯) · 🧪 Tracking = "
+BET_YES, BET_TRACK, BET_INFO = "🃏 Bet", "🧪 Tracking", "Info only"
+BET_NOTE = ("**Bet?** — 🃏 Bet = a tag from a rule that has made money in testing (💰 / 🔒 / 🎟️ / 🎯) · 🧪 Tracking = "
             "the ✅ close-gap rule being tested forward (not proven yet) · Info only = what the model thinks, with no "
             "tested edge — context, not a bet.")
 
 
 def game_bet(league: str, playable: bool, money: bool, agree: str) -> str:
-    """The Bet? value for a game: a tested tag -> ✅ Bet; NCAAMB close-gap (✅ agree) -> 🧪 Tracking; else Info only."""
+    """The Bet? value for a game: a tested tag -> 🃏 Bet; NCAAMB close-gap (✅ agree) -> 🧪 Tracking; else Info only."""
     if playable or money:
         return BET_YES
     if league == "NCAAMB" and str(agree).startswith("✅"):
