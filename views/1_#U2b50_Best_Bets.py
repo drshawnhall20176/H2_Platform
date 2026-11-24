@@ -291,6 +291,9 @@ if _gl_pick:                                                    # Nov 24: the ga
     except Exception:                                           # noqa: BLE001
         _glr = []
     st.markdown("##### 📏 Game lines")
+    import game_previews as _GPgl
+    _glk = _GPgl.bet_filter("bb_gl_bet") if _glr else set()
+    _glr = [r for r in _glr if r["Bet?"] in _glk]
     if _glr:
         _CLB.show_table(_glr)
         st.caption(_CLB.ICON_KEY + " Tick and log game lines on the game board (Home, or the sport's Game Lab).")
@@ -472,12 +475,21 @@ try:
         _rename["_agree"] = _GPB.AGREE
 except Exception:                                               # noqa: BLE001
     pass
-for p in view:                                                  # Nov 24 (owner): a Bet? column
-    _u = str(p.get("_use") or p.get("Use") or "")
-    p["_bet"] = "🃏 Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
+import game_previews as _GPbb
+for p in view:                                                  # Nov 24 (owner): a Bet? column, 🧪 for tracked rules
+    p["_bet"] = _GPbb.prop_bet(_active.key, str(p.get("_use") or p.get("Use") or ""), p)
+_bbk = _GPbb.bet_filter("bb_bet")                                # and the 🃏 / 🧪 / Info only filter buttons
+view = [p for p in view if p["_bet"] in _bbk]
+if not view:
+    st.info("No props of the Bet? kinds picked — tick another kind above.")
+    st.stop()
 _cols.append("_bet")
 _rename["_bet"] = "Bet?"
-_FIRST = ["Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
+for p in view:
+    p["_league"] = _active.key
+_cols.append("_league")
+_rename["_league"] = "League"
+_FIRST = ["_league", "Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
           "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]

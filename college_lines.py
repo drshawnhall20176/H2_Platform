@@ -216,6 +216,10 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
     st.caption(prop_supply(board_plays, len(rows)))
     pl = plays(league, date_str, rows)
     if pl:
+        import game_previews as _GPc
+        _ck = _GPc.bet_filter(f"cl_bet_{league}")               # Nov 24 (owner): filter buttons
+        pl = [r for r in pl if r["Bet?"] in _ck]
+    if pl:
         show_table(pl)
         cand = ""
         if league == "NCAAMB":

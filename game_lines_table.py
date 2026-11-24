@@ -250,6 +250,9 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
         rows = [r for r in rows if r.get("money")]
     elif show.startswith("🔒"):
         rows = [r for r in rows if r.get("lock")]
+    import game_previews as _GPf
+    _bk = _GPf.bet_filter(f"{key}_bet")                         # Nov 24 (owner): 🃏 / 🧪 / Info only filter buttons
+    rows = [r for r in rows if any(bet(r).startswith(k) for k in _bk)]
     rows = sorted(rows, key=lambda r: (C._kick_dt(r.get("time")) is None, str(C._kick_dt(r.get("time")) or ""),
                                        not r.get("money")))
     if past and rows:

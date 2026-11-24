@@ -346,6 +346,57 @@ def gap_text(p: Dict, league: str = "") -> str:
     return f"✅ {g:.1f}" if g < 2 else f"{g:.1f}"
 
 
+TESTED_ICONS = ("💰", "🔒", "🎟️", "🎯")
+
+
+def _f(x):
+    try:
+        return None if x is None else float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def prop_tracking(sport: str, p: Dict) -> bool:
+    """Nov 24 (owner: every league with the Bet? column and NCAAMB's Tracking): a prop the tracked prop rules would bet
+    (candidate_rules.PROP_RULES -- NFL / college football Unders). Reads a board play (Side, ModelProb, MarketProb, Line,
+    Pickem, PriceSource) or a saved row (side, chance, p_market, line)."""
+    try:
+        import candidate_rules as CR
+    except Exception:                                           # noqa: BLE001
+        return False
+    side = p.get("Side") or p.get("side")
+    if side != "Under" or p.get("Pickem") or (p.get("PriceSource") not in (None, "book")):
+        return False
+    ch = _f(p.get("ModelProb") if p.get("ModelProb") is not None else p.get("chance"))
+    mk = _f(p.get("MarketProb") if p.get("MarketProb") is not None else p.get("p_market"))
+    line = p.get("Line") if p.get("Line") is not None else p.get("line")
+    if ch is None or mk is None or line is None:
+        return False
+    row = {"book": p.get("PricedAt") or p.get("book") or "", "over_price": -110, "under_price": -110,
+           "p_model": 1 - ch, "p_market": 1 - mk, "line": line}
+    return any(cfg["sport"] == sport and CR.prop_qualifies(rule, row) for rule, cfg in CR.PROP_RULES.items())
+
+
+def prop_bet(sport: str, use_text: str = "", play: Optional[Dict] = None) -> str:
+    """Bet? for a prop (or any tagged pick): a tested tag -> 🃏 Bet; a tracked prop rule -> 🧪 Tracking; else Info only."""
+    u = str(use_text or "")
+    if any(i in u for i in TESTED_ICONS):
+        return BET_YES
+    if play is not None and prop_tracking(sport, play):
+        return BET_TRACK
+    return BET_INFO
+
+
+def bet_filter(key: str) -> set:
+    """Nov 24 (owner: "Tracking and Info only should be filter buttons"): which Bet? kinds a table shows."""
+    import streamlit as st
+    opts = [BET_YES, BET_TRACK, BET_INFO]
+    sel = st.pills("Show Bet?", opts, selection_mode="multi", default=opts, key=key,
+                   help="🃏 Bet = a tested tag · 🧪 Tracking = a rule being tested forward · Info only = no tested edge. "
+                        "Untick a kind to hide it.")
+    return set(sel or opts)
+
+
 def game_bet(league: str, playable: bool, money: bool, agree: str) -> str:
     """The Bet? value for a game: a tested tag -> 🃏 Bet; NCAAMB close-gap (✅ agree) -> 🧪 Tracking; else Info only."""
     if playable or money:
