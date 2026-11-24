@@ -150,6 +150,12 @@ else:
                       f"({diag['matched_lines']} player/market line(s) matched from "
                       f"{diag['offers']} live offer(s)) — the model's own defaults fill in the rest.")
 
+try:                                                            # Nov 24 (owner): college = a game-line sport
+    import college_lines as _CL
+    _CL.render(_active.key, date_str, plays or [])
+except Exception:                                               # noqa: BLE001 — the props board still renders
+    pass
+
 if not plays:
     if not _active.has_projections:
         st.info("🥊 Best Bets doesn't apply to UFC — fights are outcome-based, not counting-stat-based. "
@@ -310,8 +316,13 @@ view.sort(key=lambda p: p["ModelProb"], reverse=True)
 view = C.by_kickoff(view, lambda p: p.get("GameTime") or p.get("Time"))   # Nov 11: game time first, then chance
 
 if not view:
-    st.info("No plays match the current filters — adjust the time slot, game, markets, min "
-           "conviction, or min probability.")
+    if _active.key in ("NCAAMB", "NCAAF"):
+        st.info("No player props pass the filters — normal for college: the sportsbooks price props on only a few "
+                "games, and pick'em-app lines carry no tested edge. The game-line plays at the top are the day's "
+                "college bets.")
+    else:
+        st.info("No plays match the current filters — adjust the time slot, game, markets, min "
+               "conviction, or min probability.")
     st.stop()
 
 # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community pain point:
