@@ -903,7 +903,10 @@ def model_split(bets: List[Dict]) -> Dict[str, Dict]:
             return float(b.get("model_prob"))
         except (TypeError, ValueError):
             return None
-    w = [b for b in bets if (_p(b) or 0) >= 0.5]
+    # Nov 24 (owner: "I will stick with the tracking bets as live"): a bet ticked from a model board with no stated
+    # chance (a 🧪 Tracking close-gap pick) is still the model's call -- category H2 / H2-beta marks it model-sourced
+    w = [b for b in bets if (_p(b) or 0) >= 0.5
+         or (_p(b) is None and str(b.get("category") or "") in ("H2", "H2-beta"))]
     o = [b for b in bets if b not in w]
     return {"with": summary(w), "own": summary(o)}
 
