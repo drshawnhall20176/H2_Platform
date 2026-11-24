@@ -509,11 +509,12 @@ if True:
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         # Nov 20 (owner: "more investor friendly -- the more important columns to the left, informational to the
         # right"): the bet and how it did first, then the model's pick and the likely winner, then the detail
-        _ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result",
-                  "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
+        _ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Pick result", "Money result", "Winner result",
+                  "✓ Pick", "Pick", "Use", "Spread move", "Chance", "Price", "Value",
                   "Blowout risk", "Model & market agree?",
+                  "✓ Money", "Money pick", "Money score",
                   "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
-                  "Spread move", "Weather", "League"]
+                  "Weather", "League"]
         if not _wdf.empty:
             _wdf = _wdf[[c for c in _ORDER if c in _wdf.columns] + [c for c in _wdf.columns if c not in _ORDER]]
         if _wdf.empty:

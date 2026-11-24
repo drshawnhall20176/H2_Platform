@@ -107,10 +107,11 @@ def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
              "final": "Army 60 – Duke 75", "money_result": "win", "best_result": "loss", "winner_result": "win",
              "league": "NCAAMB"}]
     today = list(GLT.frame(rows, past=False).columns)
-    assert today[:7] == ["Time", "Game", "Bet?", "✓ Money", "Money pick", "Money score", "✓ Pick"]
+    assert today[:5] == ["Time", "Game", "Bet?", "✓ Pick", "Pick"]           # Nov 24 (owner): Line pick first
+    assert today.index("✓ Money") > today.index("Pick") and today.index("✓ Winner") > today.index("✓ Money")
     assert "Final" not in today and "Sport" not in today
     past = list(GLT.frame(rows, past=True, show_sport=True).columns)
-    assert past[:8] == ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result"]
+    assert past[:8] == ["Time", "Sport", "Game", "Bet?", "Final", "Pick result", "Money result", "Winner result"]
 
 
 def test_select_all_ticks_every_row():

@@ -20,12 +20,15 @@ from typing import Dict, List, Optional, Sequence
 import pandas as pd
 import streamlit as st
 
-TICKS = ["✓ Money", "✓ Pick", "✓ Winner"]
+TICKS = ["✓ Pick", "✓ Money", "✓ Winner"]
 BLOW, AGREE = "Blowout risk", "Model & market agree?"
-ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result",
-         "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value", BLOW, AGREE,
+# Nov 24 (owner: "Line pick would be the first selectable item, not money pick"): the Line pick block first, with the
+# spread move beside it (the tested tiebreaker), then the Money pick, then the Winner
+ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Pick result", "Money result", "Winner result",
+         "✓ Pick", "Pick", "Use", "Spread move", "Chance", "Price", "Value", BLOW, AGREE,
+         "✓ Money", "Money pick", "Money score",
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
-         "Spread move", "Weather", "League"]
+         "Weather", "League"]
 # Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
 # internal names; display() renames for the screen and back() maps a ticked column back.
 DISPLAY = {
@@ -41,9 +44,10 @@ SHOW = {"💰 Money picks": "💰 Only games with a Money pick", "🔒 Locks onl
         "All games": "All games", "All playable": "All games"}
 LEGEND = "\n".join("- " + x for x in [
     "Each game can carry **three different bets**, each with its own tick box right before it:",
+    "&nbsp;&nbsp;**Line pick** — the side of the **spread or total** the model favors against the market. On a 🧪 "
+    "Tracking game it is the tracked rule's side — the box to tick.",
     "&nbsp;&nbsp;**💰 Money pick** — the bet whose **price** pays best for its chance (the Money score = expected return "
     "per $1). 💰 marks one that meets the tested rule.",
-    "&nbsp;&nbsp;**Line pick** — the side of the **spread or total** the model favors (where it disagrees with the market most).",
     "&nbsp;&nbsp;**Winner pick** — the team the model has **winning outright**, with its chance and moneyline.",
     "They can point at **different sides of the same game** (the Money pick often takes the other side of a big model "
     "lean, because those leans have lost in testing). **Pick one per game.**",
