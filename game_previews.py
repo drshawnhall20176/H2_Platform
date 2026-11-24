@@ -245,6 +245,10 @@ def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
         "win chances within 4 points) · 🟨 same winner, further apart · ⚠️ the model has the other team winning "
         "outright. It has meant something only in college basketball so far (the model's side won 60% of ✅ games on "
         "Nov 5–22, now being tested forward); in the NBA ✅ games went 52% against the spread — break-even.",
+        "**Last meetings** — how the two teams' games against each other went over the last year (up to 4). "
+        "Context only: tested Nov 24, past meetings added nothing to the model's chances or against the spread "
+        "(NBA props: 5,401 graded; NBA, NHL and college basketball games), because the model already prices each "
+        "team's form and defense.",
         "**⭐ = model favors** — in each market column, the star marks the team (or Over / Under) the model's numbers "
         "favor against that line. Like the column above, a lean, not a final pick.",
         f"**Form (30 days)** — how the model's favored side did on games with a gap this size in the last 30 days: "
@@ -303,10 +307,23 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
                     "Gap (pts)": None if e is None else round(abs(e), 1),
                     **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
+                    LAST: _last(league, p),                     # Nov 24 (owner): context, right of the form
                     **(extras(p) if extras else {}),
                     "_lean": _lean(p), "_playable": playable, "_move": mv.get("spread_move") or "",
                     "_form": form_of(w, n) if b is not None else NEW, "_i": len(out)})
     return out
+
+
+LAST = "Last meetings"
+
+
+def _last(league: str, p: Dict) -> str:
+    """Nov 24 (owner): the teams' recent meetings (h2h.py) -- context, not part of the chances."""
+    try:
+        import h2h as H
+        return H.lookup(league, p.get("home"), p.get("away"))
+    except Exception:                                           # noqa: BLE001
+        return "—"
 
 
 def spotlight(rows: List[Dict], k: int = 3) -> List[Dict]:
