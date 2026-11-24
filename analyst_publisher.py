@@ -47,6 +47,7 @@ import analyst as A
 import analyst_context as AC
 import analyst_ledger as AL
 import analyst_tools as AT
+import game_line_recap as GLR
 import odds_api as O
 import sports
 
@@ -276,6 +277,30 @@ def publish_sport(sport_key: str, date_str: str, today_str: str, deps: Dict[str,
                     out["recap"] = "posted"
             else:
                 out["recap"] = "already posted"
+
+    # --- Nov 24: yesterday's game-line results (owner: "the analyst desk reports do not include the game lines
+    # results") -- college basketball is mostly game lines, so this posts even on a day with no prop calls ----------
+    out["lines_recap"] = "nothing to post"
+    if sport_key in GLR.LINE_SPORTS:
+        yday = (datetime.fromisoformat(today_str) - timedelta(days=1)).date().isoformat()
+        try:
+            ltext = deps.get("lines_recap", GLR.recap_text)(sport_key, yday, label=short)
+        except Exception:                                      # noqa: BLE001 — a recap must never stop the cards
+            ltext = ""
+        if ltext:
+            out["text"]["recap:lines"] = ltext
+            if not post:
+                out["lines_recap"] = "not posted" if lock else "dry run"
+            elif AL.claim_post("recap:lines", sport_key, yday):
+                try:
+                    AT.post_to_discord(webhook, ltext, post=send)
+                except RuntimeError as exc:
+                    AL.release_post("recap:lines", sport_key, yday)
+                    out["lines_recap"] = f"failed: {exc}"
+                else:
+                    out["lines_recap"] = "posted"
+            else:
+                out["lines_recap"] = "already posted"
     return out
 
 
@@ -310,9 +335,11 @@ def run(sport_keys: List[str], *, date_str: Optional[str] = None, book: Optional
             out(f"{key}: ERROR {type(exc).__name__}: {str(exc)[:160]}")
             bad += 1
             continue
-        out(f"{key}: locked {r['locked']}, graded {r['graded']}, picks: {r['picks']}, recap: {r['recap']}"
+        out(f"{key}: locked {r['locked']}, graded {r['graded']}, picks: {r['picks']}, recap: {r['recap']}, "
+            f"lines recap: {r.get('lines_recap', '—')}"
             + (f" · {'; '.join(r['notes'])}" if r["notes"] else ""))
-        if r["picks"].startswith("failed") or r["recap"].startswith("failed"):
+        if (r["picks"].startswith("failed") or r["recap"].startswith("failed")
+                or str(r.get("lines_recap", "")).startswith("failed")):
             bad += 1
         if not post and not lock:
             for kind, text in r["text"].items():

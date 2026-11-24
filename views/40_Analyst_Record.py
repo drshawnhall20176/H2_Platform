@@ -48,6 +48,22 @@ with c2:
                      key="record_basis",
                      help="The first is every call the Desk locked. The second is only the calls actually posted to the "
                           "audience (stamped when posted).")
+try:                                                            # Nov 24: the game-line results (owner)
+    import game_line_recap as _GLR
+    from datetime import timedelta as _td
+    if sport_pick in _GLR.LINE_SPORTS:
+        _gl = _GLR.window(sport_pick, (datetime.now(pytz.timezone("US/Eastern")) - _td(days=1)).date().isoformat())
+        st.markdown("#### 📏 Game lines — last 7 days")
+        if _gl:
+            st.dataframe(pd.DataFrame(_gl), width="stretch", hide_index=True)
+            st.caption("The model's game-line board, graded: 💰 Money picks (the tested tag), ✅ Model & market agree "
+                       "(a candidate rule being tracked), the Pick column and the Likely winner. 1 unit per pick at "
+                       "the price on the board.")
+        else:
+            st.caption("No graded game lines in the last 7 days.")
+        st.markdown("#### 🎯 Player-prop calls")
+except Exception:                                               # noqa: BLE001
+    pass
 rows = [r for r in all_rows if sport_pick == "All sports" or r["sport"] == sport_pick]
 if basis.startswith("Published"):
     rows = [r for r in rows if r.get("published_at")]
