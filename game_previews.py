@@ -304,11 +304,12 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         _ag = agreement(p, league)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
                     BET: game_bet(league, playable, False, _ag),
-                    blow_col(league): blowout(league, p), AGREE: _ag, **lead,     # Nov 23 (owner): left of Use
-                    **says_parts(p, playable, tagged=bool(use)),
-                    TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
+                    AGREE: _ag, blow_col(league): blowout(league, p),     # Nov 24 (owner): the indicators up front
                     "Gap (pts)": None if e is None else round(abs(e), 1),
                     **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
+                    **lead,     # Nov 23 (owner): left of Use
+                    **says_parts(p, playable, tagged=bool(use)),
+                    TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
                     LAST: _last(league, p),                     # Nov 24 (owner): context, right of the form
                     **(extras(p) if extras else {}),
@@ -324,6 +325,25 @@ BET_YES, BET_TRACK, BET_INFO = "🃏 Bet", "🧪 Tracking", "Info only"
 BET_NOTE = ("**Bet?** — 🃏 Bet = a tag from a rule that has made money in testing (💰 / 🔒 / 🎟️ / 🎯) · 🧪 Tracking = "
             "the ✅ close-gap rule being tested forward (not proven yet) · Info only = what the model thinks, with no "
             "tested edge — context, not a bet.")
+
+
+GAP = "Close gap (pts)"
+
+
+def gap_text(p: Dict, league: str = "") -> str:
+    """Nov 24 (owner: indicators up front): how far the model's margin is from the market's spread -- '✅ 1.2' inside
+    the close-gap rule's 2 points, else the number. Hockey's puck line says nothing here: '—'."""
+    try:
+        import game_sim as GS
+        if league and GS.family(league) == "hockey":
+            return "—"
+    except Exception:                                           # noqa: BLE001
+        pass
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    if hs is None or mm is None:
+        return "—"
+    g = abs(mm + hs)
+    return f"✅ {g:.1f}" if g < 2 else f"{g:.1f}"
 
 
 def game_bet(league: str, playable: bool, money: bool, agree: str) -> str:

@@ -368,7 +368,7 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         st.dataframe(df, hide_index=True, width="stretch")
     else:
         shown = [ordered[r["_i"]] for r in rows]                # the games in the order the table lists them
-        df = with_book_ticks(df, shown, after="Gap (pts)")
+        df = with_book_ticks(df, shown, after=GP.TOTAL)          # Nov 24: Gap moved up front with the indicators
         st.caption("☑️ Tick any side to log it — the model's side or the other one, spread, total or moneyline. "
                    "Change the line or price in the log box to match your slip (alternate spreads too).")
         ticks = LU.tick_grid(df, list(TICK_COLS), key=f"hg_ticks_{league}", hide_index=True, width="stretch",
