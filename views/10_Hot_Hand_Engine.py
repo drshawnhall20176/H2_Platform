@@ -238,12 +238,38 @@ if _active.key == "NBA":
                            "(Oct 30 – Nov 17). A favorite's price only has value if it beats his chance here.")
             _kdf = pd.DataFrame(_k[:25])
             _kdf["Blowout chance"] = _kdf["Blowout chance"].apply(lambda v: "—" if v is None or v != v else f"{v:.0%}")
-            st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source", "Ceiling (90th)",
-                               "Best recent", "Minutes", "Blowout chance", "Min at risk", "Spread", "Game"]],
-                         hide_index=True, width="stretch",
-                         column_config={"King chance": st.column_config.ProgressColumn(
-                             "King chance", format="percent", min_value=0.0, max_value=max(0.25, float(_kdf["King chance"].max()))),
-                             "Min at risk": st.column_config.NumberColumn(format="%.1f")})
+            # Nov 24 (owner): click a player's row to open his player card
+            st.caption("👆 Click a player's row to open his player card.")
+            _ksel = st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source",
+                                       "Ceiling (90th)", "Best recent", "Minutes", "Blowout chance", "Min at risk",
+                                       "Spread", "Game"]],
+                                 hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                                 key="kotc_table",
+                                 column_config={"King chance": st.column_config.ProgressColumn(
+                                     "King chance", format="percent", min_value=0.0,
+                                     max_value=max(0.25, float(_kdf["King chance"].max()))),
+                                     "Min at risk": st.column_config.NumberColumn(format="%.1f")})
+            try:
+                _krows = list(getattr(getattr(_ksel, "selection", None), "rows", None) or [])
+            except Exception:                                   # noqa: BLE001
+                _krows = []
+            if _krows:
+                import player_card as _PCK
+                _kr = _k[:25][_krows[0]]
+                _pra = next((b for b in board if b.get("Player") == _kr["Player"]
+                             and str(b.get("Market")) in ("Pts+Reb+Ast", "PRA")), None)
+                _info = player_info.get((_kr["Player"], _kr.get("Team"))) or {}
+                with st.container(border=True):
+                    _PCK.render({"Player": _kr["Player"], "Team": _kr.get("Team"), "Opp": _kr.get("Opp"),
+                                 "Time": (_pra or {}).get("Time"), "Game": _kr.get("Game"),
+                                 "Market": "Pts+Reb+Ast", "Side": "Over",
+                                 "Line": (_pra or {}).get("Line"), "RealPrice": (_pra or {}).get("RealPrice"),
+                                 "Projection": _kr.get("Adj PRA") or _kr.get("Proj PRA"),
+                                 "ModelProb": (_pra or {}).get("ModelProb"),
+                                 "_values": list(_info.get("pra") or []),
+                                 "Why": f"👑 King chance {_kr['King chance']:.0%} · ceiling (90th) "
+                                        f"{_kr.get('Ceiling (90th)')} · best recent {_kr.get('Best recent')}",
+                                 "Warnings": []}, "NBA", bet="Info only")
             st.caption(
                 "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. Every "
                 "rotation player is in the simulation, and each player's night is drawn from how players at his "
