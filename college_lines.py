@@ -61,6 +61,14 @@ def _close_gap(league: str, day: str, recs: Optional[List[Dict]]) -> Dict[str, D
         return {}
 
 
+# Nov 24 (owner: "the Pick ... is what the model is suggesting based on a model and market reconciliation correct?
+# This is different than Pick in the Game Lab"): three kinds of pick share the table, so each row says which it is.
+MONEY = "Money pick (model + market)"     # Money Score: the books' no-vig chance plus the model's EARNED disagreement
+LINE = "Line pick (model vs market)"      # the side of the spread / total the model's own number favors
+CLOSE = "Close-gap pick"                  # NCAAMB: model and market within 2 points, the model's side (tracked)
+WINNER = "Winner (model's favorite)"      # the team the model alone has winning; its chance is the model's
+
+
 def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[Dict]] = None) -> List[Dict]:
     """Every game's bets as rows — the Line pick, the Money pick and the Winner (one row per distinct bet) — with the
     icons the boards use on the LEFT: 💰 Money pick (tested) · 🔒 / 🎟️ / 🎯 the line pick's Use tag · ✅ the model
@@ -76,30 +84,32 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
         cg = cand.get(r.get("game"))
         seen = set()
 
-        def add(market, pick, price, chance, icons):
+        def add(market, pick, price, chance, icons, kind):
             key = str(pick).replace(" ML", "").replace(" moneyline", "").strip()
             if not pick or key in seen:
                 return
             seen.add(key)
             ic = list(dict.fromkeys(i for i in icons if i))
-            out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Use": " ".join(ic),
-                        "Market": market, "Pick": pick, "Price": price, "Model %": chance,
+            out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Use": " ".join(ic), "Pick type": kind,
+                        "Market": market, "Pick": pick, "Price": price, "Chance": chance,
                         "Blowout risk": blow, GP.AGREE: agree, "Last meetings": last,
                         "_kick": (r.get("_rec") or {}).get("kickoff")})
 
         money_same = r.get("money_pick") and r.get("best") and r.get("money_pick") == r.get("best")
         if r.get("money") and r.get("money_pick") and not money_same:
-            add(r.get("money_market") or "", r["money_pick"], r.get("money_price"), r.get("money_chance"), ["💰"])
+            add(r.get("money_market") or "", r["money_pick"], r.get("money_price"), r.get("money_chance"), ["💰"],
+                MONEY)
         if r.get("best"):
             m = r.get("bet_market") or "Spread"
             add(m, r["best"], r.get("best_price"), r.get("best_chance"),
                 [("💰" if r.get("money") and money_same else ""), ("🔒" if r.get("lock") else ""), _icon(r.get("use")),
-                 ("✅" if m in ("Spread", "Moneyline") and agree.startswith("✅") else "")])
+                 ("✅" if m in ("Spread", "Moneyline") and agree.startswith("✅") else "")],
+                MONEY if r.get("money") and money_same else LINE)
         if cg and cg["pick"] not in seen:
-            add("Spread", cg["pick"], cg.get("price"), None, ["✅"])
+            add("Spread", cg["pick"], cg.get("price"), None, ["✅"], CLOSE)
         if r.get("winner"):
             add("Moneyline", f"{r['winner']} ML", r.get("price"), r.get("chance"),
-                ["✅" if agree.startswith("✅") else ""])
+                ["✅" if agree.startswith("✅") else ""], WINNER)
     import components as C
     return C.by_kickoff(out, lambda x: x.get("_kick") or x.get("Time"))
 
@@ -150,7 +160,11 @@ def gl_board(league: str, day: str, markets: Sequence[str], slot: str, game: str
     return out
 
 
-ICON_KEY = ("**Use:** 💰 Money pick — the game-line rule that has returned money in testing (1 unit each) · 🔒 / 🎟️ / 🎯 "
+ICON_KEY = ("**Pick type:** Money pick = the model's chance reconciled with the market (the books' chance plus only "
+            "the part of the model's disagreement its record has earned) at a price that pays · Line pick = the side "
+            "of the spread or total the model's own number favors against the market (the Game Lab's Pick) · Winner = "
+            "the team the model alone has winning, at the model's own chance · Close-gap pick = the model's side when "
+            "model and market are within 2 points. **Chance** follows the pick type.  \n**Use:** 💰 Money pick — the game-line rule that has returned money in testing (1 unit each) · 🔒 / 🎟️ / 🎯 "
             "a tested Use tag on the line pick · ✅ the model and the market agree (college basketball: the close-gap "
             "rule being tracked forward — information until it earns its tag).")
 
@@ -161,7 +175,7 @@ def show_table(rows: Sequence[Dict]) -> None:
     df = pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in rows])
     st.dataframe(df, hide_index=True, width="stretch",
                  column_config={"Price": st.column_config.NumberColumn(format="%+d"),
-                                "Model %": st.column_config.NumberColumn(format="percent")})
+                                "Chance": st.column_config.NumberColumn(format="percent")})
 
 
 def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
