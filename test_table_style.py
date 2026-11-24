@@ -68,3 +68,19 @@ ev = st.dataframe(df, on_select="rerun", key="sel")     # a selection table stay
     at.session_state[TS.LAYOUT_KEY] = "Full"
     at.run()
     assert not any("h2c-t" in m.value for m in at.markdown) and len(at.dataframe) == 3
+
+
+def test_slate_tables_sort_by_start_time_with_time_and_game_first_and_market_headers():
+    df = pd.DataFrame([{"Use": "a", "Game": "Late @ X", "Time": "11:59 PM", "Book says": "x"},
+                       {"Use": "b", "Game": "Midnight @ Y", "Time": "12:30 AM", "Book says": "y"},
+                       {"Use": "c", "Game": "Early @ Z", "Time": "11:00 AM", "Book says": "z"},
+                       {"Use": "d", "Game": "Eve @ W", "Time": "7:00 PM", "Book says": "w"}])
+    out, cfg = TS.conform(df, {"Book says": {"label": None}})
+    assert list(out["Game"]) == ["Early @ Z", "Eve @ W", "Late @ X", "Midnight @ Y"]
+    assert list(out.columns[:2]) == ["Time", "Game"] and "Market says" in out.columns and "Market says" in cfg
+    wk = pd.DataFrame([{"Game": "b", "Time": "Sun 1:00 PM"}, {"Game": "a", "Time": "Sat 7:00 PM"}])
+    assert list(TS.conform(wk)[0]["Game"]) == ["a", "b"]
+    plain = pd.DataFrame([{"Sport": "NBA", "Record": "5-3"}, {"Sport": "NHL", "Record": "2-2"}])
+    assert TS.conform(plain)[0].equals(plain)                          # not a slate table: untouched
+    keep = pd.DataFrame([{"Book": "draftkings", "Game": "a", "Time": "1:00 PM"}])
+    assert "Book" in TS.conform(keep)[0].columns                       # the sportsbook's name column stays
