@@ -893,6 +893,21 @@ def summary(bets: List[Dict]) -> Dict:
     }
 
 
+def model_split(bets: List[Dict]) -> Dict[str, Dict]:
+    """Nov 24 (owner: "I am still trying to get my mind in the frame of sticking with what the model called out"):
+    the record split by whether the model backed the bet -- a model chance of 50%+ on the side bet ("with") -- or
+    not ("own": no model chance, or the model leaned the other way). The discipline scorecard tools like Action
+    Network's tracker show; here it answers "did my own calls help or hurt?"."""
+    def _p(b):
+        try:
+            return float(b.get("model_prob"))
+        except (TypeError, ValueError):
+            return None
+    w = [b for b in bets if (_p(b) or 0) >= 0.5]
+    o = [b for b in bets if b not in w]
+    return {"with": summary(w), "own": summary(o)}
+
+
 # "book" = captured from a sportsbook feed; "manual" = the price the owner typed from the book's own screen (Edge
 # Board's Model Board logger, Position Matchups' Player props). Both are real, independently-sourced prices; only
 # "model_fair" (the model's own fair price) is excluded from CLV.
