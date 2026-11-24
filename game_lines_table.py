@@ -22,7 +22,7 @@ import streamlit as st
 
 TICKS = ["✓ Money", "✓ Pick", "✓ Winner"]
 BLOW, AGREE = "Blowout risk", "Model & market agree?"
-ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result",
+ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result",
          "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value", BLOW, AGREE,
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
          "Spread move", "Weather", "League"]
@@ -56,6 +56,9 @@ LEGEND = "\n".join("- " + x for x in [
     "(hockey), from the market's spread: 🟥 60%+ · 🟨 35–60% · 🟩 under 35%.",
     "**Model & market agree?** — ✅ same winner and close (2 points; hockey: win chances within 4) · 🟨 same winner, "
     "further apart · ⚠️ the model has the other team. It has meant something only in college basketball so far.",
+    "**Bet?** — ✅ Bet = the row carries a tag from a rule that has made money in testing (and which pick it is) · "
+    "🧪 Tracking = the college basketball ✅ close-gap rule, being tested forward · Info only = no tested edge: "
+    "what the model thinks, not a bet.",
     "**Last meetings** — how the two teams' games against each other went over the last year. Context only: past "
     "meetings tested as adding nothing to the chances (Nov 24).",
     "Stakes: a flat 1u per 💰 pick until the edge is proven, scaled so a day's 💰 picks total 5u at most.",
@@ -131,9 +134,29 @@ def extras(r: Dict) -> Dict:
     p = r.get("_full") or {}
     lg = r.get("league") or r.get("sport") or ""
     try:
-        return {BLOW: GP.blowout(lg, p) if p else "—", AGREE: GP.agreement(p, lg) if p else "—"}
+        return {BLOW: GP.blowout(lg, p) if p else "—", AGREE: GP.agreement(p, lg) if p else "—",
+                GP.LAST: GP._last(lg, p) if p else "—"}
     except Exception:                                           # noqa: BLE001
-        return {BLOW: "—", AGREE: "—"}
+        return {BLOW: "—", AGREE: "—", "Last meetings": "—"}
+
+
+def bet(r: Dict) -> str:
+    """Nov 24 (owner): which of the row's picks, if any, is a bet. The 💰 flag already respects a paused rule."""
+    import game_previews as GP
+    import todays_best as TB
+    lg = r.get("league") or r.get("sport") or ""
+    parts = []
+    if r.get("money"):
+        parts.append("💰 Money pick")
+    if r.get("lock") or r.get("use") in TB.PLAYABLE:
+        parts.append("Line pick")
+    if parts:
+        return f"{GP.BET_YES}: " + " + ".join(parts)
+    try:
+        ag = GP.agreement(r.get("_full") or {}, lg) if r.get("_full") else ""
+    except Exception:                                           # noqa: BLE001
+        ag = ""
+    return GP.game_bet(lg, False, False, ag)
 
 
 def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.DataFrame:
@@ -141,7 +164,7 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
     import pick_records as PR
     import todays_best as TB
     df = pd.DataFrame([{
-        "Time": r.get("time") or "", "Sport": r.get("sport"), "Game": r.get("game"),
+        "Time": r.get("time") or "", "Sport": r.get("sport"), "Game": r.get("game"), "Bet?": bet(r),
         "Final": r.get("final") or "—", **extras(r),
         "Money result": TB.RESULT_ICON.get(r.get("money_result"), "—"),
         "Pick result": TB.RESULT_ICON.get(r.get("best_result"), "—"),

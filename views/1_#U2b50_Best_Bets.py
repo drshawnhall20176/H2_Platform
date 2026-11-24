@@ -472,7 +472,12 @@ try:
         _rename["_agree"] = _GPB.AGREE
 except Exception:                                               # noqa: BLE001
     pass
-_FIRST = ["Time", "Game", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
+for p in view:                                                  # Nov 24 (owner): a Bet? column
+    _u = str(p.get("_use") or p.get("Use") or "")
+    p["_bet"] = "✅ Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
+_cols.append("_bet")
+_rename["_bet"] = "Bet?"
+_FIRST = ["Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
           "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]

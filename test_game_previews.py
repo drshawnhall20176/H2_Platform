@@ -77,7 +77,8 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
     owner = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
     # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
     # Nov 23 (owner): both games are ⚪ No edge, so the Use column gives way to one note above the table
-    assert list(owner.columns[:6]) == ["Tip (ET)", "Game", GP.blow_col("NCAAMB"), GP.AGREE, "Model has", "Market has"]
+    assert list(owner.columns[:7]) == ["Tip (ET)", "Game", GP.BET, GP.blow_col("NCAAMB"), GP.AGREE, "Model has",
+                                       "Market has"]
     assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
     assert "Use" not in owner.columns and any("every game here reads ⚪ No edge" in c.value for c in at.caption)
     assert any("Previews, not picks" in i.value for i in at.info)
@@ -127,7 +128,7 @@ def test_ncaaf_game_lab_lists_previews_with_form(monkeypatch):
     tables = [d.value for d in at.dataframe if "Form (30 days)" in d.value.columns]
     assert tables, [str(e.value)[:200] for e in at.exception]
     t = tables[0]
-    assert list(t.columns[:7]) == ["Kickoff (ET)", "Game", GP.blow_col("NCAAF"), GP.AGREE, "Tracking pick", "Model has",
+    assert list(t.columns[:8]) == ["Kickoff (ET)", "Game", GP.BET, GP.blow_col("NCAAF"), GP.AGREE, "Tracking pick", "Model has",
                                    "Market has"]
     assert [x.split("· ")[-1] for x in t[GP.SIDE]] == ["H1 -3", "A2 -3.5"] and list(t["Gap (pts)"]) == [7.0, 0.5]
     assert list(t["Game"]) == ["A1 @ H1", "A2 @ H2 (neutral)"] and list(t["Tracking pick"]) == ["H1 -3", "—"]

@@ -461,7 +461,7 @@ if True:
                                    by={"Line pick result": "pick", "Winner pick result": "winner",
                                        "Money pick result": "money"})
         import game_lines_table as _GLT0
-        _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"], **_GLT0.extras(r),
+        _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"], "Bet?": _GLT0.bet(r), **_GLT0.extras(r),
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
                                "Total": r.get("total_txt") or "",
@@ -509,7 +509,7 @@ if True:
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         # Nov 20 (owner: "more investor friendly -- the more important columns to the left, informational to the
         # right"): the bet and how it did first, then the model's pick and the likely winner, then the detail
-        _ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result",
+        _ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result",
                   "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
                   "Blowout risk", "Model & market agree?",
                   "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
