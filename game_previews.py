@@ -103,10 +103,20 @@ def blow_col(league: str) -> str:
 AGREE = "Model & market agree?"
 
 
-def agreement(p: Dict) -> str:
+def agreement(p: Dict, league: str = "") -> str:
     """Nov 23 (owner: "a column right next to Blowout Risk that shows if the model and the market agree", like the
     Anytime TD lab's): ✅ same winner and within 2 points (the tracked candidate rule's games) · 🟨 same winner, further
-    apart · ⚠️ the model has the other team winning."""
+    apart · ⚠️ the model has the other team winning. Hockey (Nov 23): the spread is always the 1.5-goal puck line, so
+    points say nothing -- it compares win chances instead (✅ same favorite within 4 points)."""
+    import game_sim as GS
+    if league and GS.family(league) == "hockey":
+        mp, fh = PR._num(p.get("model_p")), PR._num(p.get("fair_home"))
+        if mp is None or fh is None:
+            return "—"
+        gap = abs(mp - fh) * 100
+        if (mp > 0.5) != (fh > 0.5) and abs(mp - 0.5) > 0.01 and abs(fh - 0.5) > 0.01:
+            return f"⚠️ Model has {p.get('home') if mp > 0.5 else p.get('away')} winning"
+        return "✅ Agree" if gap < 4 else f"🟨 Same favorite · win chance {gap:.0f} pts apart"
     hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
     if hs is None or mm is None:
         return "—"
@@ -180,9 +190,10 @@ def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
         "football, 3+ goals in hockey), from the market's spread: 🟥 60%+ · 🟨 35-60% · 🟩 under 35%. It runs off the "
         "market because the market sizes margins better than our model. Use it for props (starters sit late in "
         "blowouts) and big-spread picks; on the season, the model's spread picks at big gaps were only a coin flip.",
-        "**Model & market agree?** — ✅ Agree = same winner and within 2 points of each other · 🟨 same winner, "
-        "further apart · ⚠️ the model has the other team winning outright. (On Nov 5–22 the model's side won 60% of "
-        "✅ games and ~50% once 5+ points apart — now being tested forward.)",
+        "**Model & market agree?** — ✅ Agree = same winner and within 2 points of each other (hockey: same favorite, "
+        "win chances within 4 points) · 🟨 same winner, further apart · ⚠️ the model has the other team winning "
+        "outright. It has meant something only in college basketball so far (the model's side won 60% of ✅ games on "
+        "Nov 5–22, now being tested forward); in the NBA ✅ games went 52% against the spread — break-even.",
         "**⭐ = model favors** — in each market column, the star marks the team (or Over / Under) the model's numbers "
         "favor against that line. Like the column above, a lean, not a final pick.",
         f"**Form (30 days)** — how the model's favored side did on games with a gap this size in the last 30 days: "
@@ -235,7 +246,7 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
                                     if mv.get("spread_move_why") else "") if x)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
-                    blow_col(league): blowout(league, p), AGREE: agreement(p), **lead,     # Nov 23 (owner): left of Use
+                    blow_col(league): blowout(league, p), AGREE: agreement(p, league), **lead,     # Nov 23 (owner): left of Use
                     **says_parts(p, playable, tagged=bool(use)),
                     TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Gap (pts)": None if e is None else round(abs(e), 1),

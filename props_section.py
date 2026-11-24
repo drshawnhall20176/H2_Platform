@@ -61,6 +61,13 @@ def _load(sport: str, day: str):
 def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
     import log_ui as LU
     st.markdown(f"##### {title}")
+    try:                                                        # Nov 23: a prop rule being tracked forward, if any
+        import candidate_rules as CR
+        _cand = CR.prop_status_line(sport)
+        if _cand:
+            st.caption(_cand)
+    except Exception:                                           # noqa: BLE001
+        pass
     saved, rows, _judged = _load(sport, day)
     if not rows:
         # Nov 23 (owner, Monday Madness): "none saved" read like a broken page. Say what this list holds and why

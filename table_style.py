@@ -36,6 +36,78 @@ def centered(data: Any, column_config: Optional[Dict] = None) -> Optional[Dict]:
     return cfg
 
 
+# --------------------------------------------------------------------------- one table convention (Nov 24)
+# Owner, Nov 24: "all data tables should include the ... column heading alignments, arrangements etc we discussed with
+# the game labs ... all important data should be to the left and all tables should be game time ascending and each
+# consistent with each other." Every st.dataframe passes through here, so the convention holds on every page:
+#   * a slate table (a start-time column plus a game / player / pick column) is sorted by start time, earliest first
+#     (times before 6 AM are after-midnight starts and sort last);
+#   * the start time and the game lead, in that order;
+#   * the comparison headers say Model / Market, never "Book" (the sportsbook's NAME column keeps "Book").
+# Row-selection tables and data editors are left in their own order (their callers map rows by position).
+import re as _re
+
+TIME_COLS = ("Time", "Tip (ET)", "Kickoff (ET)", "Time (ET)", "Start (ET)", "Start", "Kickoff", "When", "Tip")
+GAME_COLS = ("Game", "Matchup", "Fight")
+ROW_COLS = ("Game", "Matchup", "Fight", "Player", "Pick", "Bet")
+RENAME = {"Book says": "Market says", "Book price": "Market price", "Book no-vig": "Market no-vig",
+          "Book line": "Market line", "Book implied*": "Market implied*", "Book has": "Market has",
+          "Book spread": "Market spread", "Book total": "Market total", "Book ML": "Market moneyline"}
+_T = _re.compile(r"(?:(\d{1,2})/(\d{1,2})\s+)?(\d{1,2}):(\d{2})\s*([AaPp][Mm])")
+_WD = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def time_key(v):
+    """Sort key for a start time as the site writes it ('7:00 PM', 'Sat 12:00 PM', '11/23 7:00 PM'); None if not a
+    time (TBD, Final, blank)."""
+    s = str(v or "").strip()
+    m = _T.search(s)
+    if not m:
+        return None
+    mo, dy, h, mi, ap = m.groups()
+    h = int(h) % 12 + (12 if ap.upper() == "PM" else 0)
+    mins = h * 60 + int(mi)
+    day = 0
+    if mo and dy:
+        day = int(mo) * 40 + int(dy)
+    else:
+        wd = next((i for i, w in enumerate(_WD) if s.startswith(w)), None)
+        if wd is not None:
+            day = 1000 + wd
+    if mins < 6 * 60 and not (mo or day >= 1000):
+        mins += 24 * 60                                         # 12:30 AM tonight comes after 11:59 PM
+    return (day, mins)
+
+
+def conform(frame, column_config=None):
+    """(frame, column_config) in the site's convention: Model/Market headers, time then game first, earliest start
+    first. Anything unexpected returns the inputs untouched."""
+    import pandas as pd
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return frame, column_config
+    cfg = dict(column_config or {})
+    ren = {c: RENAME[c] for c in frame.columns if isinstance(c, str) and c in RENAME and RENAME[c] not in frame.columns}
+    if ren:
+        frame = frame.rename(columns=ren)
+        cfg = {ren.get(k, k): v for k, v in cfg.items()}
+    t = next((c for c in TIME_COLS if c in frame.columns), None)
+    g = next((c for c in GAME_COLS if c in frame.columns), None)
+    rowc = next((c for c in ROW_COLS if c in frame.columns), None)
+    if t and rowc:
+        keys = [time_key(v) for v in frame[t]]
+        if sum(k is not None for k in keys) >= max(2, 0.8 * len(keys)):
+            order = sorted(range(len(keys)), key=lambda i: (keys[i] is None, keys[i] or (0, 0), i))
+            if order != list(range(len(keys))):
+                frame = frame.iloc[order]
+                if isinstance(frame.index, pd.RangeIndex) or list(frame.index) == sorted(frame.index):
+                    frame = frame.reset_index(drop=True)
+        lead = [t] + ([g] if g and g != t else [])
+        cols = list(frame.columns)
+        if cols[:len(lead)] != lead:
+            frame = frame[lead + [c for c in cols if c not in lead]]
+    return frame, cfg
+
+
 def install() -> None:
     import streamlit as st
     from streamlit.delta_generator import DeltaGenerator as DG
@@ -44,8 +116,12 @@ def install() -> None:
     for name in ("dataframe", "data_editor"):
         orig = getattr(DG, name)
 
-        def wrap(self, data=None, *args, _orig=orig, **kw):
+        def wrap(self, data=None, *args, _orig=orig, _name=name, **kw):
             try:
+                if _name == "dataframe" and not kw.get("on_select") and kw.get("selection_mode") is None:
+                    data, cc = conform(data, kw.get("column_config"))
+                    if cc is not None:
+                        kw["column_config"] = cc
                 kw["column_config"] = centered(data, kw.get("column_config"))
             except Exception:                                   # noqa: BLE001 -- styling never breaks a table
                 pass
@@ -161,7 +237,8 @@ def install_phone() -> None:
             frame = _as_frame(data)
             if (frame is not None and len(frame.columns) >= PHONE_MIN_COLS and not kw.get("on_select")
                     and kw.get("selection_mode") is None and len(frame) and phone_mode()):
-                cfg = centered(frame, kw.get("column_config")) or {}
+                frame, cc = conform(frame, kw.get("column_config"))       # Nov 24: same order as the table
+                cfg = centered(frame, cc) or {}
                 self.markdown(cards_html(frame, cfg), unsafe_allow_html=True)
                 more = len(frame) - CARD_ROWS
                 exp = self.expander(f"Full table ({len(frame)} rows, scroll sideways)" if more <= 0 else
