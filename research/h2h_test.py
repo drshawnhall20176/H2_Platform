@@ -89,6 +89,7 @@ tm = teams("NBA")
 days = [d for d in MS.snapshot_dates("NBA") if "2026-10-21" <= d <= "2026-11-23"]
 g = DR.grade_dates("NBA", days)
 rows = [r for rs in g.values() for r in rs if r.get("result") in ("hit", "miss") and r.get("chance") is not None and r.get("p_market") is not None]
+print("sample team/opp/pid", [(r.get("team"), r.get("opp"), r.get("player_id"), r.get("slate_date")) for r in rows[:5]], "nteams", len(tm))
 print("graded priced props", len(rows), "sample keys", sorted(rows[0].keys()) if rows else None)
 mk = collections.Counter(r.get("market") for r in rows); print("markets", dict(mk))
 BOX = {}
@@ -131,6 +132,7 @@ for minn in (1, 2):
         b, se = fit(X, [d["hit"] for d in sub])
         print(f" logistic (min {minn}): intercept {b[0]}±{se[0]}  logit(earned) {b[1]}±{se[1]}  H2H edge {b[2]}±{se[2]}  n={len(sub)}")
 # ----------------------------------------------------------------- B. game lines
+sys.exit(0)
 print("== B. game lines: prior meetings vs the market spread ==")
 for lg, seasons in (("NBA", ["2026", "2027"]), ("NHL", ["2026", "2027"]), ("NCAAMB", ["2026", "2027"])):
     tm = teams(lg)
