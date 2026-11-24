@@ -46,16 +46,38 @@ try:
 except Exception:                                               # noqa: BLE001
     pass
 C.section_header("🏟", "Select Sport")
-with st.container(horizontal=True, horizontal_alignment="left"):
-    for s in live:
-        if st.button(f"{s.icon} {s.label}", key=f"sport_btn_{s.key}",
-                     type="primary" if current == s.key else "secondary", width="content"):
-            st.session_state["sport"] = s.key
-            st.rerun()
+# Nov 24 (owner: "Select Sport and Sports shown are redundant ... couldn't the multi select be done at the select sport
+# level?"): one picker. Pick one sport or several; every table on this desk follows the set. The sidebar's pages are
+# one sport's tools, so they open to the sport picked most recently (named under the picker).
+if current not in (st.session_state.get("desk_sports") or []):  # arrived from Today / another page: that sport alone
+    st.session_state["desk_sports"] = [current]
+    st.session_state["_desk_prev"] = [current]
+
+
+def _desk_changed():
+    new = list(st.session_state.get("desk_sports") or [])
+    old = list(st.session_state.get("_desk_prev") or [])
+    if not new:                                                 # never empty: keep the sidebar's sport
+        new = [st.session_state.get("sport", current)]
+        st.session_state["desk_sports"] = new
+    added = [k for k in new if k not in old]
+    if added:
+        st.session_state["sport"] = added[-1]
+    elif st.session_state.get("sport") not in new:
+        st.session_state["sport"] = new[0]
+    st.session_state["_desk_prev"] = new
+
+
+st.pills("Select Sport", [s.key for s in live], selection_mode="multi", key="desk_sports", on_change=_desk_changed,
+         format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}", label_visibility="collapsed")
+current = st.session_state.get("sport", current)
 
 active = sports.get(current)
 if active:
-    st.caption(f"Currently viewing: **{active.icon} {active.label}** — select a page from the sidebar to begin.")
+    _others = [k for k in (st.session_state.get("desk_sports") or []) if k != current]
+    st.caption(f"Sidebar pages open to: **{active.icon} {active.label}**"
+               + (f" · this desk also shows {', '.join(_others)}" if _others else "")
+               + " — click more sports to add them to the tables below; the last one you click runs the sidebar.")
     if current == "UFC":
         st.info("🥊 UFC Fight Card: tonight's bouts with moneyline odds, the market's no-vig chances, and total-rounds "
                "(fight duration) lines. There's no UFC model — every chance comes from the odds — and method-of-victory "
@@ -84,27 +106,24 @@ if True:
     _today = _day.strftime("%Y-%m-%d")
     _best = _TB.collect(_today, _props_sports, past=_past)
     _missing = [k for k, at in _best["props"].items() if not at]
-    _c1, _c2, _c3 = st.columns([2, 2, 1])
+    _c1, _c3 = st.columns([4, 1])
     _here = active.label if active else "This sport"
     # Nov 24 (owner): "select sport enabled to allow for multiple sport filtering ... the tables should update
     # accordingly" -- pick any set of sports; every table below follows it
     _sport_opts = [s.key for s in live]
-    if st.session_state.get("_home_best_for") != current:       # a new sport button: start from that sport alone
-        st.session_state["_home_best_for"] = current
-        st.session_state["home_best_sports"] = [current]
-    _picked_sports = _c1.pills("Sports shown", _sport_opts, selection_mode="multi",
-                              key="home_best_sports", format_func=lambda k: f"{sports.get(k).icon} {k}",
-                              help="Tick any sports — the picks, game lines, blowout watch and long shots below all "
-                                   "follow. The sport button above still sets the sidebar's pages.")
-    _sel = set(_picked_sports or [current])
+    _sel = set(st.session_state.get("desk_sports") or [current])     # Nov 24: the one Select Sport picker above
     _multi = len(_sel) > 1
     _scope = "All sports" if set(_sport_opts) <= _sel else "picked"
-    _show = _c2.radio("Show", ["🔒 Locks only", "💰 Money picks", "All playable"], horizontal=True,
-                      key="home_best_show", label_visibility="collapsed",
+    # Nov 24 (owner): Tracking and Info only as choices beside Only Locks / Only Money picks / All playable
+    _show = _c1.radio("Show", ["🔒 Locks only", "💰 Money picks", "🧪 Tracking", "Info only", "All playable"],
+                      horizontal=True, key="home_best_show", label_visibility="collapsed",
                       # Nov 23 (owner): say what each choice shows
                       format_func={"🔒 Locks only": "🔒 Only Locks", "💰 Money picks": "💰 Only Money picks",
-                                   "All playable": "All playable picks"}.get,
-                      help=_PE_H.MONEY_HELP)
+                                   "🧪 Tracking": "🧪 Only Tracking", "Info only": "Only Info only",
+                                   "All playable": "All picks"}.get,
+                      help=_PE_H.MONEY_HELP + " 🧪 Only Tracking = picks from a rule being tested forward (college "
+                           "basketball's close-gap games, the football prop Unders). Only Info only = the model's leans "
+                           "with no tested edge.")
     if _owner and _c3.button("🔄 Refresh props", width="stretch", disabled=_past,
                   help="Reloads each props sport's board. Boards are rebuilt every hour on the server (Nov 20: "
                        "building them here ran the app out of memory); this picks up the newest one."):
@@ -238,10 +257,11 @@ if True:
         C.hit_miss_breakdown(_rows, "result", "chance", key="home_best_hm", title="Picks that hit and missed")
         _rows = C.show_filter(_rows, "result", key="home_best_hm_show")
     import game_previews as _GPp
-    if _rows:
-        _pbk = _GPp.bet_filter("home_best_bet")                 # Nov 24 (owner): Bet? on every table, with its filter
+    _SHOWBET = {"🧪 Tracking": _GPp.BET_TRACK, "Info only": _GPp.BET_INFO}
+    if _rows and _show in _SHOWBET:                             # Nov 24: the Show choice picks the Bet? kind
         _rows = [r for r in _rows if _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
-                                                   + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r) in _pbk]
+                                                   + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
+                                                   r) == _SHOWBET[_show]]
     if _rows:
         _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "",
                               "Bet?": _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
@@ -286,7 +306,8 @@ if True:
                        "books beat this model, so those are always ⚪ No edge. Treat these as reads, and only at the "
                        "price shown under Needs or better.")
     else:
-        _none = "locks" if _show.startswith("🔒") else "playable picks"
+        _none = {"🔒 Locks only": "locks", "💰 Money picks": "💰 Money picks", "🧪 Tracking": "🧪 Tracking picks",
+                 "Info only": "Info-only picks"}.get(_show, "picks")
         _when = f"on {_day:%a %b %-d}" if _past else "yet today"
         st.caption(f"No {_none} for {', '.join(sorted(_sel))} {_when}.")
     _notes = []
@@ -461,8 +482,10 @@ if True:
         if not _lshow:                                          # a 🧪 Tracking / 🃏 Bet row is never hidden as "losing"
             _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE
                    or not _GLTb.bet(r).startswith(_GPb.BET_INFO)]
-        _bk = _GPb.bet_filter("home_win_bet")                   # Nov 24 (owner): 🃏 / 🧪 / Info only as filter buttons
-        _ws = [r for r in _ws if any(_GLTb.bet(r).startswith(k) for k in _bk)]
+        if _show == "🧪 Tracking":                              # Nov 24 (owner): the Show choice, on the game lines too
+            _ws = [r for r in _ws if _GLTb.bet(r).startswith(_GPb.BET_TRACK)]
+        elif _show == "Info only":
+            _ws = [r for r in _ws if _GLTb.bet(r).startswith(_GPb.BET_INFO)]
         # Nov 20 (owner): the Show choice filters the game lines too -- 🔒 rows only, 💰 rows only, or everything
         if _show == "💰 Money picks":
             _ws = [r for r in _ws if r.get("money")]
