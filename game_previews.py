@@ -17,6 +17,8 @@ Form is recent results, not a tested edge: the long backtest for these leagues f
 """
 from __future__ import annotations
 
+import re
+
 from typing import Callable, Dict, List, Optional
 
 import pick_records as PR
@@ -151,6 +153,55 @@ def blowout(league: str, p: Dict) -> str:
 
 
 BLOW_HIGH, BLOW_MID = 0.60, 0.35
+
+
+def prop_agreement(chance, price) -> str:
+    """Nov 24 (owner: "expand this metric to player props"): does the market lean the same way as the model on this
+    prop? The model's chance vs. the chance the price implies (vig left in, so ~52% is a coin flip at -110).
+    ✅ both above a coin flip · ⚠️ the price says this side is the underdog while the model likes it · ➖ the price is
+    about even. One side's price only, so it reads the market's lean, not a no-vig fair line."""
+    c, pr = PR._num(chance), PR._num(price)
+    if c is None or pr is None or pr == 0:
+        return "—"
+    imp = (-pr / (-pr + 100)) if pr < 0 else (100 / (pr + 100))
+    model_yes = c > 0.5
+    if imp >= 0.535:
+        return "✅ Agree" if model_yes else "⚠️ Market favors this side"
+    if imp <= 0.49:
+        return "⚠️ Market leans the other way" if model_yes else "✅ Agree"
+    return "➖ Market near even"
+
+
+def _norm(s) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", str(s or "").lower()).strip()
+
+
+def game_blowouts(league: str, games) -> Dict[str, str]:
+    """Nov 24: the game-level Blowout risk for each prop's game string ("Away @ Home"), matched to the saved game
+    picks by team names. A prop in a likely blowout carries minutes risk for starters (and garbage-time upside)."""
+    import model_store as MS
+    try:
+        recs = MS.load_game_picks(league, ungraded=True)
+    except Exception:                                           # noqa: BLE001
+        recs = []
+    out: Dict[str, str] = {}
+    for g in {x for x in games if x}:
+        ng = _norm(g)
+        hit = None
+        for p in recs:
+            h, a = _norm(p.get("home")), _norm(p.get("away"))
+            if h and a and h in ng and a in ng:
+                hit = p
+                break
+        if hit is None:                                         # fall back to the teams' last words ("Lakers")
+            for p in recs:
+                h = (_norm(p.get("home")).split() or [""])[-1]
+                a = (_norm(p.get("away")).split() or [""])[-1]
+                if h and a and re.search(rf"\b{h}\b", ng) and re.search(rf"\b{a}\b", ng):
+                    hit = p
+                    break
+        out[g] = blowout(league, hit) if hit else "—"
+    return out
 
 
 USE_NOTE = ("**Use:** every game here reads ⚪ No edge — no game-line rule for this league has passed testing yet, so the "

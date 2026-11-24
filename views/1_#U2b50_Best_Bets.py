@@ -420,13 +420,38 @@ if _props_model:
     _rename.update({"_cushion": "Cushion", "_warn": "Warnings"})
 if _show_blowout_risk:
     _cols.insert(_cols.index("Team") + 1, "_blowout_risk")
-    _rename["_blowout_risk"] = "Blowout Risk"
+    _rename["_blowout_risk"] = "Team blowout flag"
+# Nov 24 (owner, full scrub: "all data tables should include the additional columns ... we discussed with the game
+# labs"): the game's Blowout risk (free -- simulated from the saved game picks, no odds quota) and whether the price
+# leans the same way as the model, then one column order everywhere: time, game, the pick, the call, the rest.
+try:
+    import game_previews as _GPB
+    _gblow = _GPB.game_blowouts(_active.key, [p.get("Game") for p in view])
+    for p in view:
+        p["_gblow"] = _gblow.get(p.get("Game"), "—")
+        p["_agree"] = (_GPB.prop_agreement(p.get("ModelProb"), p.get("RealPrice"))
+                       if p.get("PriceSource") == "book" and not p.get("Pickem") else "—")
+    if any(p["_gblow"] != "—" for p in view):
+        _cols.append("_gblow")
+        _rename["_gblow"] = "Blowout risk"
+    if any(p["_agree"] != "—" for p in view):
+        _cols.append("_agree")
+        _rename["_agree"] = _GPB.AGREE
+except Exception:                                               # noqa: BLE001
+    pass
+_FIRST = ["Time", "Game", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
+          "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
+_cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
 st.dataframe(df.style.format({"Model %": "{:.0%}", "Earned %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}",
                               "Money score": "{:+.1%}"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
+if "Blowout risk" in df.columns or "Model & market agree?" in df.columns:
+    st.caption("**Blowout risk**: the game's chance of a lopsided finish (🟩 low · 🟨 medium · 🟥 high) — starters can "
+               "sit late, which hurts Overs and helps Unders. **Model & market agree?**: whether the book's price leans "
+               "the same way as the model (✅ yes · ⚠️ the price says the other side · ➖ about even).")
 if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
                "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "

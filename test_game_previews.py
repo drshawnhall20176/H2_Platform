@@ -152,3 +152,21 @@ def test_a_use_column_that_says_no_edge_everywhere_is_dropped_for_a_note():
     mixed = pd.DataFrame([{"Game": "a", "Use": "⚪ No edge"}, {"Game": "b", "Use": "🎯 Single only"}])
     df, note = GP.collapse_use(mixed)
     assert "Use" in df.columns and note is None
+
+
+def test_prop_agreement_reads_the_price_lean_against_the_model():
+    import game_previews as GP
+    assert GP.prop_agreement(0.6, -140) == "✅ Agree"
+    assert GP.prop_agreement(0.6, 120).startswith("⚠️")
+    assert GP.prop_agreement(0.6, -110).startswith("➖")
+    assert GP.prop_agreement(None, -110) == "—"
+
+
+def test_game_blowouts_matches_prop_games_to_saved_game_picks(monkeypatch):
+    import game_previews as GP
+    import model_store as MS
+    monkeypatch.setattr(MS, "load_game_picks", lambda lg, ungraded=False: [
+        {"home": "Boston Celtics", "away": "Detroit Pistons", "home_spread": -14.5, "line_total": 225, "game_id": "x"}])
+    out = GP.game_blowouts("NBA", ["Detroit Pistons @ Boston Celtics", "Pistons @ Celtics", "Kings @ Suns"])
+    assert out["Kings @ Suns"] == "—"
+    assert out["Detroit Pistons @ Boston Celtics"] != "—" and out["Pistons @ Celtics"] != "—"

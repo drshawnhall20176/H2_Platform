@@ -418,6 +418,18 @@ m5.metric("Beat-close rate", f"{rp['beat_close_rate']:.0f}%" if rp["beat_close_r
 m6.metric("Followed sizing", f"{adh['rate']:.0f}%" if adh["rate"] is not None else "—",
           help=f"Of {adh['n_measured']} bets with a platform-suggested stake, how many you staked "
                f"within 10% (or $0.50) of it. Over: {adh['n_over']} · under: {adh['n_under']}.")
+try:                                                            # Nov 24: with the model vs. your own calls
+    _ms = B.model_split(view_bets)
+    def _ln(d):
+        if not d["settled"]:
+            return "no settled bets"
+        return (f"{d['wins']}-{d['losses']}, ${d['profit']:+,.2f}"
+                + (f" ({d['roi']:+.1f}% ROI)" if d["roi"] is not None else ""))
+    st.caption(f"🧭 **With the model** (its chance 50%+ on your side): {_ln(_ms['with'])} · "
+               f"**Your own calls** (no model chance, or the model leaned the other way): {_ln(_ms['own'])}. "
+               "Sticking with the model means the first group, not every lean — only 💰 / 🎯 tags have passed testing.")
+except Exception:                                               # noqa: BLE001
+    pass
 if rp["n_total"] and rp["n_real_price"] < rp["n_total"]:
     st.caption(f"ℹ️ {rp['n_total'] - rp['n_real_price']} bet(s) here weren't logged at a real book "
                "price (model fair price, or logged before price-source tracking), so they're "

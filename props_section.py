@@ -88,14 +88,24 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
         st.caption("Nothing matches these filters.")
         return
     import coach as CO
+    import game_previews as GP
+    try:                                                        # Nov 24: the game-lab columns on props too
+        _blow = GP.game_blowouts(sport, [j.get("game") for j in show])
+    except Exception:                                           # noqa: BLE001
+        _blow = {}
     df = pd.DataFrame([{"Time": j.get("time") or "", "Game": j.get("game") or "", "Pick": j.get("pick"),
-                        "Price": j.get("price"), "Book": j.get("book") or "", "Model": j.get("chance"),
-                        "Use": j.get("use") or "", "Coach": j.get("verdict"),
-                        "Edge": "" if j.get("edge") is None else CO.pts(j["edge"])} for j in show])
+                        "Use": j.get("use") or "", "Model": j.get("chance"), "Price": j.get("price"),
+                        "Blowout risk": _blow.get(j.get("game"), "—"),
+                        GP.AGREE: GP.prop_agreement(j.get("chance"), j.get("price")),
+                        "Coach": j.get("verdict"),
+                        "Edge": "" if j.get("edge") is None else CO.pts(j["edge"]),
+                        "Book": j.get("book") or ""} for j in show])
     sel = LU.selectable(df, f"ps_sel_{sport}", hide_index=True, width="stretch", column_config={
         "Price": st.column_config.NumberColumn(format="%+d"),
         "Model": st.column_config.NumberColumn(format="percent")})
     st.caption(C.money_md(
         f"The model's playable props for today ({len(rows)} saved, prices as of {_age(saved.get('at')) or 'today'}). "
-        "Coach = My Coach's verdict at that price — 🟢 Good bet, 🟡 Maybe, 🔴 Skip. Tick rows to log them."))
+        "Coach = My Coach's verdict at that price — 🟢 Good bet, 🟡 Maybe, 🔴 Skip. Blowout risk = the game's chance of "
+        "a lopsided finish (starters may sit late). Model & market agree? = does the price lean the same way as the "
+        "model (✅ yes · ⚠️ the price says the other side · ➖ about even). Tick rows to log them."))
     LU.panel(LU.picked(show, sel), f"ps_log_{sport}", day, tag=f"{sport.lower()}-props")

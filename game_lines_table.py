@@ -21,8 +21,9 @@ import pandas as pd
 import streamlit as st
 
 TICKS = ["✓ Money", "✓ Pick", "✓ Winner"]
+BLOW, AGREE = "Blowout risk", "Model & market agree?"
 ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result",
-         "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
+         "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value", BLOW, AGREE,
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Spread", "Total", "Model",
          "Spread move", "Weather", "League"]
 # Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
@@ -51,6 +52,10 @@ LEGEND = "\n".join("- " + x for x in [
     "long-run backtest. 52.4% breaks even at −110.",
     "**Model** = our projection; **Market** = the sportsbooks' line. **Market spread / Market total** — the books' lines; **Model** — the model's own score.",
     "**Game** is listed **Away @ Home**.",
+    "**Blowout risk** — the chance the game is decided by 15+ points (basketball), 14+ (football) or 3+ goals "
+    "(hockey), from the market's spread: 🟥 60%+ · 🟨 35–60% · 🟩 under 35%.",
+    "**Model & market agree?** — ✅ same winner and close (2 points; hockey: win chances within 4) · 🟨 same winner, "
+    "further apart · ⚠️ the model has the other team. It has meant something only in college basketball so far.",
     "Stakes: a flat 1u per 💰 pick until the edge is proven, scaled so a day's 💰 picks total 5u at most.",
 ])
 
@@ -117,13 +122,25 @@ def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
     return out
 
 
+def extras(r: Dict) -> Dict:
+    """Nov 24 (owner: every table like the NCAAMB Game Lab's): the game's blowout risk and whether the model and the
+    market agree -- the same two columns the Game Lab tables carry, from the board row's full game record."""
+    import game_previews as GP
+    p = r.get("_full") or {}
+    lg = r.get("league") or r.get("sport") or ""
+    try:
+        return {BLOW: GP.blowout(lg, p) if p else "—", AGREE: GP.agreement(p, lg) if p else "—"}
+    except Exception:                                           # noqa: BLE001
+        return {BLOW: "—", AGREE: "—"}
+
+
 def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.DataFrame:
     """The board as a table, columns in ORDER; empty columns dropped."""
     import pick_records as PR
     import todays_best as TB
     df = pd.DataFrame([{
         "Time": r.get("time") or "", "Sport": r.get("sport"), "Game": r.get("game"),
-        "Final": r.get("final") or "—",
+        "Final": r.get("final") or "—", **extras(r),
         "Money result": TB.RESULT_ICON.get(r.get("money_result"), "—"),
         "Pick result": TB.RESULT_ICON.get(r.get("best_result"), "—"),
         "Winner result": TB.RESULT_ICON.get(r.get("winner_result"), "—"),
