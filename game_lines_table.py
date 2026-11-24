@@ -195,6 +195,45 @@ def bet(r: Dict) -> str:
     return GP.game_bet(lg, False, False, ag)
 
 
+def started(r: Dict, now=None) -> bool:
+    """Nov 24 (owner: started or finished games in their own section / a box to filter them out): the game has
+    tipped (its kickoff is past) or has a final."""
+    if r.get("final"):
+        return True
+    import sports
+    from datetime import datetime, timezone
+    k = sports.game_dt((r.get("_rec") or {}).get("kickoff") or (r.get("_full") or {}).get("kickoff"))
+    if k is None:
+        return False
+    return k <= (now or datetime.now(timezone.utc))
+
+
+def started_section(rows: Sequence[Dict], key: str, past: bool = False):
+    """The 'Hide games that have started' switch (on by default today) -> (rows to list, rows set aside). The set-aside
+    games are listed read-only in their own fold-out by `show_started`."""
+    if past or not rows:
+        return list(rows or []), []
+    gone = [r for r in rows if started(r)]
+    if not gone:
+        return list(rows), []
+    hide = st.toggle(f"Hide games that have started ({len(gone)})", value=True, key=f"{key}_hide_started",
+                     help="Games in progress or final move to their own list below the board. Untick to keep them in "
+                          "the board.")
+    return ([r for r in rows if not started(r)], gone) if hide else (list(rows), [])
+
+
+def show_started(gone: Sequence[Dict], label: str = "") -> None:
+    """The started / finished games, read-only, under the board."""
+    if not gone:
+        return
+    with st.expander(f"⏱️ Started or finished ({len(gone)}){label}", expanded=False):
+        st.dataframe(pd.DataFrame([{"League": league_of(r), "Time": r.get("time") or "", "Game": r.get("game"),
+                                    "Bet?": bet(r), "Line pick": r.get("best") or "—",
+                                    "Score": r.get("final") or "in progress"} for r in gone]),
+                     hide_index=True, width="stretch")
+        st.caption("Their bets are closed. Results are graded on the board's past-days view and in the records.")
+
+
 def league_of(r: Dict) -> str:
     """Nov 24 (owner: every table like NCAAMB's): the League column -- the sport's own key (NCAAMB, NBA, NHL...), or the
     league's name where one sport holds many (international hoops: EuroLeague; soccer: Premier League). A college
@@ -267,6 +306,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
         rows = [r for r in rows if r.get("money")]
     elif show.startswith("🔒"):
         rows = [r for r in rows if r.get("lock")]
+    rows, _gone = started_section(rows, key, past)              # Nov 24 (owner): started games set aside
     import game_previews as _GPf
     _bk = _GPf.bet_filter(f"{key}_bet")                         # Nov 24 (owner): 🃏 / 🧪 / Info only filter buttons
     rows = [r for r in rows if any(bet(r).startswith(k) for k in _bk)]
@@ -309,6 +349,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                                                     "Money score": st.column_config.NumberColumn(format="percent",
                                                                                                  help=MONEY_HELP)})))
     LU.panel(line_items(rows, ticks), f"{key}_log", date_str, past=past)
+    show_started(_gone)
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)
