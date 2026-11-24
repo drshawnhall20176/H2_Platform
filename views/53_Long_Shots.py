@@ -55,6 +55,15 @@ WARN = {
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def _lead(r):
+    """Nov 24 (owner: every table like NCAAMB's): League and Bet? lead every long-shot table. 🃏 Bet = a market whose
+    long-shot value lines have made money in testing (BEST); everything else is Info only."""
+    mk = r.get("Market") or ""
+    if not mk and r.get("Bet"):
+        mk = next((m for m in BEST if m in str(r.get("Bet"))), "")
+    return {"League": SPORT, "Bet?": "🃏 Bet" if mk in BEST else "Info only"}
+
+
 def _past_night(sport_key, day_s):
     import model_store as MS
     import postgame as PG
@@ -144,7 +153,7 @@ def _look_back():
             "Main line", "Game"]
     if not any(r["Price"] for r in show):
         cols = [c for c in cols if c not in ("Price", "EV per $1")]
-    st.dataframe(pd.DataFrame([{c: r[c] for c in cols} for r in show]), hide_index=True, width="stretch",
+    st.dataframe(pd.DataFrame([{**_lead(r), **{c: r[c] for c in cols}} for r in show]), hide_index=True, width="stretch",
                  column_config={"Honest chance": st.column_config.NumberColumn(format="percent"),
                                 "Fair price": st.column_config.NumberColumn(format="%+d", help=(
                                     "The price that would be a fair bet at the honest chance — a book paying more "
@@ -213,7 +222,7 @@ if _cards:
     _all = _LSS.all_rows(_saved)
     with st.expander(f"All {len(_all)} value long shots from today's scan"
                      + (f" ({_saved.get('games', 0)} games)" if _saved.get("games") else "")):
-        st.dataframe(pd.DataFrame(_all), hide_index=True, width="stretch", column_config={
+        st.dataframe(pd.DataFrame([{**_lead(r), **r} for r in _all]), hide_index=True, width="stretch", column_config={
             "Price": st.column_config.NumberColumn(format="%+d"),
             "Honest chance": st.column_config.NumberColumn(format="percent"),
             "Book says": st.column_config.NumberColumn(format="percent"),
@@ -303,8 +312,8 @@ only = st.multiselect("Markets", mkts, default=[m for m in mkts if m in BEST] or
 rows = [r for r in rows if r["Market"] in only] if only else rows
 value = [r for r in rows if r["EV per $1"] > 0]
 show = value or rows[:15]
-df = pd.DataFrame([{k: r[k] for k in ("Player", "Bet", "Price", "Book says", "Honest chance", "Model raw", "Edge",
-                                       "EV per $1", "Projection", "Main line", "Flags")} for r in show])
+df = pd.DataFrame([{**_lead(r), **{k: r[k] for k in ("Player", "Bet", "Price", "Book says", "Honest chance", "Model raw", "Edge",
+                                       "EV per $1", "Projection", "Main line", "Flags")}} for r in show])
 sel = LU.selectable(df, "ls_sel", hide_index=True, width="stretch", column_config={
     "Price": st.column_config.NumberColumn(format="%+d"),
     "Book says": st.column_config.NumberColumn(format="percent"),

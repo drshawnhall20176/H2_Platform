@@ -263,7 +263,7 @@ if True:
                                                    + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""),
                                                    r) == _SHOWBET[_show]]
     if _rows:
-        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "",
+        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Game": r.get("game"),
                               "Bet?": _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
                                                     + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r),
                               "Pick": r["pick"],
@@ -274,7 +274,7 @@ if True:
                               "Price": ("—" if r.get("price") is None else f"{float(r['price']):+.0f}"),
                               "Needs": ("" if r.get("need") is None else f"{float(r['need']):+.0f} or better"),
                               "Market": " ".join(x for x in (r.get("move") or "", f"({r['move_why']})" if r.get("move_why") else "") if x),
-                              "Game": r.get("game"), "Weather": _wx(r.get("sport"), r.get("game")),
+                              "Weather": _wx(r.get("sport"), r.get("game")),
                               "Where": r.get("page"),
                               "Tested": "no backtest" if r.get("untested") else "",
                               "Result": _TB.RESULT_ICON.get(r.get("result"), "—")} for r in _rows[:_cap]])
@@ -354,6 +354,10 @@ if True:
 
         for _k, _v in _ls_sets:
             _top = [r for r in _v["top"] if _keep(r)]
+            if _show == "🧪 Tracking":
+                _top = []
+            elif _show == "Info only":
+                _top = [r for r in _top if not r.get("tested")]
             if not _top:
                 continue
             if _past:                                           # Nov 19: how each went, from that night's box scores
@@ -371,10 +375,13 @@ if True:
             st.markdown(f"**{_k}** · {len(_v.get('rows') or [])} value long shots across {_v.get('games', 0)} games"
                         + (f" · prices as of {_at}" if _at else "")
                         + (" · rebuilt from that night's saved reads and alternate prices" if _v.get("rebuilt") else ""))
-            _ldf = _pd.DataFrame([{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"),
+            # Nov 24 (owner: "most-probable longshots look different"): the same layout as every table -- League,
+            # Time, Game, Bet? first; the tested market is 🃏 Bet (it was a ✅, which now means model & market agree)
+            _ldf = _pd.DataFrame([{"League": _k, "Time": r.get("time") or "", "Game": r.get("game") or "",
+                                   "Bet?": "🃏 Bet" if r.get("tested") else "Info only", "Pick": r.get("pick"),
                                    "Price": r.get("Price"), "Honest chance": r.get("Honest chance"),
                                    "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
-                                   "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or ""),
+                                   "Market": str(r.get("Market") or ""),
                                    **({"Actual": r.get("Actual"), "Result": r.get("Hit") or "—"} if _past else {})}
                                   for r in _top])
             _ls_items += _LU.picked(_top, _LU.selectable(_ldf, f"home_ls_{_k}", hide_index=True, width="stretch",
@@ -388,7 +395,7 @@ if True:
                 "The most likely long shots (priced +400 or longer) that are still worth their price at the honest "
                 "chance, one per player, from the Long Shots finder — only where the model and the book roughly agree "
                 "on the player's normal night (projection within 25% of the book's main line), so these are tail "
-                "outcomes, not bets that the book has the player wrong. ✅ = the one market whose long-shot value lines have "
+                "outcomes, not bets that the book has the player wrong. 🃏 Bet = the one market whose long-shot value lines have "
                 "made money in testing (NBA Assists, NFL Rush Yards, college football Rush and Receiving Yards); the rest "
                 "lost 19–32% overall (NHL: 11–25%). Most of these lose "
                 "— keep stakes flat at a few dollars and never put two of the same player in one parlay."))
@@ -422,8 +429,9 @@ if True:
                 _at = ""
             st.markdown(f"**{_lab_names.get(_k, _k)}** · {_v['n']} value {_v['kind']} · untested, tracking"
                         + (f" · prices as of {_at}" if _at else ""))
-            _labdf = _pd.DataFrame([{"Time": r.get("time") or "", "League": r.get("league") or "",
-                                     "Game": r.get("game") or "", "Pick": r.get("pick"), "Price": r.get("Price"),
+            _labdf = _pd.DataFrame([{"League": r.get("league") or _lab_names.get(_k, _k), "Time": r.get("time") or "",
+                                     "Game": r.get("game") or "", "Bet?": "Info only", "Pick": r.get("pick"),
+                                     "Price": r.get("Price"),
                                      "Model chance": r.get("chance"), "EV per $1": r.get("EV per $1"),
                                      "Book": r.get("book") or ""} for r in _top])
             _lab_items += _LU.picked(_top, _LU.selectable(_labdf, f"home_labls_{_k}", hide_index=True, width="stretch",
@@ -536,7 +544,7 @@ if True:
                                                   if r.get("money") and _PE_H.stake_units(r.get("money_chance"),
                                                                                          r.get("money_price")) else ""))
                                               if r.get("money_pick") else "—"),
-                               "League": r["league"],
+                               "League": _GLT0.league_of(r),
                                "Final": r.get("final") or "—",
                                "Pick result": _TB.RESULT_ICON.get(r.get("best_result"), "—"),
                                "Winner result": _TB.RESULT_ICON.get(r.get("winner_result"), "—"),
@@ -545,7 +553,7 @@ if True:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result", "Money result"])
         if not _wdf.empty and not _wdf["Spread move"].any():
             _wdf = _wdf.drop(columns=["Spread move"])
-        if not _multi and not _wdf.empty and "League" in _wdf:   # League leads; Sport only when it adds something
+        if not _wdf.empty and "League" in _wdf:                 # Nov 24: League (first) names the sport
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
             _wdf = _wdf.drop(columns=["Weather"])

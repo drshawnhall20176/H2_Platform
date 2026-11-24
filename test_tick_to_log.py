@@ -112,7 +112,7 @@ def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
     assert today.index("✓ Money") > today.index("Pick") and today.index("✓ Winner") > today.index("✓ Money")
     assert "Final" not in today and "Sport" not in today
     past = list(GLT.frame(rows, past=True, show_sport=True).columns)
-    assert past[:9] == ["League", "Time", "Sport", "Game", "Bet?", "Model & market agree?", "Blowout risk",
+    assert past[:8] == ["League", "Time", "Game", "Bet?", "Model & market agree?", "Blowout risk",
                          "Close gap (pts)", "Final"]
 
 
