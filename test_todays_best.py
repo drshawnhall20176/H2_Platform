@@ -196,7 +196,7 @@ def test_log_selection_singles_parlay_and_dedupe(monkeypatch):
     done = TB.log_selection(items, "Both", 4, 3, TB.parlay_odds([-112, -104, -105]), True, "platform-test", "2026-11-07")
     assert done["skipped"] == 1 and len(done["singles"]) == 2 and done["ticket"] == 99
     gl = [a for a in added if a["market"] == "Total"][0]
-    assert gl["notes"] == "platform-test,gl:NCAAMB:g1" and gl["side"] == "Under" and gl["line"] == 154.5
+    assert gl["notes"] == "platform-test,lean,gl:NCAAMB:g1" and gl["side"] == "Under" and gl["line"] == 154.5
     name, legs, odds, stake = tickets[0]
     assert len(legs) == 3 and stake == 3 and 590 < odds < 640
 

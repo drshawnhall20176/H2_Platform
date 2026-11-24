@@ -425,7 +425,8 @@ try:                                                            # Nov 24: with t
             return "no settled bets"
         return (f"{d['wins']}-{d['losses']}, ${d['profit']:+,.2f}"
                 + (f" ({d['roi']:+.1f}% ROI)" if d["roi"] is not None else ""))
-    st.caption(f"🧭 **With the model** (its chance 50%+ on your side, or ticked from a model board): {_ln(_ms['with'])} · "
+    st.caption(f"🧭 **With the model** (🃏 Bet and 🧪 Tracking picks): {_ln(_ms['with'])} · "
+               f"**Info-only leans** (ticked from a board without a tested tag): {_ln(_ms['lean'])} · "
                f"**Your own calls** (no model chance, or the model leaned the other way): {_ln(_ms['own'])}. "
                "Sticking with the model means the first group, not every lean — only 💰 / 🎯 tags have passed testing.")
 except Exception:                                               # noqa: BLE001
