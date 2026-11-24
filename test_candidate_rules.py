@@ -53,6 +53,27 @@ def test_the_agreement_column():
     assert GP.agreement({"home": "H"}) == "—"
 
 
+def _prop(pm, pmod, actual, line=4.5, book="draftkings", under=-110):
+    return {"p_market": pm, "p_model": pmod, "actual": actual, "line": line, "book": book, "over_price": -110,
+            "under_price": under}
+
+
+def test_prop_rules_take_only_model_unders_with_the_right_agreement():
+    assert CR.prop_qualifies("nfl_under_vs_fav", _prop(0.55, 0.45, 3))          # market favors Over, model Under
+    assert not CR.prop_qualifies("nfl_under_vs_fav", _prop(0.45, 0.40, 3))      # both favor Under: "same"
+    assert CR.prop_qualifies("ncaaf_under_same", _prop(0.45, 0.40, 3))
+    assert not CR.prop_qualifies("ncaaf_under_same", _prop(0.45, 0.50, 3))      # model on the Over
+    assert not CR.prop_qualifies("ncaaf_under_same", _prop(0.45, 0.40, 3, book="underdog"))   # pick'em line
+
+
+def test_prop_forward_record_and_status(store):
+    graded = {"2026-11-23": [_prop(0.55, 0.45, 2)],                               # before the rule starts
+              "2026-11-29": [_prop(0.55, 0.45, 2), _prop(0.55, 0.45, 7), _prop(0.45, 0.40, 2)]}
+    rec = CR.refresh_props("2026-12-01", grade_for={r: (lambda: graded) for r in CR.PROP_RULES})
+    assert rec["nfl_under_vs_fav"] == {"n": 2, "hits": 1, "units": round(100 / 110 - 1, 2), "through": "2026-11-30"}
+    line = CR.prop_status_line("NFL")
+    assert "1–1" in line and "Not a bet yet" in line and "NFL player-prop Unders" in line
+    assert CR.prop_status_line("NBA") == ""
 def test_hockey_agreement_compares_win_chances_not_the_puck_line():
     g = {"home": "NJ", "away": "CBJ", "home_spread": -1.5, "model_margin": 1.1}
     assert GP.agreement(dict(g, model_p=0.683, fair_home=0.646), "NHL") == "✅ Agree"
