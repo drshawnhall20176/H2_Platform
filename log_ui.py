@@ -199,10 +199,11 @@ def panel(items: Sequence[Dict], key: str, date_str: str, tag: str = "platform-t
         import coach as CO
         chk = CO.ticket_check(its, mode, stake, pstake, podds if mode != "Singles" else None, B.list_bets(), date_str,
                               tag_records_for=_tag_records)
-        box = {"A": st.success, "B": st.success, "C": st.warning, "D": st.warning, "F": st.error}[chk["grade"]]
+        box = {"T": st.info, "A": st.success, "B": st.success, "C": st.warning, "D": st.warning,
+               "F": st.error}[chk["grade"]]
         import components as C
         box(C.money_md(f"**Coach grade: {chk['grade']}** — {chk['headline']}"))
-        icon = {"red": "🔴", "amber": "🟠", "ok": "✅"}
+        icon = {"red": "🔴", "amber": "🟠", "ok": "✅", "test": "🧪"}
         for lv, msg in chk["flags"]:
             st.markdown(C.money_md(f"{icon[lv]} {msg}"))
         t = chk["today"]

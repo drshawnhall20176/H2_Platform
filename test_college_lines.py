@@ -56,3 +56,18 @@ def test_soccer_today_rows_flag_tracking_and_label_reads():
                       flags=[{"time": "3:00 PM", "game": "X vs Y", "pick": "Over 2.5 goals", "market": "Total",
                               "price": 105, "chance": 0.52, "ev": 0.03, "league": "EPL"}])
     assert [r["Bet?"] for r in rows] == ["🧪 Tracking", "Info only"]
+
+
+def test_close_gap_line_picks_log_as_test_legs_and_the_coach_grades_a_test_ticket():
+    import coach as CO
+    import game_lines_table as GLT
+    r = {"league": "NCAAMB", "bet_market": "Spread", "best": "Belmont +2.5", "bet_price": -110,
+         "_full": {"home": "Akron", "away": "Belmont", "home_spread": -2.5, "model_margin": 0.8}}
+    assert GLT.is_tracking(r) and not GLT.is_tracking(dict(r, _full=dict(r["_full"], model_margin=8.0)))
+    (it,) = GLT.line_items([r], [(0, "✓ Pick")])
+    assert it["tracking"] and it["grade"].startswith("🧪 Tracking")
+    chk = CO.ticket_check([dict(it, sport="NCAAMB", price=-110)], "Singles", 2.7, 0, None, [], "2026-11-24",
+                          lim={"max_legs": 4, "max_parlay_stake": 10, "stop_loss": 50, "daily_budget": 100,
+                               "max_parlays": 2})
+    assert chk["grade"] == "T" and chk["headline"].startswith("🧪 Test ticket")
+    assert any(lv == "test" for lv, _ in chk["flags"]) and not any(lv == "red" for lv, _ in chk["flags"])

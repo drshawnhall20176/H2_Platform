@@ -533,7 +533,7 @@ if True:
             st.caption("☑️ Tick **Line pick**, **Winner pick** or **Money pick** on any row to log that bet — each box "
                        "sits right before the bet it logs.")
             _ticks_l = _GLT.back(_LU.tick_grid(
-                _GLT.display(_wdf), [_GLT.DISPLAY[t] for t in ("✓ Pick", "✓ Winner", "✓ Money")], "home_win_ticks",
+                _GLT.display(_wdf), [_GLT.DISPLAY[t] for t in ("✓ Pick", "✓ Money", "✓ Winner")], "home_win_ticks",
                 hide_index=True, width="stretch", tick_help=_GLT.TICK_HELP,
                          column_config=_GLT.config({"Chance": st.column_config.NumberColumn(format="percent"),
                                         "Value": st.column_config.NumberColumn(format="percent"),
