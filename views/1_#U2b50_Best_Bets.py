@@ -340,6 +340,29 @@ view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 view.sort(key=lambda p: p["ModelProb"], reverse=True)
 view = C.by_kickoff(view, lambda p: p.get("GameTime") or p.get("Time"))   # Nov 11: game time first, then chance
 
+# Nov 24 (owner: "the ability to click into a player ... to see things"; "point me to a player card"): one prop on
+# one screen, in H2's look -- any player on tonight's board (every prop in the chosen markets, not only the playable
+# ones the table lists), so it's there even when the filters leave the table empty
+if _props_model:
+    _pool = C.by_kickoff([p for p in slot_plays if p["Market"] in mkt_pick],
+                         lambda p: p.get("GameTime") or p.get("Time"))
+    if _pool:
+        _pc = st.selectbox(f"🔎 Open a player card ({len(_pool)} props on tonight's board)", [None] + list(range(len(_pool))),
+                           key=f"bb_pc_{_active.key}",
+                           format_func=lambda i: "Pick a player…" if i is None else
+                           f"{_pool[i].get('Player')} — {_pool[i].get('Side')} "
+                           f"{_pool[i].get('Line') if _pool[i].get('Line') is not None else ''} {_pool[i].get('Market')}"
+                           f" ({_pool[i].get('Time') or ''})",
+                           help="His recent games against tonight's line, the projection, the chances and the read.")
+        if _pc is not None:
+            try:
+                import player_card as _PCD
+                import game_previews as _GPpc
+                _pp = _pool[_pc]
+                with st.container(border=True):
+                    _PCD.render(_pp, _active.key, bet=_GPpc.prop_bet(_active.key, str(_pp.get("Use") or ""), _pp))
+            except Exception as _exc:                           # noqa: BLE001
+                st.caption(f"(Player card unavailable: {type(_exc).__name__})")
 if not view:
     if _active.key in ("NCAAMB", "NCAAF"):
         st.info("No player props pass the filters — normal for college: the sportsbooks price props on only a few "
@@ -498,21 +521,6 @@ st.dataframe(df.style.format({"Model %": "{:.0%}", "Earned %": "{:.0%}", "Convic
                               "Money score": "{:+.1%}"}, na_rep="—")
              .theme_gradient(cmap="Greens", subset=["Model %"]),
              width="stretch", hide_index=True, height=400)
-# Nov 24 (owner: "the ability to click into a player ... to see things"): one prop on one screen, in H2's look
-if _props_model:
-    _pc_opts = list(range(len(view)))
-    _pc = st.selectbox("🔎 Open a player card", [None] + _pc_opts, key=f"bb_pc_{_active.key}",
-                       format_func=lambda i: "Pick a player…" if i is None else
-                       f"{view[i].get('Player')} — {view[i].get('Side')} {view[i].get('Line') if view[i].get('Line') is not None else ''} "
-                       f"{view[i].get('Market')} ({view[i].get('Time') or ''})",
-                       help="His recent games against tonight's line, the projection, the chances and the read.")
-    if _pc is not None:
-        try:
-            import player_card as _PCD
-            with st.container(border=True):
-                _PCD.render(view[_pc], _active.key, bet=view[_pc].get("_bet", ""))
-        except Exception as _exc:                               # noqa: BLE001
-            st.caption(f"(Player card unavailable: {type(_exc).__name__})")
 if "Blowout risk" in df.columns or "Model & market agree?" in df.columns:
     st.caption("**Blowout risk**: the game's chance of a lopsided finish (🟩 low · 🟨 medium · 🟥 high) — starters can "
                "sit late, which hurts Overs and helps Unders. **Model & market agree?**: whether the book's price leans "
