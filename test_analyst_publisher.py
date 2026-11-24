@@ -73,7 +73,8 @@ def env(monkeypatch, tmp_path):
             "fetch_offers": fetch_offers,
             "game_env": lambda *a: ({}, ""), "matchups": lambda *a: ({}, ""),
             "history_fn": lambda *a: [],
-            "results": lambda sport, d: state["results"]}
+            "results": lambda sport, d: state["results"],
+            "lines_recap": lambda *a, **k: state.get("lines", "")}
     state["deps"] = deps
     return state
 
@@ -423,3 +424,12 @@ def test_basketball_and_hockey_get_windows_from_nov_23():
     assert PUB.game_slot("NBA", "2026-11-24T00:00:00Z") == "afternoon"      # 7:00 PM
     assert PUB.game_slot("NHL", "2026-11-24T03:00:00Z") == "night"          # 10:00 PM
     assert not PUB.slotted("MLB", "2026-11-23")
+
+
+def test_yesterdays_game_lines_recap_posts_once_a_day(env):
+    """Nov 24 (owner: the Desk reports had no game-line results; college basketball is mostly game lines)."""
+    env["lines"] = "📏 **H2 Sports — game lines recap · NBA, x**"
+    r, send = go(env)
+    assert r["lines_recap"] == "posted" and any("game lines recap" in t for t in send.sent)
+    r2, send2 = go(env)
+    assert r2["lines_recap"] == "already posted" and not any("game lines recap" in t for t in send2.sent)

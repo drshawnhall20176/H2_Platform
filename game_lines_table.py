@@ -24,7 +24,7 @@ TICKS = ["✓ Money", "✓ Pick", "✓ Winner"]
 BLOW, AGREE = "Blowout risk", "Model & market agree?"
 ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result",
          "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value", BLOW, AGREE,
-         "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Spread", "Total", "Model",
+         "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
          "Spread move", "Weather", "League"]
 # Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
 # internal names; display() renames for the screen and back() maps a ticked column back.
@@ -56,6 +56,8 @@ LEGEND = "\n".join("- " + x for x in [
     "(hockey), from the market's spread: 🟥 60%+ · 🟨 35–60% · 🟩 under 35%.",
     "**Model & market agree?** — ✅ same winner and close (2 points; hockey: win chances within 4) · 🟨 same winner, "
     "further apart · ⚠️ the model has the other team. It has meant something only in college basketball so far.",
+    "**Last meetings** — how the two teams' games against each other went over the last year. Context only: past "
+    "meetings tested as adding nothing to the chances (Nov 24).",
     "Stakes: a flat 1u per 💰 pick until the edge is proven, scaled so a day's 💰 picks total 5u at most.",
 ])
 

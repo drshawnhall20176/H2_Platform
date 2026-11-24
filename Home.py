@@ -512,7 +512,7 @@ if True:
         _ORDER = ["Time", "Sport", "Game", "Final", "Money result", "Pick result", "Winner result",
                   "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
                   "Blowout risk", "Model & market agree?",
-                  "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Spread", "Total", "Model",
+                  "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
                   "Spread move", "Weather", "League"]
         if not _wdf.empty:
             _wdf = _wdf[[c for c in _ORDER if c in _wdf.columns] + [c for c in _wdf.columns if c not in _ORDER]]
