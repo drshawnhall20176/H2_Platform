@@ -300,6 +300,12 @@ if True:
                                         "pick with the same Use tag (e.g. all NBA 'No edge' reads), not this player. "
                                         "The ± is the likely range. 💰 rows show the 💰 Money picks' own record "
                                         "(from the weekly money review) instead."))}))
+        try:                                                    # Nov 24 (owner): a player card for any pick here
+            import player_card as _PCH
+            _PCH.picker([r for r in _rows[:_cap] if r.get("kind") == "Prop"], lambda r: r.get("sport"),
+                        "home_best_card")
+        except Exception:                                       # noqa: BLE001
+            pass
         _fades = sorted({f"{r['sport']} {_PR._strip(r.get('use'))}" for r in _rows if r.get("verdict") == "fade"})
         if _fades:
             st.warning("**Consider the fade:** " + ", ".join(_fades) + " — the other side of these has been winning "
@@ -352,7 +358,7 @@ if True:
             st.caption("No long shots saved for this day (the scan's alternate prices weren't kept)." if _past else
                        "No long-shot scan yet for today — it runs a few times a day once the books post alternate "
                        "lines (and on the Long Shots page).")
-        _ls_items = []
+        _ls_items, _ls_all = [], []
         @st.cache_data(ttl=1800, show_spinner=False)
         def _ls_graded(k, day, rows):
             return _LSS.grade_saved(list(rows), k, day)
@@ -389,12 +395,18 @@ if True:
                                    "Market": str(r.get("Market") or ""),
                                    **({"Actual": r.get("Actual"), "Result": r.get("Hit") or "—"} if _past else {})}
                                   for r in _top])
+            _ls_all += [dict(r, sport=_k) for r in _top]
             _ls_items += _LU.picked(_top, _LU.selectable(_ldf, f"home_ls_{_k}", hide_index=True, width="stretch",
                                     column_config={"Price": st.column_config.NumberColumn(format="%+d"),
                                                    "Honest chance": st.column_config.NumberColumn(format="percent"),
                                                    "Book says": st.column_config.NumberColumn(format="percent"),
                                                    "EV per $1": st.column_config.NumberColumn(format="%+.2f")}))
         if _ls_sets:
+            try:                                                # Nov 24 (owner): a player card for any long shot
+                import player_card as _PCL
+                _PCL.picker(_ls_all, lambda r: r.get("sport"), "home_ls_card")
+            except Exception:                                   # noqa: BLE001
+                pass
             _LU.panel(_ls_items, "home_ls_log", _today, tag="long-shot", past=_past)
             st.caption(C.money_md(
                 "The most likely long shots (priced +400 or longer) that are still worth their price at the honest "

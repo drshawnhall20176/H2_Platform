@@ -86,6 +86,42 @@ def _pct(x) -> str:
         return "—"
 
 
+def from_row(r: Dict) -> Dict:
+    """Nov 24: a saved pick row (Today's best, the college props section, a long shot) in the board-play shape the
+    card reads. Board plays pass through unchanged."""
+    if r.get("Player") and "Side" in r:
+        return r
+    use = ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "") + str(r.get("use") or "")
+    return {"Player": r.get("player") or r.get("Player"), "PlayerId": r.get("pid"), "Team": r.get("team") or r.get("Team"),
+            "Opp": None, "Time": r.get("time"), "Side": r.get("side"), "Line": r.get("line"),
+            "Market": r.get("market") or r.get("Market"), "RealPrice": r.get("price"),
+            "Projection": r.get("projection") if r.get("projection") is not None else r.get("Projection"),
+            "ModelProb": r.get("raw_chance") if r.get("raw_chance") is not None else r.get("chance"),
+            "_earned": r.get("earned"), "_values": r.get("values") or [], "Why": r.get("why"),
+            "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game")}
+
+
+def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> None:
+    """A 'pick a player' box over a list of rows; the chosen one opens as a card right under it."""
+    import streamlit as st
+    rows = [r for r in rows or [] if (r.get("Player") or r.get("player"))]
+    if not rows:
+        return
+    def _name(i):
+        c = from_row(rows[i])
+        ln = c.get("Line")
+        return (f"{c.get('Player')} — {c.get('Side') or ''} {'' if ln is None else f'{ln:g}'} {c.get('Market') or ''}"
+                f" ({c.get('Time') or ''})")
+    i = st.selectbox(f"{label} ({len(rows)})", [None] + list(range(len(rows))), key=key,
+                     format_func=lambda i: "Pick a player…" if i is None else _name(i))
+    if i is None:
+        return
+    import game_previews as GP
+    c, sp = from_row(rows[i]), sport_of(rows[i])
+    with st.container(border=True):
+        render(c, sp, bet=GP.prop_bet(sp, str(c.get("Use") or ""), c))
+
+
 def render(p: Dict, sport: str, bet: str = "") -> None:
     """One board play (Best Bets' row) as a card."""
     import streamlit as st

@@ -120,4 +120,9 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
         "Coach = My Coach's verdict at that price — 🟢 Good bet, 🟡 Maybe, 🔴 Skip. Blowout risk = the game's chance of "
         "a lopsided finish (starters may sit late). Model & market agree? = does the price lean the same way as the "
         "model (✅ yes · ⚠️ the price says the other side · ➖ about even). Tick rows to log them."))
+    try:                                                        # Nov 24 (owner): a player card for any prop here
+        import player_card as PCD
+        PCD.picker(show, lambda r: sport, f"ps_card_{sport}")
+    except Exception:                                           # noqa: BLE001
+        pass
     LU.panel(LU.picked(show, sel), f"ps_log_{sport}", day, tag=f"{sport.lower()}-props")
