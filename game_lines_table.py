@@ -180,6 +180,14 @@ def bet(r: Dict) -> str:
         parts.append("Line pick")
     if parts:
         return f"{GP.BET_YES}: " + " + ".join(parts)
+    import pick_records as PR
+    if r.get("lean_verdict") in PR.HIDE and not r.get("best_tested"):
+        try:                                                    # a 🧪 close-gap game is still Tracking
+            ag = GP.agreement(r.get("_full") or {}, lg) if r.get("_full") else ""
+        except Exception:                                       # noqa: BLE001
+            ag = ""
+        if GP.game_bet(lg, False, False, ag) == GP.BET_INFO:
+            return f"{GP.BET_INFO} · ⚠️ losing lean type"
     try:
         ag = GP.agreement(r.get("_full") or {}, lg) if r.get("_full") else ""
     except Exception:                                           # noqa: BLE001
