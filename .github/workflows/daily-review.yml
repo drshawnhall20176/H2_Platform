@@ -87,6 +87,11 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python candidate_rules.py props || true
+      - name: Last meetings for today's games (h2h.py, Nov 24)
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: timeout 900 python h2h.py refresh || true
       - name: Grade the picks as shown (pick_ledger.py, Nov 21)
         if: always()
         env:
