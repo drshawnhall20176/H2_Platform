@@ -21,7 +21,9 @@ def test_home_lists_only_selectable_sports_and_labs_open_their_pages():
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=60)
     at.run()
-    labels = [b.label for b in at.button]
+    # Nov 24: the sports are one multi-select chip row (Select Sport), labelled by their full names
+    picker = at.button_group(key="desk_sports")
+    labels = [str(o) for o in picker.options]
     assert any("Tennis" in x for x in labels) and any("International Hoops" in x for x in labels)
     assert not any("coming soon" in x for x in labels)
     for key in [k for k in S.SEASON_WINDOWS if not S.in_season(k)]:

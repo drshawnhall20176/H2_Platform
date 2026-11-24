@@ -50,8 +50,9 @@ def test_home_panel_renders(monkeypatch):
     at.session_state["sport"] = "NHL"
     at.run()
     assert not at.dataframe or "A Points Under 20.5" not in at.dataframe[0].value.to_string()
-    at.button_group(key="home_best_sports").set_value(["NHL", "NBA"]).run()      # Nov 24: pick several sports
+    at.button_group(key="desk_sports").set_value(["NHL", "NBA"]).run()           # Nov 24: one picker, several sports
     assert "A Points Under 20.5" in at.dataframe[0].value.to_string()
+    assert at.session_state["sport"] == "NBA"                   # the sport clicked last runs the sidebar
 
 
 def test_warm_slates_builds_in_season_boards(monkeypatch):
