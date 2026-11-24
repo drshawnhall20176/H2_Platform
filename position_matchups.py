@@ -504,7 +504,7 @@ def player_form(pgames: Iterable[Dict], pid, sport: str, n: int = RECENT_N, opp:
     if not mine:
         return None
     vals = [metric_value(sport, p.get("stats") or {}) for p in mine]
-    out = {"avg": sum(vals) / len(vals), "games": len(vals)}
+    out = {"avg": sum(vals) / len(vals), "games": len(vals), "vals": list(vals)}   # Nov 24: newest first, for the card
     if FAMILY_BY_SPORT.get(sport) == "basketball":      # the parts of PRA, so nobody reads 16.5 PRA as 16.5 points
         out["split"] = {k: sum(_num((p.get("stats") or {}).get(k)) for p in mine) / len(mine) for k in ("pts", "reb", "ast")}
     return out
