@@ -620,3 +620,13 @@ def test_fix_fields_returns_only_what_changed_and_checks_the_numbers():
     assert B.fix_fields(bet, model_prob="51")[1] and B.fix_fields(bet, entry_odds="-50")[1]
     assert B.fix_fields(bet, line="")[0] == {"line": None}
     assert "#7" in B.bet_label(bet) and "Tortona" in B.bet_label(bet)
+
+
+def test_model_split_separates_bets_the_model_backed_from_own_calls():
+    import betlog as B
+    bets = [{"model_prob": 0.6, "stake": 1.0, "entry_odds": -110, "result": "win", "market": "Spread"},
+            {"model_prob": 0.4, "stake": 1.0, "entry_odds": -110, "result": "loss", "market": "Spread"},
+            {"model_prob": None, "stake": 1.0, "entry_odds": 100, "result": "loss", "market": "Other"}]
+    s = B.model_split(bets)
+    assert (s["with"]["wins"], s["with"]["losses"]) == (1, 0)
+    assert (s["own"]["wins"], s["own"]["losses"]) == (0, 2)
