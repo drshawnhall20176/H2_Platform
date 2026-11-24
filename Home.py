@@ -92,7 +92,7 @@ if True:
     if st.session_state.get("_home_best_for") != current:       # a new sport button: start from that sport alone
         st.session_state["_home_best_for"] = current
         st.session_state["home_best_sports"] = [current]
-    _picked_sports = st.pills("Sports shown", _sport_opts, selection_mode="multi",
+    _picked_sports = _c1.pills("Sports shown", _sport_opts, selection_mode="multi",
                               key="home_best_sports", format_func=lambda k: f"{sports.get(k).icon} {k}",
                               help="Tick any sports — the picks, game lines, blowout watch and long shots below all "
                                    "follow. The sport button above still sets the sidebar's pages.")
@@ -237,8 +237,16 @@ if True:
     if _past and _rows:                                         # Nov 19: looking back -- the split, by chance range
         C.hit_miss_breakdown(_rows, "result", "chance", key="home_best_hm", title="Picks that hit and missed")
         _rows = C.show_filter(_rows, "result", key="home_best_hm_show")
+    import game_previews as _GPp
     if _rows:
-        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "", "Pick": r["pick"],
+        _pbk = _GPp.bet_filter("home_best_bet")                 # Nov 24 (owner): Bet? on every table, with its filter
+        _rows = [r for r in _rows if _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
+                                                   + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r) in _pbk]
+    if _rows:
+        _df = _pd.DataFrame([{"Sport": r["sport"], "Time": r.get("time") or "",
+                              "Bet?": _GPp.prop_bet(r.get("sport"), ("💰 " if r.get("money") else "")
+                                                    + ("🔒 " if r.get("lock") else "") + (r.get("use") or ""), r),
+                              "Pick": r["pick"],
                               "Use": ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "")
                                      + (r.get("use") or ""),
                               "Record (30d)": r.get("record") or "—",
@@ -260,8 +268,7 @@ if True:
             _df = _df.drop(columns=["Market"])
         if not _df["Tested"].any():
             _df = _df.drop(columns=["Tested"])
-        if not _multi:
-            _df = _df.drop(columns=["Sport"])
+        # Nov 24: the Sport column stays -- the tables show it as League, first
         _sel_props = _LU.picked(_rows[:_cap], _LU.selectable(_df, "home_best_sel", hide_index=True, width="stretch",
                      column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                                     "Record (30d)": st.column_config.TextColumn(help=(
@@ -449,8 +456,13 @@ if True:
                                      "covered 55% even at the moved (closing) number, vs 47% when the spread moved "
                                      "against it. Bet these early -- the opening number covered 65%."):
             _ws = _gours
-        if not _lshow:
-            _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE]
+        import game_lines_table as _GLTb
+        import game_previews as _GPb
+        if not _lshow:                                          # a 🧪 Tracking / 🃏 Bet row is never hidden as "losing"
+            _ws = [r for r in _ws if r.get("best_tested") or r.get("lean_verdict") not in _PR.HIDE
+                   or not _GLTb.bet(r).startswith(_GPb.BET_INFO)]
+        _bk = _GPb.bet_filter("home_win_bet")                   # Nov 24 (owner): 🃏 / 🧪 / Info only as filter buttons
+        _ws = [r for r in _ws if any(_GLTb.bet(r).startswith(k) for k in _bk)]
         # Nov 20 (owner): the Show choice filters the game lines too -- 🔒 rows only, 💰 rows only, or everything
         if _show == "💰 Money picks":
             _ws = [r for r in _ws if r.get("money")]
@@ -510,7 +522,7 @@ if True:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result", "Money result"])
         if not _wdf.empty and not _wdf["Spread move"].any():
             _wdf = _wdf.drop(columns=["Spread move"])
-        if not _multi and not _wdf.empty:
+        if not _multi and not _wdf.empty and "League" in _wdf:   # League leads; Sport only when it adds something
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
             _wdf = _wdf.drop(columns=["Weather"])
@@ -657,8 +669,7 @@ if True:
                                "Most likely outcome": r.get("likely") or "—",
                                "What happened": r.get("happened") or "—",
                                "Called it": r.get("likely_result") or "—"} for r in _btop])
-        if not _multi:
-            _bdf = _bdf.drop(columns=["Sport"])
+        # Nov 24: Sport stays and reads as League, first
         if not _past:
             _bdf = _bdf.drop(columns=["What happened", "Called it"])
         st.dataframe(_bdf, hide_index=True, width="stretch",

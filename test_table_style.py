@@ -84,3 +84,16 @@ def test_slate_tables_sort_by_start_time_with_time_and_game_first_and_market_hea
     assert TS.conform(plain)[0].equals(plain)                          # not a slate table: untouched
     keep = pd.DataFrame([{"Book": "draftkings", "Game": "a", "Time": "1:00 PM"}])
     assert "Book" in TS.conform(keep)[0].columns                       # the sportsbook's name column stays
+
+
+def test_league_leads_every_table_and_a_sport_column_reads_as_league():
+    import pandas as pd
+    import table_style as TS
+    f, _ = TS.league_first(pd.DataFrame({"Time": ["7:00 PM"], "Sport": ["NBA"], "Pick": ["x"]}))
+    assert list(f.columns) == ["League", "Time", "Pick"]
+    f, _ = TS.league_first(pd.DataFrame({"Time": ["7:00 PM"], "Sport": ["NBA"], "League": ["NBA"]}))
+    assert list(f.columns) == ["League", "Time"]
+    f, cfg = TS.league_first(pd.DataFrame({"Time": ["7:00 PM"], "Sport": ["NBA"], "League": ["NBA"]}), editable=True)
+    assert list(f.columns) == ["League", "Time", "Sport"] and cfg["Sport"] is None
+    f, _ = TS.league_first(pd.DataFrame({"Time": ["1"], "Sport": ["NBA"]}), editable=True)
+    assert list(f.columns) == ["Time", "Sport"]

@@ -108,6 +108,37 @@ def conform(frame, column_config=None):
     return frame, cfg
 
 
+def league_first(frame, column_config=None, editable: bool = False):
+    """Nov 24 (owner: "All tables should have League as the first column for consistency"). A table with a League
+    column leads with it; one with only a Sport column (a props list, a sport summary) shows it as League. A Sport
+    column that just repeats League is hidden. An editable table (a tick grid) is only reordered / hidden, never
+    renamed, so the page reading it back still finds its columns."""
+    import pandas as pd
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return frame, column_config
+    cfg = dict(column_config or {})
+    cols = list(frame.columns)
+    if "League" not in cols and "Sport" in cols and not editable:
+        frame = frame.rename(columns={"Sport": "League"})
+        if "Sport" in cfg:
+            cfg["League"] = cfg.pop("Sport")
+    cols = list(frame.columns)
+    if "League" in cols and "Sport" in cols:
+        try:
+            same = all(str(a).strip() == str(b).strip() for a, b in zip(frame["League"], frame["Sport"]))
+        except Exception:                                       # noqa: BLE001
+            same = False
+        if same:
+            if editable:
+                cfg["Sport"] = None
+            else:
+                frame = frame.drop(columns=["Sport"])
+    cols = list(frame.columns)
+    if "League" in cols and cols[0] != "League":
+        frame = frame[["League"] + [c for c in cols if c != "League"]]
+    return frame, cfg
+
+
 def install() -> None:
     import streamlit as st
     from streamlit.delta_generator import DeltaGenerator as DG
@@ -122,6 +153,9 @@ def install() -> None:
                     data, cc = conform(data, kw.get("column_config"))
                     if cc is not None:
                         kw["column_config"] = cc
+                data, cc = league_first(data, kw.get("column_config"), editable=_name == "data_editor")
+                if cc is not None:
+                    kw["column_config"] = cc
                 kw["column_config"] = centered(data, kw.get("column_config"))
             except Exception:                                   # noqa: BLE001 -- styling never breaks a table
                 pass
@@ -238,6 +272,7 @@ def install_phone() -> None:
             if (frame is not None and len(frame.columns) >= PHONE_MIN_COLS and not kw.get("on_select")
                     and kw.get("selection_mode") is None and len(frame) and phone_mode()):
                 frame, cc = conform(frame, kw.get("column_config"))       # Nov 24: same order as the table
+                frame, cc = league_first(frame, cc)
                 cfg = centered(frame, cc) or {}
                 self.markdown(cards_html(frame, cfg), unsafe_allow_html=True)
                 more = len(frame) - CARD_ROWS
