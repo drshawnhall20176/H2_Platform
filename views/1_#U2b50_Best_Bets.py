@@ -150,6 +150,12 @@ else:
                       f"({diag['matched_lines']} player/market line(s) matched from "
                       f"{diag['offers']} live offer(s)) — the model's own defaults fill in the rest.")
 
+try:                                                            # Nov 24 (owner): college = a game-line sport
+    import college_lines as _CL
+    _CL.render(_active.key, date_str, plays or [])
+except Exception:                                               # noqa: BLE001 — the props board still renders
+    pass
+
 if not plays:
     if not _active.has_projections:
         st.info("🥊 Best Bets doesn't apply to UFC — fights are outcome-based, not counting-stat-based. "
@@ -223,6 +229,7 @@ f3, f4, f5 = st.columns(3)
 with f3:
     markets = sorted({p["Market"] for p in plays})
     # Nov 1: football boards mix offense, defense (sacks/tackles) and kicking -- narrow the Markets list by unit.
+    _all_markets = list(markets)
     markets = C.market_group_filter(markets, key="bb_market_unit")
     # Same real, deliberate curation as Suggested Parlays/Graded Picks/Speculative Basket -- see
     # sports.py's own comment for the full reasoning. Intersected with markets so a curated-in
@@ -232,7 +239,13 @@ with f3:
     _default_mkt_pick = [m for m in _default_markets if m in markets] or markets
     if not markets:
         st.caption("No markets in this group on tonight's board.")
-    mkt_pick = st.multiselect("Markets", markets, default=_default_mkt_pick)
+    # Nov 24 (owner: "the full board at the bottom does not have game lines as a filter ... across the site"): the
+    # game lines (spread / total / moneyline) are Markets too, on every sport with a game-line board
+    import todays_best as _TBM
+    import college_lines as _CLB
+    _gl_opts = (list(_CLB.GL_MARKETS) if _active.key in _TBM.WINNER_LEAGUES and len(markets) == len(_all_markets)
+                else [])                                        # a narrowed unit (Defense, Kicking) is props only
+    mkt_pick = st.multiselect("Markets", _gl_opts + markets, default=_gl_opts + _default_mkt_pick)
 # NBA reads players through the Player props model (slate_props): every play is a Position Matchups read at the
 # book's line, and only the ones Player props leans on carry Conviction above 1.0.
 _props_model = any(p.get("Model") == "player-props" for p in plays)
@@ -271,6 +284,21 @@ with f5:
 if not mkt_pick:
     st.info("Select at least one market above to see plays.")
     st.stop()
+_gl_pick = [m for m in mkt_pick if m in _CLB.GL_MARKETS]
+if _gl_pick:                                                    # Nov 24: the game lines, same filters, same icons
+    try:
+        _glr = _CLB.gl_board(_active.key, date_str, _gl_pick, slot_pick, game_pick)
+    except Exception:                                           # noqa: BLE001
+        _glr = []
+    st.markdown("##### 📏 Game lines")
+    if _glr:
+        _CLB.show_table(_glr)
+        st.caption(_CLB.ICON_KEY + " Tick and log game lines on the game board (Home, or the sport's Game Lab).")
+    else:
+        st.caption("No game lines match these filters.")
+    if not [m for m in mkt_pick if m not in _CLB.GL_MARKETS]:
+        st.stop()
+    st.markdown("##### 🎯 Player props")
 
 _USE_FILTER = {"All playable": ("🎟️ Parlay + Single", "🎟️ Parlay leg", "🎯 Single only"),
                "Singles": ("🎟️ Parlay + Single", "🎯 Single only"),
@@ -310,8 +338,13 @@ view.sort(key=lambda p: p["ModelProb"], reverse=True)
 view = C.by_kickoff(view, lambda p: p.get("GameTime") or p.get("Time"))   # Nov 11: game time first, then chance
 
 if not view:
-    st.info("No plays match the current filters — adjust the time slot, game, markets, min "
-           "conviction, or min probability.")
+    if _active.key in ("NCAAMB", "NCAAF"):
+        st.info("No player props pass the filters — normal for college: the sportsbooks price props on only a few "
+                "games, and pick'em-app lines carry no tested edge. The game-line plays at the top are the day's "
+                "college bets.")
+    else:
+        st.info("No plays match the current filters — adjust the time slot, game, markets, min "
+               "conviction, or min probability.")
     st.stop()
 
 # ADDED DIRECTLY ON REQUEST, a real, confirmed fix for a real, repeated community pain point:
@@ -439,7 +472,12 @@ try:
         _rename["_agree"] = _GPB.AGREE
 except Exception:                                               # noqa: BLE001
     pass
-_FIRST = ["Time", "Game", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
+for p in view:                                                  # Nov 24 (owner): a Bet? column
+    _u = str(p.get("_use") or p.get("Use") or "")
+    p["_bet"] = "🃏 Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
+_cols.append("_bet")
+_rename["_bet"] = "Bet?"
+_FIRST = ["Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
           "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]

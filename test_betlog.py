@@ -630,3 +630,11 @@ def test_model_split_separates_bets_the_model_backed_from_own_calls():
     s = B.model_split(bets)
     assert (s["with"]["wins"], s["with"]["losses"]) == (1, 0)
     assert (s["own"]["wins"], s["own"]["losses"]) == (0, 2)
+
+
+def test_model_split_counts_a_tracking_pick_logged_from_a_board_as_with_the_model():
+    import betlog as B
+    bets = [{"model_prob": None, "category": "H2", "stake": 1.0, "entry_odds": -110, "result": "win", "market": "Spread"},
+            {"model_prob": None, "category": "OFF", "stake": 1.0, "entry_odds": -110, "result": "loss", "market": "Spread"}]
+    s = B.model_split(bets)
+    assert (s["with"]["wins"], s["own"]["losses"]) == (1, 1)

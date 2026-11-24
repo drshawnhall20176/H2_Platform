@@ -136,8 +136,9 @@ def test_single_play_boards_preselect_everything_a_book_prices_but_not_threes_at
     _patch_board(monkeypatch)
     at = _run(page)
     picker = [m for m in at.multiselect if m.label.startswith("Markets")][0]
-    assert set(ALL) == set(picker.options)
-    assert set(picker.value) == set(ALL) - {"Threes Attempted"}
+    props = lambda xs: {x for x in xs if not str(x).startswith("📏")}     # Nov 24: game lines are Markets too
+    assert set(ALL) == props(picker.options)
+    assert props(picker.value) == set(ALL) - {"Threes Attempted"}
 
 
 def test_best_bets_receipts_for_a_combo_sum_the_games_parts(monkeypatch):
