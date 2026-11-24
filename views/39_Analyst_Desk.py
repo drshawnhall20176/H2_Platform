@@ -611,6 +611,24 @@ with tab_live:
                         st.error(f"Not posted — {exc}.")
         else:
             st.caption("A graded recap appears here once a locked day's games are final.")
+        try:                                                    # Nov 24: the game-lines recap (owner)
+            import game_line_recap as _GLR2
+            if _active.key in _GLR2.LINE_SPORTS:
+                _yd = (datetime.now(pytz.timezone("US/Eastern")) - timedelta(days=1)).date().isoformat()
+                _lt = _GLR2.recap_text(_active.key, _yd, label=short_label)
+                if _lt:
+                    _lt = st.text_area("Game-lines recap (yesterday) — posts automatically each morning; edit and "
+                                       "post here if needed", _lt, height=200, key=f"analyst_lines_recap_{_yd}")
+                    if st.button("Post game-lines recap to Discord", key="analyst_post_lines", disabled=not webhook):
+                        try:
+                            AT.post_to_discord(webhook, _lt)
+                            st.success("Posted to Discord.")
+                        except RuntimeError as exc:
+                            st.error(f"Not posted — {exc}.")
+                else:
+                    st.caption("The game-lines recap appears once every game on yesterday's board is final.")
+        except Exception:                                       # noqa: BLE001
+            pass
 
 # --- Proof -------------------------------------------------------------------------
 with tab_proof:
@@ -618,6 +636,21 @@ with tab_proof:
                 "game that has started can't be added) and graded afterwards against the real result. A call "
                 "for a player who didn't play is a void, not a loss. Hit rate is compared with the chance the "
                 "model itself stated — that gap is what 'predictable' means here.")
+    try:                                                        # Nov 24: the game-line results (owner)
+        import game_line_recap as _GLR
+        if _active.key in _GLR.LINE_SPORTS:
+            st.markdown("#### 📏 Game lines — how the model's board did")
+            _gl = _GLR.window(_active.key, (datetime.now(pytz.timezone("US/Eastern")) - timedelta(days=1)).date().isoformat())
+            if _gl:
+                st.dataframe(pd.DataFrame(_gl), width="stretch", hide_index=True)
+                st.caption("1 unit per pick at the price on the board. 💰 Money picks are the tested tag; ✅ Model & "
+                           "market agree is the candidate rule being tracked; the Pick and Likely-winner columns are "
+                           "information, shown so the whole board is accountable.")
+            else:
+                st.caption("No graded game lines in the last 7 days.")
+            st.markdown("#### 🎯 Player-prop calls")
+    except Exception:                                           # noqa: BLE001
+        pass
     rows_b = [r for r in board if r["n"]]
     if not rows_b:
         st.info("No calls have been graded yet — the record starts filling as soon as the first locked day's "
