@@ -105,7 +105,9 @@ def describe(home: str, away: str, meetings: List[Dict], league: str = "") -> st
         lead = home if hw > aw else away
         head = f"{lead} won {max(hw, aw)} of {n}"
     side = home if avg > 0 else away
-    return (f"{head} (by {abs(avg):.1f} {unit} a game{' for ' + side if hw == aw and avg else ''}) · last: "
+    margin = ("even on the scoreboard" if abs(avg) < 0.5 else
+              f"by {abs(avg):.1f} {unit} a game{' for ' + side if hw == aw else ''}")
+    return (f"{head} ({margin}) · last: "
             f"{lw} by {abs(last['margin']):g}, {when}" if last["margin"] else f"{head} · last: tie, {when}")
 
 
