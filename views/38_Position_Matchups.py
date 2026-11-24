@@ -677,7 +677,8 @@ def _card(r, team, opp, market):
         except Exception:                                       # noqa: BLE001
             warn = []
         play = {"Player": r.get("player"), "Team": team, "Opp": opp, "Time": None, "Game": game_label,
-                "Side": side, "Line": line, "Market": market, "RealPrice": price, "Projection": r.get("projection"),
+                "Side": side, "Line": line, "Market": market, "RealPrice": price,
+                "Projection": None if r.get("projection") is None else round(float(r["projection"]), 1),
                 "ModelProb": ch, "_values": [float(v) for v in list(r.get("values") or []) if v is not None][:20],
                 "Why": why, "Warnings": warn, "Use": r.get("use") or ""}
         with st.container(border=True):
@@ -750,18 +751,23 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         shown = rows if side_pick == "All Sides" else [r for r in rows if r.get("side") == side_pick]
         if shown:
             # Nov 24 (owner): click a player's row (or name) to open his player card
-            _sel = st.dataframe(pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
-                                                                opp_label=opp_label, market=market)),
+            _cdf = pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
+                                                    opp_label=opp_label, market=market))
+            _sel = st.dataframe(_cdf,
                                 hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                                 key=f"pm_card_sel_{team}_{market}")
             try:
                 _rows = list(getattr(getattr(_sel, "selection", None), "rows", None) or [])
             except Exception:                                   # noqa: BLE001
                 _rows = []
-            if _rows and _rows[0] < len(shown):
-                _card(shown[_rows[0]], team, opp, market)
+            _hit = None
+            if _rows and _rows[0] < len(_cdf) and "Player" in _cdf.columns:
+                _nm = str(_cdf.iloc[_rows[0]]["Player"])          # the table's own order, matched back by name
+                _hit = next((r for r in shown if r.get("player") and _nm.startswith(str(r["player"]))), None)
+            if _hit is not None:
+                _card(_hit, off_name, def_name, market)
             else:
-                st.caption("👆 Click a player's row to open his player card.")
+                st.caption("☑️ Tick the box at the left of a player's row to open his player card.")
         else:
             st.caption(f"No {side_pick} picks for this team in this market.")
         return rows
