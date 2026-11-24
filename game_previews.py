@@ -245,6 +245,7 @@ def legend_md(extra: Optional[List[str]] = None, rules: str = "") -> str:
         "win chances within 4 points) · 🟨 same winner, further apart · ⚠️ the model has the other team winning "
         "outright. It has meant something only in college basketball so far (the model's side won 60% of ✅ games on "
         "Nov 5–22, now being tested forward); in the NBA ✅ games went 52% against the spread — break-even.",
+        BET_NOTE,
         "**Last meetings** — how the two teams' games against each other went over the last year (up to 4). "
         "Context only: tested Nov 24, past meetings added nothing to the model's chances or against the spread "
         "(NBA props: 5,401 graded; NBA, NHL and college basketball games), because the model already prices each "
@@ -300,8 +301,10 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
             mv = {}
         move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
                                     if mv.get("spread_move_why") else "") if x)
+        _ag = agreement(p, league)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
-                    blow_col(league): blowout(league, p), AGREE: agreement(p, league), **lead,     # Nov 23 (owner): left of Use
+                    BET: game_bet(league, playable, False, _ag),
+                    blow_col(league): blowout(league, p), AGREE: _ag, **lead,     # Nov 23 (owner): left of Use
                     **says_parts(p, playable, tagged=bool(use)),
                     TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Gap (pts)": None if e is None else round(abs(e), 1),
@@ -315,6 +318,21 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
 
 
 LAST = "Last meetings"
+# Nov 24 (owner: "is there a 'bet' column so I can identify these easily"): one column that says what a row is for.
+BET = "Bet?"
+BET_YES, BET_TRACK, BET_INFO = "✅ Bet", "🧪 Tracking", "Info only"
+BET_NOTE = ("**Bet?** — ✅ Bet = a tag from a rule that has made money in testing (💰 / 🔒 / 🎟️ / 🎯) · 🧪 Tracking = "
+            "the ✅ close-gap rule being tested forward (not proven yet) · Info only = what the model thinks, with no "
+            "tested edge — context, not a bet.")
+
+
+def game_bet(league: str, playable: bool, money: bool, agree: str) -> str:
+    """The Bet? value for a game: a tested tag -> ✅ Bet; NCAAMB close-gap (✅ agree) -> 🧪 Tracking; else Info only."""
+    if playable or money:
+        return BET_YES
+    if league == "NCAAMB" and str(agree).startswith("✅"):
+        return BET_TRACK
+    return BET_INFO
 
 
 def _last(league: str, p: Dict) -> str:

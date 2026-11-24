@@ -90,7 +90,11 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
                 return
             seen.add(key)
             ic = list(dict.fromkeys(i for i in icons if i))
-            out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Use": " ".join(ic), "Pick type": kind,
+            tested = any(i in ic for i in ("💰", "🔒", "🎟️", "🎯"))
+            out.append({"Time": r.get("time") or "", "Game": r.get("game"),
+                        "Bet?": GP.BET_YES if tested else GP.BET_TRACK if kind == CLOSE or (
+                            league == "NCAAMB" and "✅" in ic and kind != WINNER) else GP.BET_INFO,
+                        "Use": " ".join(ic), "Pick type": kind,
                         "Market": market, "Pick": pick, "Price": price, "Chance": chance,
                         "Blowout risk": blow, GP.AGREE: agree, "Last meetings": last,
                         "_kick": (r.get("_rec") or {}).get("kickoff")})
@@ -160,7 +164,8 @@ def gl_board(league: str, day: str, markets: Sequence[str], slot: str, game: str
     return out
 
 
-ICON_KEY = ("**Pick type:** Money pick = the model's chance reconciled with the market (the books' chance plus only "
+ICON_KEY = ("✅ Bet = a tested tag · 🧪 Tracking = the close-gap rule being tested forward · Info only = no tested "
+            "edge.  \n**Pick type:** Money pick = the model's chance reconciled with the market (the books' chance plus only "
             "the part of the model's disagreement its record has earned) at a price that pays · Line pick = the side "
             "of the spread or total the model's own number favors against the market (the Game Lab's Pick) · Winner = "
             "the team the model alone has winning, at the model's own chance · Close-gap pick = the model's side when "

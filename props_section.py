@@ -58,6 +58,12 @@ def _load(sport: str, day: str):
     return saved, rows, (judged(rows, sport) if rows else [])
 
 
+def _prop_tagged(use) -> bool:
+    """Nov 24 (owner's Bet? column): a prop carrying a tested tag (💰 / 🔒 / 🎟️ / 🎯)."""
+    u = str(use or "")
+    return any(i in u for i in ("💰", "🔒", "🎟️", "🎯"))
+
+
 def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
     import log_ui as LU
     st.markdown(f"##### {title}")
@@ -93,7 +99,8 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
         _blow = GP.game_blowouts(sport, [j.get("game") for j in show])
     except Exception:                                           # noqa: BLE001
         _blow = {}
-    df = pd.DataFrame([{"Time": j.get("time") or "", "Game": j.get("game") or "", "Pick": j.get("pick"),
+    df = pd.DataFrame([{"Time": j.get("time") or "", "Game": j.get("game") or "",
+                        GP.BET: GP.BET_YES if _prop_tagged(j.get("use")) else GP.BET_INFO, "Pick": j.get("pick"),
                         "Use": j.get("use") or "", "Model": j.get("chance"), "Price": j.get("price"),
                         "Blowout risk": _blow.get(j.get("game"), "—"),
                         GP.AGREE: GP.prop_agreement(j.get("chance"), j.get("price")),

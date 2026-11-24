@@ -24,7 +24,7 @@ def test_plays_lists_money_picks_and_close_gap_games_by_time_with_icons_left(mon
              "game_id": "g"}]
     out = CL.plays("NCAAMB", "2026-11-24", rows, recs=recs)
     assert [(o["Game"], o["Use"], o["Pick"]) for o in out] == [("C @ D", "✅", "D -4"), ("A @ B", "💰 🎯", "B -3.5")]
-    assert list(out[0])[:5] == ["Time", "Game", "Use", "Pick type", "Market"]
+    assert list(out[0])[:5] == ["Time", "Game", "Bet?", "Use", "Pick type"]
     assert out[0]["Pick type"] == CL.LINE and out[1]["Pick type"] == CL.MONEY
     full = CL.board_rows("NCAAMB", "2026-11-24", rows, recs=recs)
     assert {o["Market"] for o in full} == {"Spread", "Moneyline"} and len(full) == 4
