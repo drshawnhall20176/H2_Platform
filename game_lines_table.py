@@ -106,6 +106,21 @@ def money_pick_text(r: Dict) -> str:
     return txt
 
 
+TRACK_GRADE = "🧪 Tracking · close-gap rule — 60% looking back (101–66), being tested forward"
+
+
+def is_tracking(r: Dict) -> bool:
+    """Nov 24: the row's Line pick is the NCAAMB close-gap rule's pick (the spread, model and market within 2 points) --
+    the 🧪 Tracking bet the owner is testing live. Logged and coached as a test, not graded as a losing lean."""
+    import pick_records as PR
+    lg = r.get("league") or r.get("sport") or ""
+    p = r.get("_full") or {}
+    if lg != "NCAAMB" or r.get("bet_market") != "Spread" or r.get("best_tested"):
+        return False
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    return hs is not None and mm is not None and 0 < abs(mm + hs) < 2
+
+
 def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
     """[(row, tick column)] from log_ui.tick_grid -> log items: the Pick, the Likely winner's moneyline, or the Money
     pick (any side, at its own line and price)."""
@@ -118,6 +133,9 @@ def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
         r = rows[i]
         full = r.get("_full") or {}
         if col == "✓ Pick" and r.get("bet_market") and r.get("best"):
+            if is_tracking(r):                                  # Nov 24 (owner): don't grade the test as a losing lean
+                out.append(dict(r, price=r.get("bet_price"), pick=r["best"], tracking=True, grade=TRACK_GRADE))
+                continue
             out.append(dict(r, price=r.get("bet_price"), pick=r["best"],
                             grade=("tracking only" if r.get("status") else PR.grade(r))))
         elif col == "✓ Winner" and full:

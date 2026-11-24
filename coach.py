@@ -512,6 +512,11 @@ def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: f
              "tested": bool(it.get("best_tested")) if it.get("_rec") else True}
         if not it.get("_rec") and it.get("use") is None:
             c["use"] = "?"                                      # came from a page that doesn't carry the tag: unknown
+        if it.get("tracking"):                                  # Nov 24 (owner): a test of a tracked rule, said so
+            legs.append({**it, "verdict": "🧪 Test", "signal": "🧪 Test", "edge": None, "need": breakeven(c["price"]),
+                         "real_chance": None, "model_chance": None,
+                         "why": "the close-gap rule you're tracking — 60% looking back (101–66), not proven yet"})
+            continue
         j = judge(c, hist, cache.get(sp, {}).get(_strip_use(c["use"])))
         legs.append({**it, **j})
     # Nov 17: a spread whose line has moved away from the ticked side since it opened (college basketball: those
@@ -532,6 +537,11 @@ def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: f
             flags.append(("ok", f"{l.get('pick')}: the spread is moving this way ({mv['spread_move_why']}) — those "
                                 "covered 55% at the closing number."))
     singles_mode, parlay_mode = mode in ("Singles", "Both"), mode in ("Parlay", "Both")
+    tests = [l for l in legs if l["verdict"] == "🧪 Test"]
+    if tests:
+        flags.append(("test", f"{len(tests)} test leg(s) — {', '.join(str(l.get('pick')) for l in tests)}: the "
+                              "close-gap rule you're tracking (60% looking back, 101–66; not proven yet). A small, flat "
+                              "stake is the right size for a test."))
     for l in legs:
         if l["verdict"].startswith("🔴"):
             flags.append(("red", f"{l.get('pick')}: Skip — {l['why'].split(';')[0]}"))
@@ -583,7 +593,10 @@ def ticket_check(items: Sequence[Dict], mode: str, stake: float, parlay_stake: f
     ambers = sum(1 for lv, _ in flags if lv == "amber")
     grade = "A" if not reds and not ambers else "B" if not reds and ambers <= 1 else "C" if not reds else \
         "D" if reds == 1 else "F"
-    headline = {"A": "✅ Good ticket — place it at your normal stake.",
+    if tests and len(tests) == len(legs) and not reds:
+        grade = "T"                                             # Nov 24: a ticket of test legs is graded as a test
+    headline = {"T": "🧪 Test ticket — every leg comes from the rule you're tracking. Small stakes, as planned.",
+                "A": "✅ Good ticket — place it at your normal stake.",
                 "B": "🟢 Fine — one thing to watch below.",
                 "C": "🟡 Shaky — trim the flagged legs or halve the stake.",
                 "D": "🟠 Fix the red item before you place this.",
