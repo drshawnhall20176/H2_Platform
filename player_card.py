@@ -123,7 +123,7 @@ def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> 
         render(c, sp, bet=GP.prop_bet(sp, str(c.get("Use") or ""), c))
 
 
-def render(p: Dict, sport: str, bet: str = "") -> None:
+def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None) -> None:
     """One board play (Best Bets' row) as a card."""
     import streamlit as st
     import components as C
@@ -144,7 +144,7 @@ def render(p: Dict, sport: str, bet: str = "") -> None:
             f'</div><div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""}'
             + (f' · {float(price):+.0f}' if price is not None else "") + '</div></div></div></div>')
     st.markdown(head, unsafe_allow_html=True)
-    C.kpi_row([
+    C.kpi_row(kpis or [
         {"icon": "📐", "value": "—" if p.get("Projection") is None else f"{float(p['Projection']):g}",
          "label": "Projection"},
         {"icon": "🎯", "value": _pct(p.get("ModelProb")), "label": "Model chance"},
@@ -156,9 +156,13 @@ def render(p: Dict, sport: str, bet: str = "") -> None:
     ch = bar_chart(rows, line, p.get("Projection"), p.get("Market") or "Value")
     if ch is not None:
         st.altair_chart(ch, width="stretch", key=f"pc_{p.get('PlayerId')}_{p.get('Market')}")
-        st.caption(f"His last {len(rows)} games against tonight's line — **blue** cleared it for the {side}, **slate** "
-                   f"didn't. **Gold dashed** = the line; **light-blue dotted** = the model's projection. "
-                   f"All {len(vals)} recent games: {hit_text(vals, line, side)}.")
+        if line is None:
+            st.caption(f"His last {len(rows)} games (no book line posted tonight). **Light-blue dotted** = the model's "
+                       "projection.")
+        else:
+            st.caption(f"His last {len(rows)} games against tonight's line — **blue** cleared it for the {side}, "
+                       f"**slate** didn't. **Gold dashed** = the line; **light-blue dotted** = the model's projection. "
+                       f"All {len(vals)} recent games: {hit_text(vals, line, side)}.")
     else:
         st.caption("His game-by-game bars appear after the board's next hourly rebuild (they're attached as the board "
                    "is built).")
