@@ -431,6 +431,16 @@ try:                                                            # Nov 24: with t
                "Sticking with the model means the first group, not every lean — only 💰 / 🎯 tags have passed testing.")
 except Exception:                                               # noqa: BLE001
     pass
+
+# Nov 24 (owner): "metrics that show me how these specific picks are performing ... a dashed line that shows what a
+# profitable baseline looks like" -- the 🃏 / 🧪 groups, the model's and his own, against a +5% pace
+with st.expander("📈 How the 🃏 Bet and 🧪 Tracking picks are doing — against a profitable pace", expanded=True):
+    try:
+        import picks_performance as _PP
+        import props_engine as _PEpp
+        _PP.render(_PEpp._et_today(), bets=B.list_bets())
+    except Exception as _exc:                                   # noqa: BLE001
+        st.caption(f"(Pick performance unavailable: {type(_exc).__name__})")
 if rp["n_total"] and rp["n_real_price"] < rp["n_total"]:
     st.caption(f"ℹ️ {rp['n_total'] - rp['n_real_price']} bet(s) here weren't logged at a real book "
                "price (model fair price, or logged before price-source tracking), so they're "
