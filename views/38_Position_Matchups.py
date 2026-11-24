@@ -656,6 +656,37 @@ def render_game_context(market: str) -> dict:
             "book": PE.book_order(price_book)}
 
 
+def _card(r, team, opp, market):
+    """Nov 24 (owner): one props row as H2's player card -- his recent games against the line, the chances, the read."""
+    try:
+        import player_card as PCD
+        import slate_props as SPX
+        import game_previews as GPX
+        side = r.get("side") or r.get("lean")
+        side = side if side in ("Over", "Under") else "Over"
+        line = r.get("line")
+        pf = r.get("p_final")
+        ch = None if pf is None else (float(pf) if side == "Over" else 1 - float(pf))
+        price = r.get("over_price") if side == "Over" else r.get("under_price")
+        try:
+            why = SPX.why(r)
+        except Exception:                                       # noqa: BLE001
+            why = None
+        try:
+            warn = PE.leg_warnings(r, side, line) if line is not None else []
+        except Exception:                                       # noqa: BLE001
+            warn = []
+        play = {"Player": r.get("player"), "Team": team, "Opp": opp, "Time": None, "Game": game_label,
+                "Side": side, "Line": line, "Market": market, "RealPrice": price, "Projection": r.get("projection"),
+                "ModelProb": ch, "_values": [float(v) for v in list(r.get("values") or []) if v is not None][:20],
+                "Why": why, "Warnings": warn, "Use": r.get("use") or ""}
+        with st.container(border=True):
+            PCD.render(play, SPORT_KEY, bet=GPX.prop_bet(SPORT_KEY, str(play.get("Use") or ""),
+                                                          dict(play, ModelProb=ch, side=side)))
+    except Exception as exc:                                    # noqa: BLE001
+        st.caption(f"(Player card unavailable: {type(exc).__name__})")
+
+
 def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     is_home = team == bundle["home"]
     spread_team = None if g["spread_home"] is None else (g["spread_home"] if is_home else -g["spread_home"])
@@ -718,9 +749,19 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         side_pick = st.session_state.get("pm_props_side", "All Sides")       # Nov 1: All Sides / Under / Over
         shown = rows if side_pick == "All Sides" else [r for r in rows if r.get("side") == side_pick]
         if shown:
-            st.dataframe(pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
-                                                         opp_label=opp_label, market=market)),
-                         hide_index=True, width="stretch")
+            # Nov 24 (owner): click a player's row (or name) to open his player card
+            _sel = st.dataframe(pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
+                                                                opp_label=opp_label, market=market)),
+                                hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                                key=f"pm_card_sel_{team}_{market}")
+            try:
+                _rows = list(getattr(getattr(_sel, "selection", None), "rows", None) or [])
+            except Exception:                                   # noqa: BLE001
+                _rows = []
+            if _rows and _rows[0] < len(shown):
+                _card(shown[_rows[0]], team, opp, market)
+            else:
+                st.caption("👆 Click a player's row to open his player card.")
         else:
             st.caption(f"No {side_pick} picks for this team in this market.")
         return rows
