@@ -214,7 +214,8 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
         rows = []
     C.section_header("📏", "Game-line plays — where the college edge is")
     st.caption(prop_supply(board_plays, len(rows)))
-    pl = plays(league, date_str, rows)
+    _up, _gone = GLT.started_section(rows, f"cl_{league}", date_str < today)   # Nov 24 (owner): started set aside
+    pl = plays(league, date_str, _up)
     if pl:
         import game_previews as _GPc
         _ck = _GPc.bet_filter(f"cl_bet_{league}")               # Nov 24 (owner): filter buttons
@@ -231,6 +232,7 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
         st.caption(ICON_KEY + ("  \n" + cand if cand else ""))
     else:
         st.caption("No 💰 or ✅ game lines for this date yet — the full board below has every game.")
+    GLT.show_started(_gone)
     with st.expander(f"🧾 Full game board ({len(rows)} games) — tick any line to log it", expanded=False):
         GLT.render(rows, f"bb_glt_{league}", date_str, past=date_str < today)
     st.divider()

@@ -497,6 +497,8 @@ if True:
                                                          "more than it won over the last 30 days — marked "
                                                          "\"Info only · ⚠️ losing lean type\" in the Bet? column.")
         _ws = [r for r in _w if r.get("best_tested")] if _only_tested else _w
+        import game_lines_table as _GLTs                       # Nov 24 (owner): started / finished games set aside
+        _ws, _wgone = _GLTs.started_section(_ws, "home_win", _past)
         _gours = [r for r in _ws if r.get("spread_move") == "📈 our way"]
         if _gours and st.toggle(f"📈 Spread moving our way only ({len(_gours)})", value=False, key="home_win_moves",
                                 help="College basketball games where the spread has moved a point or more toward the "
@@ -626,6 +628,7 @@ if True:
                                             "+12% with a 40%+ chance (what made money in testing)."),
                                         "Backtest cover": st.column_config.NumberColumn(format="percent")})))
             _sel_lines = _line_items(_ws[:LEANS_CAP], _ticks_l)
+        _GLTs.show_started(_wgone)
         _rec = _winner_record()
         _sports_here = sorted({r["sport"] for r in _w})
         _bits = []

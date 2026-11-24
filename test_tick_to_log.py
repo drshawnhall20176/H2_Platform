@@ -195,3 +195,12 @@ def test_prior_season_baseline_projects_from_last_seasons_games_only():
     b = HG.baseline_projection("NBA", {"home": "Strong", "away": "Weak"}, prior)
     assert 15 < b["model_margin"] < 25 and b["model_p"] > 0.9 and 150 < b["model_total"] < 230
     assert HG.baseline_projection("NBA", {"home": "Strong", "away": "Nobody"}, prior) is None
+
+
+def test_started_games_are_recognised():
+    import game_lines_table as GLT
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 24, 20, 0, tzinfo=timezone.utc)
+    assert GLT.started({"_rec": {"kickoff": "2026-11-24T17:30:00Z"}}, now=now)
+    assert not GLT.started({"_rec": {"kickoff": "2026-11-25T00:00:00Z"}}, now=now)
+    assert GLT.started({"final": "A 70 – B 60"}, now=now)
