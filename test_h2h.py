@@ -47,3 +47,9 @@ def test_refresh_saves_one_blob_per_league_and_lookup_reads_it():
     got = H.lookup("NBA", "Boston Celtics", "New York Knicks", day="2026-11-24", load=saved.get)
     assert got.startswith("Boston Celtics won 2 of 3")
     assert H.lookup("NBA", "X", "Y", day="2026-11-24", load=saved.get) == "—"
+
+
+def test_a_dead_even_series_says_so():
+    t = H.describe("A", "B", [{"date": "2026-11-01", "margin": 1}, {"date": "2026-02-01", "margin": 1},
+                              {"date": "2026-01-01", "margin": -2}], "NHL")
+    assert t.startswith("A won 2 of 3 (even on the scoreboard)")
