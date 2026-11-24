@@ -29,6 +29,14 @@ def _card(keys, day):
     return RC.card(list(keys), today=day)
 
 
+# Nov 24 (owner): the 🃏 / 🧪 picks against a dashed profitable pace (the model's picks only -- no Bet Log here)
+C.section_header("📈", "The 🃏 Bet and 🧪 Tracking picks, against a profitable pace")
+try:
+    import picks_performance as _PP
+    _PP.render(PE._et_today())
+except Exception as _exc:                                       # noqa: BLE001
+    st.caption(f"(Pick performance unavailable: {type(_exc).__name__})")
+
 C.section_header("🧾", "Report card: the picks we flag, at the prices we showed")
 _rc = _card(tuple(k for k in live if sports.get(k).has_projections), PE._et_today())
 if _rc:
