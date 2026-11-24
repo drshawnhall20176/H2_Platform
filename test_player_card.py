@@ -25,3 +25,13 @@ PCD.render({"Player": "A Guy", "Team": "BOS", "Opp": "WAS", "Time": "8:10 PM", "
 """, default_timeout=30).run()
     assert not at.exception, [e.value for e in at.exception]
     assert any("Last 5 vs this line" in str(m.value) for m in at.markdown) or True
+
+
+def test_from_row_maps_saved_picks_and_long_shots():
+    c = PCD.from_row({"sport": "NBA", "player": "A", "market": "Assists", "side": "Over", "line": 6.5, "price": -110,
+                      "chance": 0.55, "raw_chance": 0.6, "earned": 0.55, "values": [7, 5], "use": "🎯 Single only",
+                      "money": True, "time": "8:10 PM", "game": "X @ Y"})
+    assert (c["Player"], c["Line"], c["ModelProb"], c["_values"]) == ("A", 6.5, 0.6, [7, 5]) and c["Use"].startswith("💰")
+    ls = PCD.from_row({"Player": "B", "Market": "Assists", "Projection": 6.1, "side": "Over", "line": 6.5,
+                       "chance": 0.2, "price": 450, "values": [8]})
+    assert (ls["Player"], ls["Side"], ls["Line"], ls["Projection"]) == ("B", "Over", 6.5, 6.1)

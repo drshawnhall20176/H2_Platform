@@ -87,7 +87,10 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
                     "line": line, "market_key": p.get("MarketKey"),
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
                     "pickem_only": bool(p.get("Pickem")),
-                    "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5")})
+                    "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5"),
+                    # Nov 24: the player card's game-by-game bars (newest first) and its projection
+                    "values": list(p.get("_values") or [])[:20], "projection": p.get("Projection"),
+                    "why": p.get("Why"), "warnings": p.get("Warnings") or []})
     out.sort(key=_order)
     if not cap:                                                 # Nov 21: every pick, for the shown-picks ledger
         return out
