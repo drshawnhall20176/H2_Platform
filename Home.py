@@ -68,8 +68,31 @@ def _desk_changed():
     st.session_state["_desk_prev"] = new
 
 
-st.pills("Select Sport", [s.key for s in live], selection_mode="multi", key="desk_sports", on_change=_desk_changed,
-         format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}", label_visibility="collapsed")
+# Nov 24 evening (owner): "have the default be a single sport and a toggle that enables multi sport selections"
+_multi_on = st.toggle("Show several sports at once", value=False, key="desk_multi",
+                      help="Off: one sport at a time — clicking a sport switches to it. On: click as many sports as "
+                           "you like and every table below shows them together; the last one you click runs the "
+                           "sidebar's pages.")
+if not _multi_on:
+    if len(st.session_state.get("desk_sports") or []) != 1:     # back to one sport: the sidebar's sport alone
+        st.session_state["desk_sports"] = [current]
+        st.session_state["_desk_prev"] = [current]
+    if st.session_state.get("desk_one") != current:             # keep the single picker on the active sport
+        st.session_state["desk_one"] = current
+
+    def _one_changed():
+        k = st.session_state.get("desk_one") or current
+        st.session_state["desk_one"] = k
+        st.session_state["sport"] = k
+        st.session_state["desk_sports"] = [k]
+        st.session_state["_desk_prev"] = [k]
+
+    st.pills("Select Sport", [s.key for s in live], selection_mode="single", key="desk_one", on_change=_one_changed,
+             format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}", label_visibility="collapsed")
+else:
+    st.pills("Select Sport", [s.key for s in live], selection_mode="multi", key="desk_sports",
+             on_change=_desk_changed, format_func=lambda k: f"{sports.get(k).icon} {sports.get(k).label}",
+             label_visibility="collapsed")
 current = st.session_state.get("sport", current)
 
 active = sports.get(current)
@@ -77,7 +100,9 @@ if active:
     _others = [k for k in (st.session_state.get("desk_sports") or []) if k != current]
     st.caption(f"Sidebar pages open to: **{active.icon} {active.label}**"
                + (f" · this desk also shows {', '.join(_others)}" if _others else "")
-               + " — click more sports to add them to the tables below; the last one you click runs the sidebar.")
+               + (" — click more sports to add them to the tables below; the last one you click runs the sidebar."
+                  if st.session_state.get("desk_multi") else " — turn on **Show several sports at once** to compare "
+                  "sports side by side."))
     if current == "UFC":
         st.info("🥊 UFC Fight Card: tonight's bouts with moneyline odds, the market's no-vig chances, and total-rounds "
                "(fight duration) lines. There's no UFC model — every chance comes from the odds — and method-of-victory "

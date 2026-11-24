@@ -50,7 +50,8 @@ def test_home_panel_renders(monkeypatch):
     at.session_state["sport"] = "NHL"
     at.run()
     assert not at.dataframe or "A Points Under 20.5" not in at.dataframe[0].value.to_string()
-    at.button_group(key="desk_sports").set_value(["NHL", "NBA"]).run()           # Nov 24: one picker, several sports
+    at.toggle(key="desk_multi").set_value(True).run()                            # Nov 24: several sports on request
+    at.button_group(key="desk_sports").set_value(["NHL", "NBA"]).run()
     assert "A Points Under 20.5" in at.dataframe[0].value.to_string()
     assert at.session_state["sport"] == "NBA"                   # the sport clicked last runs the sidebar
 
