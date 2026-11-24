@@ -309,7 +309,8 @@ if True:
         _none = {"🔒 Locks only": "locks", "💰 Money picks": "💰 Money picks", "🧪 Tracking": "🧪 Tracking picks",
                  "Info only": "Info-only picks"}.get(_show, "picks")
         _when = f"on {_day:%a %b %-d}" if _past else "yet today"
-        st.caption(f"No {_none} for {', '.join(sorted(_sel))} {_when}.")
+        st.caption(f"No {_none} for {', '.join(sorted(_sel))} {_when}"
+                   + (" among the player props — the game lines are further down." if not _past else "."))
     _notes = []
     if _past and _rows:
         _gr = [r for r in _rows if r.get("result") in ("win", "loss")]
@@ -499,6 +500,15 @@ if True:
             _ws = [r for r in _ws if r.get("money")]
         elif _show == "🔒 Locks only":
             _ws = [r for r in _ws if r.get("lock")]
+        if not _ws and _w:                                      # Nov 24 (owner): say why the board is empty
+            _kind = {"🔒 Locks only": "🔒 Lock", "💰 Money picks": "💰 Money", "🧪 Tracking": "🧪 Tracking",
+                     "Info only": "Info-only"}.get(_show, "matching")
+            _lg = ", ".join(sorted({r["sport"] for r in _w}))
+            _ntr = sum(1 for r in _w if _GLTb.bet(r).startswith(_GPb.BET_TRACK))
+            st.info(f"No {_kind} game lines for {_lg} today — **{len(_w)} games** are on the board. Choose **All picks** "
+                    "above to see them"
+                    + (f" ({_ntr} are 🧪 Tracking — choose **🧪 Only Tracking**)" if _ntr and _show != "🧪 Tracking" else "")
+                    + ". Games with no tested or tracked rule read **Info only** in the Bet? column.")
         if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter
             # Nov 19 (owner): two result columns, two charts -- the pick, and the model's likely winner
             _gproxy = [{"pick": r.get("best_result"),
