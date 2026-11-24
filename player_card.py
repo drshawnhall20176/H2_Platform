@@ -123,14 +123,12 @@ def render(p: Dict, sport: str, bet: str = "") -> None:
                    f"didn't. **Gold dashed** = the line; **light-blue dotted** = the model's projection. "
                    f"All {len(vals)} recent games: {hit_text(vals, line, side)}.")
     else:
-        st.caption("No recent game log for this player yet.")
+        st.caption("His game-by-game bars appear after the board's next hourly rebuild (they're attached as the board "
+                   "is built).")
     why = [x for x in (p.get("Why"), p.get("UseWhy")) if x]
     warn = p.get("Warnings") or []
     st.markdown("**The read**")
-    st.markdown("  \n".join(["• " + str(w) for w in why] +
-                            ([f"• Cushion: {p.get('Cushion'):.0%} past the line"]
-                             if isinstance(p.get("Cushion"), (int, float)) else []) +
-                            ["⚠️ " + str(w) for w in warn]) or "—")
+    st.markdown("  \n".join(["• " + str(w) for w in why] + ["⚠️ " + str(w) for w in warn]) or "—")
     try:
         import game_previews as GP
         blow = GP.game_blowouts(sport, [p.get("Game")]).get(p.get("Game"), "—")
