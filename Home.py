@@ -86,8 +86,19 @@ if True:
     _missing = [k for k, at in _best["props"].items() if not at]
     _c1, _c2, _c3 = st.columns([2, 2, 1])
     _here = active.label if active else "This sport"
-    _scope = _c1.radio("Sports", [f"{_here} only", "All sports"], horizontal=True, key="home_best_scope",
-                       label_visibility="collapsed")
+    # Nov 24 (owner): "select sport enabled to allow for multiple sport filtering ... the tables should update
+    # accordingly" -- pick any set of sports; every table below follows it
+    _sport_opts = [s.key for s in live]
+    if st.session_state.get("_home_best_for") != current:       # a new sport button: start from that sport alone
+        st.session_state["_home_best_for"] = current
+        st.session_state["home_best_sports"] = [current]
+    _picked_sports = st.pills("Sports shown", _sport_opts, selection_mode="multi",
+                              key="home_best_sports", format_func=lambda k: f"{sports.get(k).icon} {k}",
+                              help="Tick any sports — the picks, game lines, blowout watch and long shots below all "
+                                   "follow. The sport button above still sets the sidebar's pages.")
+    _sel = set(_picked_sports or [current])
+    _multi = len(_sel) > 1
+    _scope = "All sports" if set(_sport_opts) <= _sel else "picked"
     _show = _c2.radio("Show", ["🔒 Locks only", "💰 Money picks", "All playable"], horizontal=True,
                       key="home_best_show", label_visibility="collapsed",
                       # Nov 23 (owner): say what each choice shows
@@ -107,7 +118,7 @@ if True:
                     pass
         st.rerun()
     # Nov 6: follow the sport picked above (the panel showed every sport, so NBA showed tennis); "All sports" for the lot
-    _rows = _best["rows"] if _scope == "All sports" else [r for r in _best["rows"] if r.get("sport") == current]
+    _rows = [r for r in _best["rows"] if r.get("sport") in _sel]
 
     # Nov 6: start-time and game filters, shared by the picks and the game lines below
     @st.cache_data(ttl=900, show_spinner=False)
@@ -120,7 +131,7 @@ if True:
         return rows
 
     _wall = _winners(_today, _past)
-    _wscope = _wall if _scope == "All sports" else [r for r in _wall if r["sport"] == current]
+    _wscope = [r for r in _wall if r["sport"] in _sel]
 
     def _tkey(t):
         # Nov 11: the shared parser (clock times, "Sat 7:00 PM", ISO kickoffs); unknown times last
@@ -135,7 +146,7 @@ if True:
         _ball = _blowouts(_today)
     except Exception:                                           # noqa: BLE001
         _ball = []
-    _bscope = _ball if _scope == "All sports" else [r for r in _ball if r["sport"] == current]
+    _bscope = [r for r in _ball if r["sport"] in _sel]
 
     # Nov 7: the MMA card (one odds request for the whole card), when UFC is picked or All sports
     @st.cache_data(ttl=900, show_spinner=False)
@@ -144,7 +155,7 @@ if True:
         return _TB.ufc_rows(day, _BBD2.get_odds_api_key())
 
     _uscope = []
-    if _scope == "All sports" or current == "UFC":
+    if "UFC" in _sel:
         try:
             _uscope = _ufc(_today)
         except Exception:                                       # noqa: BLE001
@@ -249,7 +260,7 @@ if True:
             _df = _df.drop(columns=["Market"])
         if not _df["Tested"].any():
             _df = _df.drop(columns=["Tested"])
-        if _scope != "All sports":
+        if not _multi:
             _df = _df.drop(columns=["Sport"])
         _sel_props = _LU.picked(_rows[:_cap], _LU.selectable(_df, "home_best_sel", hide_index=True, width="stretch",
                      column_config={"Chance": st.column_config.NumberColumn(format="percent"),
@@ -270,7 +281,7 @@ if True:
     else:
         _none = "locks" if _show.startswith("🔒") else "playable picks"
         _when = f"on {_day:%a %b %-d}" if _past else "yet today"
-        st.caption(f"No {_none} for {_here} {_when}." if _scope != "All sports" else f"No {_none} {_when}.")
+        st.caption(f"No {_none} for {', '.join(sorted(_sel))} {_when}.")
     _notes = []
     if _past and _rows:
         _gr = [r for r in _rows if r.get("result") in ("win", "loss")]
@@ -293,7 +304,7 @@ if True:
 
     # ---- Most probable long shots (Nov 14): for each sport with a Long Shots tab, the top few from the day's scan
     import long_shots_scan as _LSS
-    _ls_sports = [k for k in _LSS.SPORTS if (_scope == "All sports" or k == current) and k in [s.key for s in live]]
+    _ls_sports = [k for k in _LSS.SPORTS if k in _sel and k in [s.key for s in live]]
     _ls_sets = [(k, _LSS.load(k, _today)) for k in _ls_sports]
 
     @st.cache_data(ttl=3600, show_spinner="Rebuilding that day's long shots…")
@@ -363,10 +374,10 @@ if True:
     _lab_names = {"TENNIS": "Tennis", "INTL": "International hoops", "SOCCER": "Soccer",
                   "SOCCER_SCORERS": "Soccer goalscorers"}
     _lab_sets = []
-    if not _past and (_scope == "All sports" or current in ("TENNIS", "INTL", "SOCCER")):
+    if not _past and (_sel & {"TENNIS", "INTL", "SOCCER"}):
         try:
             _lab_sets = [(k, v) for k, v in _lab_ls(_today).items()
-                         if _scope == "All sports" or k.split("_")[0] == current]
+                         if k.split("_")[0] in _sel]
         except Exception:                                       # noqa: BLE001
             _lab_sets = []
     if _lab_sets:
@@ -410,7 +421,7 @@ if True:
     LEANS_CAP = 250                                             # Nov 14: soccer and every hoops league are in here
     st.markdown("##### 🏆 Game lines: tested picks and model leans")
     _w = [r for r in _wscope if _keep(r)]
-    if current == "UFC" and _scope != "All sports":
+    if _sel == {"UFC"}:
         st.caption("Not covered for this sport: UFC's chances come from the odds themselves. Choose All sports to see "
                    "the rest.")
     elif _w:
@@ -499,7 +510,7 @@ if True:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result", "Money result"])
         if not _wdf.empty and not _wdf["Spread move"].any():
             _wdf = _wdf.drop(columns=["Spread move"])
-        if _scope != "All sports" and not _wdf.empty:
+        if not _multi and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
             _wdf = _wdf.drop(columns=["Weather"])
@@ -509,12 +520,12 @@ if True:
                                       if c in _wdf and not _wdf[c].replace("", None).notna().any()])
         # Nov 20 (owner: "more investor friendly -- the more important columns to the left, informational to the
         # right"): the bet and how it did first, then the model's pick and the likely winner, then the detail
-        _ORDER = ["Time", "Sport", "Game", "Bet?", "Model & market agree?", "Blowout risk", "Close gap (pts)",
+        _ORDER = ["League", "Time", "Sport", "Game", "Bet?", "Model & market agree?", "Blowout risk", "Close gap (pts)",
                   "Spread move", "Final", "Pick result", "Money result", "Winner result",
                   "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
                   "✓ Money", "Money pick", "Money score",
                   "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
-                  "Weather", "League"]
+                  "Weather"]
         if not _wdf.empty:
             _wdf = _wdf[[c for c in _ORDER if c in _wdf.columns] + [c for c in _wdf.columns if c not in _ORDER]]
         if _wdf.empty:
@@ -567,10 +578,10 @@ if True:
                      "show the goals model's most likely result beside the market's favourite — tracking only, ⚪ No edge. "
                      "NFL and UFC aren't covered yet.")
     else:
-        st.caption("No games with a model chance today" + ("" if _scope == "All sports" else " for this sport") + ".")
+        st.caption("No games with a model chance today" + ("" if _multi else " for this sport") + ".")
 
     # ---- Soccer price flags (Nov 14): a US price above the sharp (Pinnacle) no-vig line by 2%+ -- tracking only
-    if _scope == "All sports" or current == "SOCCER":
+    if "SOCCER" in _sel:
         @st.cache_data(ttl=900, show_spinner=False)
         def _soccer_flags(day):
             return _TB.soccer_flags(day)
@@ -598,7 +609,7 @@ if True:
                 "whether the edge holds up (the Soccer Lab keeps the record). Small flat stakes only, if any."))
     # ---- Blowout watch (Nov 7): the games most likely to be decided big, and by whom -- the Game Script loop's calls
     # ---- UFC / MMA card (Nov 7)
-    if _scope == "All sports" or current == "UFC":
+    if "UFC" in _sel:
         st.markdown("##### 🥊 Fight card")
         _u = sorted([r for r in _uscope if _keep(r)], key=lambda r: r.get("commence") or "")
         if _u:
@@ -646,7 +657,7 @@ if True:
                                "Most likely outcome": r.get("likely") or "—",
                                "What happened": r.get("happened") or "—",
                                "Called it": r.get("likely_result") or "—"} for r in _btop])
-        if _scope != "All sports":
+        if not _multi:
             _bdf = _bdf.drop(columns=["Sport"])
         if not _past:
             _bdf = _bdf.drop(columns=["What happened", "Called it"])
