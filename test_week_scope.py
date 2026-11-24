@@ -236,7 +236,8 @@ def test_best_bets_market_group_and_side_filters(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
     group = [r for r in at.radio if r.label == "Market group"][0]
     assert group.options == ["All", "Offense", "Defense", "Special Teams"]
-    assert set([m for m in at.multiselect if m.label == "Markets"][0].options) == {"Pass Yards", "Sacks", "FG Made"}
+    assert ({o for o in [m for m in at.multiselect if m.label == "Markets"][0].options if not o.startswith("📏")}
+            == {"Pass Yards", "Sacks", "FG Made"})                         # Nov 24: plus the 📏 game lines
     group.set_value("Defense").run()
     assert [m for m in at.multiselect if m.label == "Markets"][0].options == ["Sacks"]
     [r for r in at.radio if r.label == "Market group"][0].set_value("Special Teams").run()
