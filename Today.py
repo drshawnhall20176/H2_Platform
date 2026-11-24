@@ -171,6 +171,32 @@ try:
 except Exception:                                               # noqa: BLE001
     pass
 
+# Nov 24 (owner): college basketball, college football, soccer and international hoops are game-line sports -- the books
+# post few props for them and they're not what he bets -- so their rows show game lines, each card saying 🃏 Bet /
+# 🧪 Tracking / Info only, with every game line one click away.
+import college_lines as _CLT
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _line_sport_rows(sp, day, _win):
+    return _CLT.today_rows(sp, day, _win)
+
+
+_line_rows = {}
+for _sp in _CLT.LINE_SPORTS_TODAY:
+    try:
+        _lr = _line_sport_rows(_sp, _g_day, _g_win)
+    except Exception:                                           # noqa: BLE001 -- the page always renders
+        _lr = []
+    _line_rows[_sp] = _lr
+    _cards.pop(_sp, None)
+    if _lr:
+        _cards[_sp] = _CLT.today_cards(_lr)
+        _games[_sp] = len({r["Game"] for r in _lr})
+        _npicks[_sp] = len({r["Game"] for r in _lr if r["Bet?"] != "Info only"})
+    else:
+        _npicks.pop(_sp, None)
+
 _order = sorted([s for s in live if _games.get(s.key) or _cards.get(s.key)],
                 key=lambda s: (-_npicks.get(s.key, 0), -_games.get(s.key, 0)))
 _quiet = [s for s in live if s not in _order]
@@ -303,6 +329,8 @@ for s in _order:
             continue
         for col, c in zip(st.columns(4), cards):
             with col.container(border=True):
+                if c.get("bet"):                                # Nov 24: game-line sports say what each card is
+                    st.caption(f"**{c['bet']}**")
                 st.markdown(f"**{'💰 ' if c.get('money') else ''}{'🔒 ' if c['lock'] else ''}{c['pick']}**")
                 st.metric("Chance", "—" if c["chance"] is None else f"{c['chance']:.0%}", label_visibility="collapsed")
                 st.caption(" · ".join(x for x in (c.get("price") if c.get("price") not in ("—", "") else "",
@@ -310,6 +338,12 @@ for s in _order:
                            + f"  \n{c['game']}" + (f" · {c['time']}" if c["time"] else ""))
                 st.caption(" · ".join(x for x in (("✅ " + c["record"]) if c.get("record") else "",
                                                    c.get("move") or "") if x))
+
+        if _line_rows.get(s.key):
+            with st.expander(f"📏 All {_games.get(s.key, 0)} games' lines — 🃏 Bet · 🧪 Tracking · Info only",
+                             expanded=False):
+                _CLT.show_table(_line_rows[s.key])
+                st.caption(_CLT.ICON_KEY)
 
 if _quiet:
     st.caption("Not playing today: " + ", ".join(f"{s.icon} {s.label.split(' — ')[0]}" for s in _quiet))

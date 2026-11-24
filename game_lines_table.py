@@ -56,7 +56,7 @@ LEGEND = "\n".join("- " + x for x in [
     "(hockey), from the market's spread: 🟥 60%+ · 🟨 35–60% · 🟩 under 35%.",
     "**Model & market agree?** — ✅ same winner and close (2 points; hockey: win chances within 4) · 🟨 same winner, "
     "further apart · ⚠️ the model has the other team. It has meant something only in college basketball so far.",
-    "**Bet?** — ✅ Bet = the row carries a tag from a rule that has made money in testing (and which pick it is) · "
+    "**Bet?** — 🃏 Bet = the row carries a tag from a rule that has made money in testing (and which pick it is) · "
     "🧪 Tracking = the college basketball ✅ close-gap rule, being tested forward · Info only = no tested edge: "
     "what the model thinks, not a bet.",
     "**Last meetings** — how the two teams' games against each other went over the last year. Context only: past "

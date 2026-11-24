@@ -39,6 +39,8 @@ def _icon(use) -> str:
 
 
 def _agree(league: str, r: Dict) -> str:
+    if league == "SOCCER":
+        return "—"
     try:
         import game_previews as GP
         return GP.agreement(r.get("_full") or {}, league) if r.get("_full") else "—"
@@ -79,8 +81,14 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
     for r in rows:
         full = r.get("_full") or {}
         agree = _agree(league, r)
-        blow = GP.blowout(league, full) if full else "—"
-        last = GP._last(league, full) if full else "—"
+        try:
+            blow = GP.blowout(league, full) if full else "—"
+        except Exception:                                       # noqa: BLE001 — a league the simulator doesn't know
+            blow = "—"
+        try:
+            last = GP._last(league, full) if full else "—"
+        except Exception:                                       # noqa: BLE001
+            last = "—"
         cg = cand.get(r.get("game"))
         seen = set()
 
@@ -164,7 +172,7 @@ def gl_board(league: str, day: str, markets: Sequence[str], slot: str, game: str
     return out
 
 
-ICON_KEY = ("✅ Bet = a tested tag · 🧪 Tracking = the close-gap rule being tested forward · Info only = no tested "
+ICON_KEY = ("🃏 Bet = a tested tag · 🧪 Tracking = the close-gap rule being tested forward · Info only = no tested "
             "edge.  \n**Pick type:** Money pick = the model's chance reconciled with the market (the books' chance plus only "
             "the part of the model's disagreement its record has earned) at a price that pays · Line pick = the side "
             "of the spread or total the model's own number favors against the market (the Game Lab's Pick) · Winner = "
@@ -215,3 +223,78 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
     with st.expander(f"🧾 Full game board ({len(rows)} games) — tick any line to log it", expanded=False):
         GLT.render(rows, f"bb_glt_{league}", date_str, past=date_str < today)
     st.divider()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Nov 24 (owner): "NCAAMB, NCAA Football, Soccer, and International hoops should reflect game lines on the Today page
+# since player props are not readily available and are not what I typically bet on for these game types."
+LINE_SPORTS_TODAY = ("NCAAMB", "NCAAF", "SOCCER", "INTL")
+_RANK = {"🃏 Bet": 0, "🧪 Tracking": 1}
+
+
+def _soccer(day: str, rows=None, flags=None) -> List[Dict]:
+    import game_previews as GP
+    import todays_best as TB
+    if rows is None:
+        try:
+            rows = TB.soccer_rows(day)
+        except Exception:                                       # noqa: BLE001
+            rows = []
+    if flags is None:
+        try:
+            flags = TB.soccer_flags(day)
+        except Exception:                                       # noqa: BLE001
+            flags = []
+    out = []
+    for f in flags:
+        out.append({"Time": f.get("time") or "", "Game": f.get("game"), "Bet?": GP.BET_TRACK,
+                    "Use": "📈", "Pick type": "Price above the sharp line", "Market": f.get("market") or "",
+                    "Pick": f.get("pick"), "Price": f.get("price"), "Chance": f.get("chance"),
+                    "League": f.get("league"), "_ev": f.get("ev"), "_kick": (f.get("_rec") or {}).get("kickoff")})
+    for r in rows:
+        out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Bet?": GP.BET_INFO, "Use": "",
+                    "Pick type": "Model's most likely result", "Market": "Moneyline (3-way)",
+                    "Pick": r.get("winner"), "Price": r.get("price"), "Chance": r.get("chance"),
+                    "League": r.get("league"), "_ev": None, "_kick": (r.get("_rec") or {}).get("kickoff")})
+    import components as C
+    return C.by_kickoff(out, lambda x: x.get("_kick") or x.get("Time"))
+
+
+def today_rows(sport: str, day: str, win_rows: Sequence[Dict]) -> List[Dict]:
+    """Every game line for one of the game-line sports, with Bet? / Use / Pick type, by start time."""
+    if sport == "SOCCER":
+        return _soccer(day)
+    rows = [r for r in win_rows or [] if r.get("sport") == sport]
+    out = board_rows(sport, day, rows)
+    moving = {r.get("game"): r.get("spread_move_why") for r in rows if r.get("spread_move") == "📈 our way"}
+    for o in out:
+        if moving.get(o["Game"]) and o["Market"] == "Spread":
+            o["Use"] = (o["Use"] + " 📈").strip()
+            o["_move"] = moving[o["Game"]]
+    return out
+
+
+def today_cards(rows: Sequence[Dict], n: int = 4) -> List[Dict]:
+    """The sport's row on the Today page: 🃏 Bet first, then 🧪 Tracking, then spreads moving our way, then the
+    strongest Info-only reads -- one card per game, in the Today page's card shape."""
+    def rank(r):                                                # info-only: a line pick before a favorite's moneyline
+        return (_RANK.get(r["Bet?"], 2 if r.get("_move") else 3), r.get("Pick type") == WINNER,
+                -(r.get("Chance") or 0))
+    out, games = [], set()
+    for r in sorted(rows, key=rank):
+        if r["Game"] in games:
+            continue
+        games.add(r["Game"])
+        pr = r.get("Price")
+        try:
+            price = f"{float(pr):+.0f}" if pr is not None else "—"
+        except (TypeError, ValueError):
+            price = str(pr)
+        basis = " · ".join(x for x in (r.get("Pick type"), r.get("Use"),
+                                       ("spread " + r["_move"]) if r.get("_move") else "") if x)
+        out.append({"pick": r["Pick"], "chance": r.get("Chance"), "lock": "🔒" in (r.get("Use") or ""),
+                    "money": "💰" in (r.get("Use") or ""), "move": "", "price": price, "game": r["Game"] or "",
+                    "time": r.get("Time") or "", "record": "", "basis": basis, "bet": r["Bet?"], "kind": "Line"})
+        if len(out) >= n:
+            break
+    return out

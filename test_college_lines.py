@@ -33,3 +33,26 @@ def test_plays_lists_money_picks_and_close_gap_games_by_time_with_icons_left(mon
 def test_same_game_matches_full_names_to_short_labels():
     assert CL.same_game("Boston Celtics @ New York Knicks", "BOS Celtics @ NY Knicks")
     assert not CL.same_game("Boston Celtics @ New York Knicks", "Lakers @ Suns")
+
+
+def test_today_cards_put_bets_then_tracking_then_moves_then_line_picks(monkeypatch):
+    rows = [
+        {"Game": "G1", "Bet?": "Info only", "Pick type": CL.WINNER, "Pick": "A ML", "Chance": 0.9, "Use": "", "Price": -900},
+        {"Game": "G1", "Bet?": "Info only", "Pick type": CL.LINE, "Pick": "A -12", "Chance": 0.55, "Use": "", "Price": -110},
+        {"Game": "G2", "Bet?": "🧪 Tracking", "Pick type": CL.CLOSE, "Pick": "B -3", "Chance": None, "Use": "✅", "Price": -110},
+        {"Game": "G3", "Bet?": "🃏 Bet", "Pick type": CL.MONEY, "Pick": "C ML", "Chance": 0.45, "Use": "💰", "Price": 130},
+        {"Game": "G4", "Bet?": "Info only", "Pick type": CL.LINE, "Pick": "D +4", "Chance": 0.5, "Use": "📈", "Price": -110,
+         "_move": "D +2.5 → +4"},
+    ]
+    cards = CL.today_cards(rows)
+    assert [c["game"] for c in cards] == ["G3", "G2", "G4", "G1"]
+    assert cards[0]["bet"] == "🃏 Bet" and cards[0]["money"] and cards[0]["price"] == "+130"
+    assert cards[3]["pick"] == "A -12"                         # the line pick, not the -900 favorite
+
+
+def test_soccer_today_rows_flag_tracking_and_label_reads():
+    rows = CL._soccer("2026-11-24", rows=[{"time": "3:00 PM", "game": "X vs Y", "winner": "Y", "chance": 0.5,
+                                            "price": 120, "league": "EPL"}],
+                      flags=[{"time": "3:00 PM", "game": "X vs Y", "pick": "Over 2.5 goals", "market": "Total",
+                              "price": 105, "chance": 0.52, "ev": 0.03, "league": "EPL"}])
+    assert [r["Bet?"] for r in rows] == ["🧪 Tracking", "Info only"]

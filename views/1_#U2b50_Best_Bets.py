@@ -474,7 +474,7 @@ except Exception:                                               # noqa: BLE001
     pass
 for p in view:                                                  # Nov 24 (owner): a Bet? column
     _u = str(p.get("_use") or p.get("Use") or "")
-    p["_bet"] = "✅ Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
+    p["_bet"] = "🃏 Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
 _cols.append("_bet")
 _rename["_bet"] = "Bet?"
 _FIRST = ["Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
