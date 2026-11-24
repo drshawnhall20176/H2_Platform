@@ -95,7 +95,7 @@ mk = collections.Counter(r.get("market") for r in rows); print("markets", dict(m
 BOX = {}
 data = []
 for r in rows:
-    tid, oid = tm.get(str(r.get("team") or "").lower()), tm.get(str(r.get("opp") or "").lower())
+    tid, oid = str(r.get("team") or ""), str(r.get("opp") or "")
     keys = statkey(str(r.get("market") or ""))
     if not tid or not oid or not keys or r.get("player_id") is None or r.get("line") is None:
         continue
