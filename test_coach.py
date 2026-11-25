@@ -185,3 +185,13 @@ def test_lessons_count_test_bets_as_the_models_calls_not_unsupported():
     assert "2 of your 5 picks had no model support" in les
     import betlog as B
     assert [B.model_group(b) for b in (t1, ln, own1)] == ["with", "lean", "own"]
+
+
+def test_a_long_shot_the_model_prices_above_break_even_is_model_backed():
+    """Nov 25: a long shot whose model chance clears its price's break-even is the model's bet."""
+    import betlog as B
+    ls = {"model_prob": 0.30, "entry_odds": 300}             # break-even 25%
+    under = {"model_prob": 0.20, "entry_odds": 300}
+    even = {"model_prob": 0.49, "entry_odds": -110}
+    assert B.model_group(ls) == "with" and B.model_group(under) == "own" and B.model_group(even) == "own"
+    assert B.model_group({"model_prob": 0.55, "entry_odds": -110}) == "with"

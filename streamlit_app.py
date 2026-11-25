@@ -602,7 +602,11 @@ def run():
         for sec in OF.SECTION_ORDER[1:]:
             if office.get(sec):
                 office_nav[sec] = office[sec]
-        sports.render_sport_selector()
+        st.session_state["_office_mode_sport_picker"] = True     # Nov 25: a real sport picker inside the Office
+        try:
+            sports.render_sport_selector()
+        finally:
+            st.session_state["_office_mode_sport_picker"] = False
         if st.sidebar.button("⬅ Back to Today", key="office_back"):
             OF.leave(st.session_state)
             st.rerun()

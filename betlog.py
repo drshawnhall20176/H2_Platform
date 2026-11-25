@@ -922,7 +922,11 @@ def model_group(b: Dict) -> str:
     except (TypeError, ValueError):
         p = None
     t = {x.strip() for x in str(b.get("notes") or "").split(",") if x.strip()}
-    if (p or 0) >= 0.5 or t & {"close-gap-test", "money-pick"}:
+    # Nov 25 (owner: long shots the model priced as value showed as "no model support"): the model backs a bet when
+    # its chance clears what the PRICE needs to break even -- 50% only for an even-money bet
+    if p is not None and p >= _break_even(b.get("entry_odds")):
+        return "with"
+    if t & {"close-gap-test", "money-pick"}:
         return "with"
     if "lean" in t:
         return "lean"
@@ -1194,3 +1198,14 @@ def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float,
                        if (singles_total is not None and parlay_pnl is not None) else None),
         "legs": leg_detail,
     }
+
+
+def _break_even(odds) -> float:
+    """The win rate an American price needs to break even (0.5 when there's no price)."""
+    try:
+        a = float(odds)
+    except (TypeError, ValueError):
+        return 0.5
+    if a == 0:
+        return 0.5
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)

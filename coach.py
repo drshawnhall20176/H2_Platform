@@ -644,8 +644,8 @@ def lessons(bets: Sequence[Dict], day: str) -> List[str]:
         out.append(f"**{len(leans)} were Info-only leans** (the model's side, but not a tested bet): {lw}–{ll}.")
     if len(unbacked) >= 2:
         uw, ul = _wl(unbacked)
-        out.append(f"**{len(unbacked)} of your {len(picks)} picks had no model support** (under 50% or your own "
-                   f"pick): {uw}–{ul}. Check Find a bet first — if it isn't 🟢 or a 🟢 Small-stake Maybe, skip it.")
+        out.append(f"**{len(unbacked)} of your {len(picks)} picks had no model support** (the model's chance was "
+                   f"below what the price needs, or it was your own pick): {uw}–{ul}. Check Find a bet first — if it isn't 🟢 or a 🟢 Small-stake Maybe, skip it.")
     heavy = [b for b in picks if (_num(b.get("entry_odds")) or 0) <= -150 and not B._ticket(b)]
     if heavy:
         hw, hl = _wl(heavy)
