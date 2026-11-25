@@ -229,7 +229,7 @@ def test_the_page_is_registered_for_its_sports_and_open_to_members():
     src = (Path(__file__).parent / "streamlit_app.py").read_text()
     assert '"38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL")' in src
     assert '"38": ("Position Matchups", "🧭", "position_matchups")' in src
-    assert re.search(r'for k in \("7".*?"38"(, "62")?\):\s*\n\s*SECTION_OF\[k\] = "🔬 DEEP RESEARCH"', src, re.DOTALL)
+    assert re.search(r'for k in \("7".*?"38"(, "62")?(, "63")?\):\s*\n\s*SECTION_OF\[k\] = "🔬 DEEP RESEARCH"', src, re.DOTALL)
     assert "Position Matchups" not in src.split("owner_only_titles = {")[1].split("}")[0]   # Nov 10: members see it
     assert (Path(__file__).parent / "views" / "38_Position_Matchups.py").exists()
 
