@@ -356,3 +356,46 @@ def test_ufc_and_nfl_show_only_on_days_they_play(monkeypatch):
     assert real("UFC", "2026-11-28") is None                  # no key: unknown, so it stays on the bar
     monkeypatch.setattr(NE, "get_schedule", lambda season: [{"game_date": "2026-11-26"}, {"game_date": "2026-11-29"}])
     assert real("NFL", "2026-11-26") is True and real("NFL", "2026-11-25") is False
+
+
+def _results():
+    out = []
+    for i in range(30):
+        out.append({"date": f"2026-11-{(i % 20) + 1:02d}", "home_team": "Duke Blue Devils" if i % 2 else "Army Black Knights",
+                    "away_team": "Army Black Knights" if i % 2 else "Duke Blue Devils",
+                    "home_points": 70 + i % 7, "away_points": 66 + (i * 3) % 9})
+    return out
+
+
+def test_team_profile_form_ranks_and_pace():
+    rat = {"off": {"Duke Blue Devils": 5.0, "Army Black Knights": -3.0, "X": 1.0},
+           "def": {"Duke Blue Devils": 2.0, "Army Black Knights": 4.0, "X": 0.0}}
+    p = GC.profile(_results(), rat, "Duke Blue Devils", loose=False)
+    assert p["off_rank"] == 1 and p["def_rank"] == 2 and p["n_teams"] == 3 and len(p["last"]) == 5
+    assert all(r in ("W", "L", "T") for r, _ in p["last"])
+    assert GC.profile(_results(), rat, "Nobody State", loose=False) is None
+    pc = GC.pace_pct(_results(), 150)
+    assert 0 <= pc <= 1 and GC.pace_pct(_results()[:5], 150) is None
+    html = GC.form_html(p, "Duke")
+    assert "#1 of 3" in html and "Offense" in html and "Defense" in html
+
+
+def test_game_card_extras_render_and_offer_owner_log_boxes(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import game_previews as GP
+    monkeypatch.setattr(GP, "blowout", lambda lg, p: "🟩 20%")
+    monkeypatch.setattr(GP, "_last", lambda lg, p: "—")
+
+    def app():
+        import game_card as GC
+        from test_today_visual import _game, _results
+        GC._season = lambda lg, d: (_results(), {"off": {"Duke Blue Devils": 1.0, "Army Black Knights": 0.0},
+                                                 "def": {"Duke Blue Devils": 1.0, "Army Black Knights": 0.0}})
+        w = dict(_game(), bet_market="Spread")
+        g = GC.build(w)
+        GC.render_extras(g, w, "2026-11-25", "t")
+    at = AppTest.from_function(app, default_timeout=60).run()
+    assert not at.exception
+    assert any("Pace" in m.value for m in at.markdown) and any("Offense" in m.value for m in at.markdown)
+    labels = [c.label for c in at.checkbox]
+    assert any(l.startswith("📏 Line pick") for l in labels) and any(l.startswith("Likely winner") for l in labels)

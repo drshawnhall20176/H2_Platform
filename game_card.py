@@ -381,3 +381,127 @@ def render_fight(g: Dict) -> None:
     st.caption("H2 has no UFC model yet: these are the market's no-vig chances (the median across books) and the best "
                "price, so a pick is grounded in the odds — not a pick from us. The full card and logging are on the "
                "Fight card page.")
+
+
+
+# --------------------------------------------------------------------------- extras (Nov 25)
+def profile(results: List[Dict], ratings: Optional[Dict], team: str, loose: bool = True, n: int = 5) -> Optional[Dict]:
+    """One team from this season's results: offense / defense rank in the ratings model (1 = best) and its last `n`
+    results ("W", margin), newest last. None when the archive doesn't know the team."""
+    import intl_hoops as I
+    names = {g.get(k) for g in results or [] for k in ("home_team", "away_team") if g.get(k)}
+    mine = I.find_team(names, team, loose) if names else None
+    if mine is None:
+        return None
+    games = []
+    for g in results or []:
+        hp, ap = _num(g.get("home_points")), _num(g.get("away_points"))
+        if hp is None or ap is None:
+            continue
+        if g.get("home_team") == mine:
+            games.append((str(g.get("date") or ""), hp - ap))
+        elif g.get("away_team") == mine:
+            games.append((str(g.get("date") or ""), ap - hp))
+    games.sort()
+    last = games[-n:]
+    out = {"name": mine, "games": len(games), "last": [("W" if m > 0 else "L" if m < 0 else "T", m) for _, m in last]}
+    if ratings and ratings.get("off") and mine in ratings["off"]:
+        off, de = ratings["off"], ratings.get("def") or {}
+        out["off_rank"] = 1 + sum(1 for v in off.values() if v > off[mine])
+        out["def_rank"] = 1 + sum(1 for v in de.values() if v > de.get(mine, 0)) if mine in de else None
+        out["n_teams"] = len(off)
+    return out
+
+
+def pace_pct(results: List[Dict], total) -> Optional[float]:
+    """Where the model's total sits among this season's finished games (0 = the lowest-scoring, 1 = the highest)."""
+    t = _num(total)
+    tots = [hp + ap for g in results or [] for hp, ap in [(_num(g.get("home_points")), _num(g.get("away_points")))]
+            if hp is not None and ap is not None]
+    if t is None or len(tots) < 20:
+        return None
+    return sum(1 for x in tots if x < t) / len(tots)
+
+
+def form_html(p: Optional[Dict], label: str) -> str:
+    if not p:
+        return (f'<div style="flex:1;min-width:150px;"><div style="font-weight:700;color:{HB.INK};">{label}</div>'
+                f'<div style="color:{HB.GRAY};font-size:12px;">No results on file yet</div></div>')
+    dots = "".join(f'<span title="{"won" if r == "W" else "lost"} by {abs(m):g}" style="display:inline-block;width:22px;'
+                   f'height:22px;line-height:22px;text-align:center;border-radius:6px;margin-right:3px;font-size:11.5px;'
+                   f'font-weight:800;background:{HB.WIN if r == "W" else HB.LOSS if r == "L" else HB.GRAY}33;'
+                   f'color:{HB.WIN if r == "W" else HB.LOSS if r == "L" else HB.GRAY};">{r}</span>'
+                   for r, m in p["last"])
+
+    def rank_bar(title, rk):
+        if rk is None or not p.get("n_teams"):
+            return ""
+        frac = 1 - (rk - 1) / max(1, p["n_teams"] - 1)
+        return meter(title, frac, "worst", "best", HB.BLUE, f"#{rk} of {p['n_teams']}")
+    return (f'<div style="flex:1;min-width:150px;"><div style="font-weight:700;color:{HB.INK};margin-bottom:4px;">'
+            f'{label}</div><div style="margin-bottom:8px;">{dots or "—"}</div>'
+            + rank_bar("Offense", p.get("off_rank")) + rank_bar("Defense", p.get("def_rank")) + '</div>')
+
+
+def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
+    """Pace, each team's form and offense / defense rank, and (owner) log boxes -- under the game card."""
+    import streamlit as st
+    lg = g.get("league") or ""
+    try:
+        res, rat = _season(lg, day)
+    except Exception:                                           # noqa: BLE001
+        res, rat = [], None
+    if res:
+        loose = lg != "NCAAMB"
+        hp, ap = profile(res, rat, g.get("home") or "", loose), profile(res, rat, g.get("away") or "", loose)
+        pc = pace_pct(res, g.get("model_total"))
+        html = ""
+        if pc is not None:
+            html += meter("Pace — the model's total vs this season's games", pc, "low-scoring", "high-scoring",
+                          HB.BLUE, f"higher than {pc:.0%} of games")
+        html += (f'<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'
+                 + form_html(ap, f"{g.get('away')} · last {len((ap or {}).get('last') or [])}")
+                 + form_html(hp, f"{g.get('home')} · last {len((hp or {}).get('last') or [])}") + '</div>')
+        st.markdown("**The matchup**")
+        st.markdown(html, unsafe_allow_html=True)
+        st.caption("Offense / defense: each team's rank in the ratings model the projection uses (adjusted for "
+                   "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
+                   "Context only — the projection already counts all of it.")
+    _log_boxes(g, w, day, key)
+
+
+def _season(league: str, day: str):
+    """(this season's finished games, the ratings fitted on them) -- cached 30 minutes per league and day."""
+    import streamlit as st
+
+    @st.cache_data(ttl=1800, show_spinner=False, max_entries=8)
+    def load(lg, d):
+        import hoops_games_page as HG
+        import intl_hoops as I
+        res = HG._season_results(lg, d)
+        rat = I.ratings_weighted(res, [1.0] * len(res), hfa_prior=I.HFA_PRIOR.get(lg)) if res else None
+        return res, rat
+    return load(league, day)
+
+
+def _log_boxes(g: Dict, w: Dict, day: str, key: str) -> None:
+    """Owner build only: tick the Line pick / Money pick / Likely winner and log them, right from the card."""
+    import streamlit as st
+    import components as C
+    if not C.is_owner() or not (w or {}).get("_full"):
+        return
+    import game_lines_table as GLT
+    import log_ui as LU
+    opts = []
+    if w.get("best") and w.get("bet_market"):
+        opts.append(("✓ Pick", f"📏 Line pick: {w['best']}"))
+    if w.get("money_pick") and w.get("money_market"):
+        opts.append(("✓ Money", f"💰 Money pick: {w['money_pick']}"))
+    if w.get("winner"):
+        opts.append(("✓ Winner", f"Likely winner: {w['winner']} ML"))
+    if not opts:
+        return
+    st.markdown("**Log it** (only you see this)")
+    ticks = [(0, col) for col, label in opts if st.checkbox(label, key=f"{key}_log_{col}")]
+    items = GLT.line_items([w], ticks) if ticks else []
+    LU.panel(items, f"{key}_panel", day, tag=f"{str(g.get('league') or '').lower()}-games")

@@ -162,7 +162,13 @@ def _game_dialog(w: Dict, props: List[Dict]):
     if w.get("sport") == "TENNIS":                              # Nov 25: a match card, not a basketball box
         GC.render_tennis(GC.build_tennis(w))
         return
-    GC.render(GC.build(w), props, key=f"gcd_{_norm(w.get('game')).replace(' ', '_')}")
+    k = f"gcd_{_norm(w.get('game')).replace(' ', '_')}"
+    g = GC.build(w)
+    GC.render(g, props, key=k)
+    try:                                                        # Nov 25: pace, form, team strength, log boxes
+        GC.render_extras(g, w, _today_et(), k)
+    except Exception:                                           # noqa: BLE001 -- the card never breaks on an extra
+        pass
 
 
 @_st.dialog("Pick", width="large")
@@ -181,6 +187,12 @@ def _soccer_rows_cached(day: str, past: bool) -> List[Dict]:
 def _soccer_flags_cached(day: str) -> List[Dict]:
     import todays_best as TB
     return TB.soccer_flags(day)
+
+
+def _today_et() -> str:
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
 
 
 def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
