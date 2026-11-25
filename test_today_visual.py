@@ -214,3 +214,41 @@ def test_the_read_explains_form_matchup_and_projection():
     assert "allowed 6% less than the league average to centers" in txt and "down 6%" in txt
     assert "leans **Under**" in txt and "earned chance 54%" in txt and "ℹ️ back-to-back" in txt
     assert PC.read_bullets({}) == []
+
+
+def test_a_tested_tag_with_an_earned_chance_below_break_even_is_tracking_in_the_preview():
+    import game_previews as GP
+    assert abs(GP.break_even(-110) - 0.5238) < 1e-3 and GP.break_even(150) == 0.4 and GP.break_even(None) is None
+    weak = {"earned": 0.50, "price": -111}
+    strong = {"_earned": 0.58, "RealPrice": -110}
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak, earned_rule=True) == GP.BET_TRACK
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", strong, earned_rule=True) == GP.BET_YES
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak, earned_rule=False) == GP.BET_YES     # live site unchanged
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak) == GP.BET_YES                        # off-preview default
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", {"price": -110}, earned_rule=True) == GP.BET_YES   # no earned: as before
+    import player_card as PC
+    txt = "\n".join(PC.read_bullets({"Side": "Under", "Line": 22.5, "earned": 0.5, "price": -111,
+                                     "_earned": 0.5, "RealPrice": -111}, GP.BET_TRACK))
+    assert "Tracking, not a bet" in txt and "50%" in txt and "52.6%" in txt
+
+
+def test_search_reads_the_full_saved_list_and_drops_the_repeated_name():
+    r = dict(_p("NBA", "Tre Jones Pts+Reb+Ast Under 22.5", 0.6), player="Tre Jones", market="PRA")
+    assert TV.pick_text(r) == "Pts+Reb+Ast Under 22.5"
+    extra = dict(_p("NBA", "Aaron X Points Over 9.5", 0.55), player="Aaron X", market="Points")
+    assert [player_of["player"] for player_of in TV.search_options([r, extra, r])] == ["Aaron X", "Tre Jones"]
+
+
+def test_the_full_playable_list_is_saved_for_search(monkeypatch):
+    import model_store as MS
+    import todays_best as TB
+    saved = {}
+    monkeypatch.setattr(MS, "save_setting", lambda k, v: saved.__setitem__(k, v))
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None: saved.get(k, d))
+    monkeypatch.setattr(TB, "props_rows", lambda sp, plays, cap=True: [{"player": f"P{i}", "values": list(range(20)),
+                                                                        "mins": list(range(20))}
+                                                                       for i in range(3 if cap else 12)])
+    TB.save_props("NBA", "2026-11-25", [{"Game": "A @ B"}])
+    allrows = TB.load_all_props("NBA", "2026-11-25")
+    assert len(allrows) == 12 and len(allrows[0]["values"]) == 10 and len(allrows[0]["mins"]) == 10
+    assert TB.load_all_props("NHL", "2026-11-25") == []

@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Sequence
 import props_engine as PE
 
 KEY = "todays_best:{sport}:{date}"
+KEY_ALL = "todays_best_all:{sport}:{date}"     # Nov 25: every playable pick on the board (Today's player search)
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
@@ -127,6 +128,16 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
                                               on_board={p.get("Game") for p in timed if p.get("Game")})})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
         pass
+    # Nov 25 (owner: Today's search should find any player on tonight's boards, not just the top picks): every playable
+    # pick, kept slim (10 games of bars / minutes) -- the search box reads this, never the boards themselves
+    try:
+        import model_store as MS
+        slim = [dict(r, values=list(r.get("values") or [])[:10], mins=list(r.get("mins") or [])[:10])
+                for r in props_rows(sport, timed, cap=False)]
+        MS.save_setting(KEY_ALL.format(sport=sport, date=date_str),
+                        {"at": datetime.now(timezone.utc).isoformat(), "rows": slim})
+    except Exception:                                           # noqa: BLE001
+        pass
     # Nov 21 (owner: "your 14-1 record is overstated"): the picks as SHOWN -- every 💰 prop the board shows and the
     # Command Center's strongest-15 -- kept the first time they appear (pick_ledger.py)
     try:
@@ -185,6 +196,15 @@ def load_props(sport: str, date_str: str) -> Optional[Dict]:
         return MS.get_setting(KEY.format(sport=sport, date=date_str), None)
     except Exception:                                           # noqa: BLE001
         return None
+
+
+def load_all_props(sport: str, date_str: str) -> List[Dict]:
+    """Nov 25: every playable pick saved for the day (Today's player search); [] before the board's next build."""
+    try:
+        import model_store as MS
+        return list((MS.get_setting(KEY_ALL.format(sport=sport, date=date_str), None) or {}).get("rows") or [])
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 # --------------------------------------------------------------------------- game lines, international, tennis
