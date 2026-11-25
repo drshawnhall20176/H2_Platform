@@ -421,6 +421,14 @@ with tab_desk:
                 with st.expander(f"{g['kickoff']} — {g['game']}", expanded=False):
                     st.write(g["text"])
     st.caption("Commentary describes what the data shows; it is analysis, not a guarantee of any outcome.")
+    try:                                                        # Nov 25 (owner): what the write-up names opens its card
+        import card_links as _CL
+        _txt = " ".join([str(cache.get(fh) or "") if use_ai else ""] + [str(day.get("overview") or "")]
+                        + [str(f.get("text") or "") for f in day.get("focus") or []]
+                        + [str(g.get("text") or "") for g in day.get("games") or []])
+        _CL.mentions(_active.key, date_str, _txt, [g.get("game") for g in day.get("games") or []])
+    except Exception:                                           # noqa: BLE001
+        pass
     with st.expander("Where do these numbers come from? How independent are they?"):
         st.markdown(
             "**The model's chance** is the platform's standard projection, the same number Best Bets and Slip Lab show: "

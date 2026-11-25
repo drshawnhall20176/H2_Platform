@@ -219,11 +219,21 @@ if current in WEEKLY_SPORTS:
         merged = _slot_filter(_merge_schedule_results(results), f"ls_slot_{current}_{week}")
         C.todays_schedule_board(merged, _active.icon, _active.label,
                                 heading=f"Week {week}, {int(season)} — {_active.label} Schedule")
+        try:                                                    # Nov 25 (owner): each game opens its game card
+            import card_links as _CL
+            _CL.game_buttons(current, datetime.now(eastern).strftime("%Y-%m-%d"), "🃏 Game cards (this week's board)")
+        except Exception:                                       # noqa: BLE001
+            pass
     else:
         games.sort(key=lambda g: g.get("game_date") or g.get("start_date") or "")
         st.caption(f"{len(games)} game(s) — Week {week}, {int(season)}")
         for g in games:
             _render_game_flat(g)
+        try:
+            import card_links as _CL
+            _CL.game_buttons(current, datetime.now(eastern).strftime("%Y-%m-%d"), "🃏 Game cards (this week's board)")
+        except Exception:                                       # noqa: BLE001
+            pass
 
 else:
     target = st.date_input("Date", datetime.now(eastern))
@@ -235,6 +245,11 @@ else:
         result = _slot_filter(result, f"ls_slot_{current}_{date_str}")
         C.todays_schedule_board(result, _active.icon, _active.label,
                                 heading=f"{date_str} — {_active.label} Schedule")
+        try:                                                    # Nov 25 (owner): each game opens its game card
+            import card_links as _CL
+            _CL.game_buttons(current, date_str)
+        except Exception:                                       # noqa: BLE001
+            pass
     else:
         @st.cache_data(ttl=300, show_spinner="Loading schedule...")
         def load_schedule_for_date(sport_key_inner: str, date_str_inner: str):
@@ -250,6 +265,11 @@ else:
         st.caption(f"{len(games)} game(s) — {date_str}")
         for g in games:
             _render_game_flat(g)
+        try:
+            import card_links as _CL
+            _CL.game_buttons(current, date_str)
+        except Exception:                                       # noqa: BLE001
+            pass
 
 st.divider()
 st.caption("Read-only schedule data — this page doesn't feed any projection, pick, grade, or "

@@ -517,10 +517,13 @@ _FIRST = ["_league", "Time", "Game", "_bet", "Player", "Team", "Market", "Side",
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
-st.dataframe(df.style.format({"Model %": "{:.0%}", "Earned %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}",
-                              "Money score": "{:+.1%}"}, na_rep="—")
-             .theme_gradient(cmap="Greens", subset=["Model %"]),
-             width="stretch", hide_index=True, height=400)
+import card_links as _CL                                        # Nov 25 (owner): a row opens the player card
+_CL.table(df.style.format({"Model %": "{:.0%}", "Earned %": "{:.0%}", "Conviction": "{:.2f}×", "Projection": "{:.1f}",
+                           "Money score": "{:+.1%}"}, na_rep="—")
+          .theme_gradient(cmap="Greens", subset=["Model %"]),
+          key=f"bb_table_{_active.key}", items=view, open_fn=_CL.open_player(_active.key),
+          caption="Tap a row to open the player's card — every prop he has tonight, his games, the matchup.",
+          width="stretch", hide_index=True, height=400)
 if "Blowout risk" in df.columns or "Model & market agree?" in df.columns:
     st.caption("**Blowout risk**: the game's chance of a lopsided finish (🟩 low · 🟨 medium · 🟥 high) — starters can "
                "sit late, which hurts Overs and helps Unders. **Model & market agree?**: whether the book's price leans "

@@ -37,3 +37,14 @@ def test_for_day_reads_each_games_archive():
     got = AH.for_day("NBA", "2026-11-25", ROWS, load_odds=lambda h, a: calls.append((h, a)) or {"offers": QUOTES})
     assert calls == [("PHI", "MIA")] and len(got) == 2
     assert AH.for_day("NBA", "2026-11-25", ROWS, load_odds=lambda h, a: None) == []
+
+
+def test_card_rows_are_his_rungs_with_the_scans_honest_chance():
+    p = {"Player": "Joel Embiid", "MarketKey": "player_rebounds", "Market": "Rebounds", "Game": "MIA @ PHI",
+         "_values": [8, 9, 10, 4, 11, 12, 9, 8, 7, 10]}
+    got = AH.card_rows(p, "NBA", "2026-11-25", load_odds=lambda h, a: {"offers": QUOTES},
+                       long_shots=[{"Player": "Joel Embiid", "Market": "Rebounds", "Bet": "8+ Rebounds",
+                                    "Honest chance": 0.71}])
+    assert [r["rung"] for r in got] == ["4+ Rebounds", "8+ Rebounds"] and got[1]["honest"] == 0.71
+    assert got[0]["honest"] is None
+    assert AH.card_rows({"Player": "X"}, "NBA", "2026-11-25") == []
