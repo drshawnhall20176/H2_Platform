@@ -104,11 +104,49 @@ import streamlit as _st
 
 
 # The two pop-ups, at module level so a click inside one (a player picker in the game card) reruns just the pop-up.
+FAV_KEY = "h2_favs"
+
+
+def favorites() -> List[str]:
+    """Nov 25: the viewer's ⭐ players. Kept for the session and in the page's web address (?fav=...), so a bookmark
+    of the page brings them back; nothing is saved on the server."""
+    if FAV_KEY not in _st.session_state:
+        try:
+            raw = _st.query_params.get("fav") or ""
+        except Exception:                                       # noqa: BLE001
+            raw = ""
+        _st.session_state[FAV_KEY] = [x for x in str(raw).split("|") if x]
+    return list(_st.session_state[FAV_KEY])
+
+
+def set_favorite(name: str, on: bool) -> List[str]:
+    favs = [f for f in favorites() if f != name] + ([name] if on else [])
+    _st.session_state[FAV_KEY] = favs
+    try:
+        if favs:
+            _st.query_params["fav"] = "|".join(favs)
+        elif "fav" in _st.query_params:
+            del _st.query_params["fav"]
+    except Exception:                                           # noqa: BLE001
+        pass
+    return favs
+
+
+def player_of(row: Dict) -> str:
+    return str(row.get("player") or row.get("Player") or "")
+
+
 @_st.dialog("Player card", width="large")
 def _player_dialog(row: Dict, sport: str):
     import game_previews as GP
     import player_card as PC
     c = PC.from_row(row)
+    name = player_of(row)
+    if name:
+        on = _st.toggle("⭐ Favorite", value=name in favorites(), key=f"fav_{_norm(name).replace(' ', '_')}",
+                        help="Your favorites show first on Today. Bookmark the page to keep them.")
+        if on != (name in favorites()):
+            set_favorite(name, on)
     PC.render(c, sport, bet=GP.prop_bet(sport, str(c.get("Use") or ""), c))
 
 
@@ -181,6 +219,10 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
         st.info("No games or picks on today's boards yet. Boards fill in through the day as the books post lines.")
         return
     sections.sort(key=lambda x: (-len(x[1]), -len(x[2])))
+    try:
+        _search_and_favorites(rows, player_dlg)
+    except Exception:                                           # noqa: BLE001 -- extras never blank the page
+        pass
     for s, cards, games in sections:
         with st.container(border=True):
             st.markdown(f"#### {s.icon} {s.key}  \n<span style='opacity:.7'>{len(games)} game"
@@ -220,3 +262,53 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                 if len(games) > STRIP_MAX:
                     st.caption(f"{len(games) - STRIP_MAX} more {s.key} games under **Games** in the sidebar, or "
                                "switch to **Table** above.")
+
+
+def search_options(rows: Sequence[Dict]) -> List[Dict]:
+    """Every player pick on today's boards, one per player and market, earliest game first."""
+    seen, out = set(), []
+    for r in rows or []:
+        if r.get("kind") != "Prop" or not player_of(r):
+            continue
+        k = (r.get("sport"), player_of(r), r.get("market") or r.get("pick"))
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+def _open_search():
+    _st.session_state["tv_search_open"] = True
+
+
+def _search_and_favorites(rows: Sequence[Dict], player_dlg) -> None:
+    import streamlit as st
+    opts = search_options(rows)
+    if not opts:
+        return
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        i = st.selectbox(f"🔎 Find a player tonight ({len(opts)} picks)", [None] + list(range(len(opts))),
+                         key="tv_search", on_change=_open_search,
+                         format_func=lambda i: "Type a name…" if i is None else
+                         f"{player_of(opts[i])} — {opts[i].get('pick')} ({opts[i].get('sport')}, {opts[i].get('time') or ''})")
+    if i is not None and st.session_state.pop("tv_search_open", False):
+        player_dlg(opts[i], opts[i].get("sport") or "")
+    favs = favorites()
+    mine = [r for r in opts if player_of(r) in favs]
+    with c2:
+        st.caption(f"⭐ {len(favs)} favorite player{'s' if len(favs) != 1 else ''}"
+                   + (f" · {len(mine)} pick{'s' if len(mine) != 1 else ''} tonight" if favs else
+                      " — open any player card and tap ⭐ Favorite to pin him here."))
+    if mine:
+        with st.container(border=True):
+            st.markdown("#### ⭐ Your players tonight")
+            for start in range(0, min(len(mine), 8), 4):
+                cols = st.columns(4)
+                for j, r in enumerate(mine[start:start + 4]):
+                    c = {"pick": r.get("pick"), "chance": r.get("chance"), "price": r.get("price"),
+                         "game": r.get("game"), "time": r.get("time"), "money": r.get("money"), "lock": r.get("lock")}
+                    with cols[j].container(border=True):
+                        st.markdown(pick_card_html(c), unsafe_allow_html=True)
+                        if st.button("Open →", key=f"tv_fav_{start + j}", width="stretch"):
+                            player_dlg(r, r.get("sport") or "")

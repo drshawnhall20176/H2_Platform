@@ -80,6 +80,69 @@ def bar_chart(rows: List[Dict], line: Optional[float], projection: Optional[floa
     return alt.layer(*layers).properties(height=260)
 
 
+SLOT_NAME = {"G": "guards", "F": "forwards", "C": "centers", "PG": "point guards", "SG": "shooting guards",
+             "SF": "small forwards", "PF": "power forwards", "QB": "quarterbacks", "RB": "running backs",
+             "WR": "wide receivers", "TE": "tight ends", "D": "defensemen"}
+
+
+def matchup_chip(factor, slot=None) -> Optional[Dict]:
+    """Nov 25: tonight's defense against his position, from the matchup factor the projection already uses (what this
+    defense allows his position vs the league average, this season blended with last). Words, not a letter grade:
+    {"text", "tone": soft | tough | even}; None when there's no factor."""
+    try:
+        f = float(factor)
+    except (TypeError, ValueError):
+        return None
+    if f != f:
+        return None
+    who = SLOT_NAME.get(str(slot or ""), "his position")
+    pct = (f - 1) * 100
+    if f >= 1.03:
+        return {"text": f"{'Soft' if f >= 1.08 else 'Leans soft'} matchup · allows {pct:+.0f}% to {who}", "tone": "soft"}
+    if f <= 0.97:
+        return {"text": f"{'Tough' if f <= 0.92 else 'Leans tough'} matchup · allows {pct:+.0f}% to {who}",
+                "tone": "tough"}
+    return {"text": f"Even matchup · about league average vs {who}", "tone": "even"}
+
+
+def minutes_rows(mins: List[float]) -> List[Dict]:
+    vals = [v for v in list(mins or [])[:10] if v is not None][::-1]
+    n = len(vals)
+    return [{"Game": "Last" if n - i == 1 else f"{n - i} ago", "Order": i, "Minutes": float(v)}
+            for i, v in enumerate(vals)]
+
+
+def minutes_chart(rows: List[Dict], proj: Optional[float]):
+    """His minutes, oldest left, against tonight's projected minutes (H2 blue bars, light-blue dotted rule)."""
+    import altair as alt
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return None
+    order = list(df.sort_values("Order")["Game"])
+    base = alt.Chart(df).encode(x=alt.X("Game:N", sort=order, title=None, axis=alt.Axis(labelAngle=0)))
+    layers = [base.mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, width={"band": 0.6}, color=HB.GRAY_SOFT).encode(
+                  y=alt.Y("Minutes:Q", title="Minutes", axis=alt.Axis(gridOpacity=0.12)),
+                  tooltip=[alt.Tooltip("Game:N"), alt.Tooltip("Minutes:Q", format=".1f")])]   # values on hover
+    if proj is not None:
+        pj = pd.DataFrame({"y": [proj], "t": [f"Tonight ~{proj:.0f}"]})
+        layers.append(alt.Chart(pj).mark_rule(color=HB.BLUE_SOFT, strokeDash=[2, 3], strokeWidth=1.8).encode(y="y:Q"))
+        layers.append(alt.Chart(pj).mark_text(align="left", dx=-18, dy=-8, color=HB.BLUE_SOFT, fontSize=11.5).encode(
+            y="y:Q", x=alt.datum(order[0], type="nominal"), text="t:N"))
+    return alt.layer(*layers).properties(height=170)
+
+
+def extras_on() -> bool:
+    """Nov 25: the newest card pieces (matchup chip, minutes chart) show only in the commercial layout -- a
+    commercial deployment, or the owner previewing it -- until the owner promotes them."""
+    try:
+        import streamlit as st
+        import nav_layout as NL
+        return bool(NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY)))
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
 def _pct(x) -> str:
     try:
         return f"{float(x):.0%}"
@@ -99,7 +162,9 @@ def from_row(r: Dict) -> Dict:
             "Projection": r.get("projection") if r.get("projection") is not None else r.get("Projection"),
             "ModelProb": r.get("raw_chance") if r.get("raw_chance") is not None else r.get("chance"),
             "_earned": r.get("earned"), "_values": r.get("values") or [], "Why": r.get("why"),
-            "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game")}
+            "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game"),
+            "_mins": r.get("mins") or [], "_proj_min": r.get("proj_min"), "_factor": r.get("factor"),
+            "_slot": r.get("slot")}
 
 
 def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> None:
@@ -123,13 +188,18 @@ def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> 
         render(c, sp, bet=GP.prop_bet(sp, str(c.get("Use") or ""), c))
 
 
-def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None) -> None:
-    """One board play (Best Bets' row) as a card."""
+def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None,
+           extras: Optional[bool] = None) -> None:
+    """One board play (Best Bets' row) as a card. `extras` (default: the commercial layout only) adds the matchup
+    chip and the minutes chart."""
     import streamlit as st
     import components as C
     side, line = p.get("Side") or "", p.get("Line")
     vals = list(p.get("_values") or [])
     price = p.get("RealPrice")
+    extras = extras_on() if extras is None else extras
+    mc = matchup_chip(p.get("_factor"), p.get("_slot")) if extras else None
+    mchip = "" if not mc else " " + HB.chip(mc["text"], {"soft": HB.BLUE}.get(mc["tone"], HB.GRAY))
     head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
             f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
@@ -138,7 +208,7 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             f' vs {p.get("Opp") or p.get("Versus") or ""} · {p.get("Time") or ""}</div>'
             f'<div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap;">{HB.bet_chip(bet or "Info only")}'
             + (f' {HB.chip(str(p.get("_use") or p.get("Use")), HB.BLUE)}' if (p.get("_use") or p.get("Use")) else "")
-            + f'</div></div>'
+            + mchip + f'</div></div>'
             f'<div style="text-align:right;"><div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.06em;">'
             f'TONIGHT</div><div style="color:{HB.GOLD};font-size:26px;font-weight:800;">{side} {"" if line is None else f"{line:g}"}'
             f'</div><div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""}'
@@ -166,6 +236,17 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
     else:
         st.caption("His game-by-game bars appear after the board's next hourly rebuild (they're attached as the board "
                    "is built).")
+    if extras:
+        try:
+            mrows = minutes_rows(p.get("_mins") or [])
+            mch = minutes_chart(mrows, p.get("_proj_min")) if mrows else None
+            if mch is not None:
+                st.altair_chart(mch, width="stretch", key=f"pcm_{p.get('PlayerId')}_{p.get('Market')}")
+                st.caption("His minutes in the same games" + (" — **light-blue dotted** = the minutes the model "
+                           "projects tonight." if p.get("_proj_min") is not None else ".")
+                           + " Fewer minutes than usual is the most common reason an Over misses.")
+        except Exception:                                       # noqa: BLE001 -- the card never breaks on an extra
+            pass
     why = [x for x in (p.get("Why"), p.get("UseWhy")) if x]
     warn = p.get("Warnings") or []
     st.markdown("**The read**")
