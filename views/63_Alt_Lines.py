@@ -29,7 +29,7 @@ day = st.date_input("Date", datetime.now(eastern).date(), key="ah_day", format="
 
 @st.cache_data(ttl=900, show_spinner="Reading tonight's alternate prices…", max_entries=8)
 def _load(sport, d):
-    rows = TB.load_all_props(sport, d)
+    rows = TB.load_reads(sport, d) or TB.load_all_props(sport, d)   # every player the model read, not just plays
     return AH.for_day(sport, d, rows)
 
 

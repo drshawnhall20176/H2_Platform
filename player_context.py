@@ -65,6 +65,12 @@ def rest_text(team: str, r: Optional[Dict]) -> str:
                           f"{d} day{'s' if d != 1 else ''} since their last game")
 
 
+def possessive(name: str) -> str:
+    """"Charlotte Hornets" -> "Charlotte Hornets'", "Miami Heat" -> "Miami Heat's"."""
+    n = str(name or "")
+    return n + ("'" if n.endswith("s") else "'s")
+
+
 def _ids(p: Dict):
     try:
         return int(p.get("PlayerId")), int(p.get("_team_id")), int(p.get("_opp_id"))
@@ -141,7 +147,7 @@ def render(p: Dict, sport: str, day: Optional[str] = None) -> None:
             st.caption(f"{sum(hits)} of {len(hits)} cleared it — a small sample; the projection already weighs it.")
     else:
         st.caption(f"He hasn't played {opp} yet this season.")
-    st.markdown(f"**{opp}'s defense lately — {mk.lower()} allowed per game**")
+    st.markdown(f"**{possessive(opp)} defense lately — {mk.lower()} allowed per game**")
     cells = []
     for label, a in allowed.items():
         v = (a or {}).get(key)
