@@ -399,3 +399,59 @@ def test_game_card_extras_render_and_offer_owner_log_boxes(monkeypatch):
     assert any("Pace" in m.value for m in at.markdown) and any("Offense" in m.value for m in at.markdown)
     labels = [c.label for c in at.checkbox]
     assert any(l.startswith("📏 Line pick") for l in labels) and any(l.startswith("Likely winner") for l in labels)
+
+
+def test_line_moves_biggest_first_with_direction():
+    a = dict(_game(home="H1", away="A1"), spread_move="📈 our way", spread_move_why="H1 -5 → -7")
+    a["_full"] = dict(a["_full"], open_line=5.0, line=7.0)
+    b = dict(_game(home="H2", away="A2"))
+    b["_full"] = dict(b["_full"], open_line=3.0, line=3.5)          # half a point: not a move
+    c = dict(_game(home="H3", away="A3"), spread_move="📉 against")
+    c["_full"] = dict(c["_full"], open_line=-1.0, line=2.0)
+    mv = TV.line_moves([a, b, c])
+    assert [m["size"] for m in mv] == [3.0, 2.0] and mv[0]["our_way"] is False and mv[1]["our_way"] is True
+    assert mv[1]["text"] == "H1 -5 → -7" and mv[0]["text"] == "H3 +1 → -2"
+
+
+def test_hot_streaks_count_straight_games_against_tonights_line():
+    assert TV.streak([25, 22, 30, 19, 28], 20.5, "Over") == 3
+    assert TV.streak([3, 4, 2, 6], 4.5, "Under") == 3
+    assert TV.streak([], 1.5, "Over") == 0
+    rows = [dict(_p("NBA", "A Points Over 20.5", 0.6), player="A", market="Points", side="Over", line=20.5,
+                 values=[25, 22, 30, 24, 21, 28, 19]),
+            dict(_p("NBA", "B Points Over 9.5", 0.55), player="B", market="Points", side="Over", line=9.5,
+                 values=[12, 3, 14, 15, 16]),
+            dict(_p("NBA", "A Points Over 20.5", 0.6), player="A", market="Points", side="Over", line=20.5,
+                 values=[25, 22, 30, 24, 21, 28, 19])]
+    hs = TV.hot_streaks(rows)
+    assert [(r["pick"], r["_streak"]) for r in hs] == [("A Points Over 20.5", 6)]
+
+
+def test_today_cards_show_the_moves_and_streak_strips(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import nav_layout as NL
+    import pick_records as PR
+    import sports
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    hot = dict(_p("NBA", "A Points Over 20.5", 0.61), player="A", market="Points", side="Over", line=20.5,
+               values=[25, 22, 30, 24, 21, 28])
+    w = dict(_game(sport="NBA", home="B", away="A"), best_tested=True, spread_move="📈 our way",
+             spread_move_why="B -5 → -7")
+    w["_full"] = dict(w["_full"], open_line=5.0, line=7.0)
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [hot], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [w])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: RECS.get(sp, {}))
+    monkeypatch.setattr(PR, "lean_records", lambda lg, days=30, recs=None: {})
+    monkeypatch.setattr(sports, "in_season", lambda k, day=None: k == "NBA")
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60)
+    at.session_state[NL.PREVIEW_KEY] = True
+    at.run()
+    assert not at.exception
+    md = " ".join(m.value for m in at.markdown)
+    assert "Biggest line moves" in md and "Hot streaks" in md and "6 straight" in md
+    keys = [b.key for b in at.button if b.key]
+    assert "tv_move_0" in keys and "tv_streak_0" in keys
+    at.button(key="tv_streak_0").click().run()
+    assert not at.exception
