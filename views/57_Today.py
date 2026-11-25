@@ -37,6 +37,15 @@ def _load(day, keys):
     return best.get("rows") or [], winners
 
 
+@st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+def _search_rows(day, keys):
+    """Nov 25: every playable pick saved today (the player search), not just Today's top picks."""
+    out = []
+    for k in keys:
+        out += TB.load_all_props(k, day)
+    return out
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _tag_recs(sp):
     import pick_records as PR
@@ -131,7 +140,12 @@ _cards_ok = False
 if _view == "Cards":
     try:
         import today_visual as _TV
-        _TV.render([s for s in live if not picked or s.key in picked], rows, winners, _day, records_for=_tag_recs)
+        try:
+            _all = _search_rows(_day, tuple(props_sports))
+        except Exception:                                       # noqa: BLE001
+            _all = []
+        _TV.render([s for s in live if not picked or s.key in picked], rows, winners, _day, records_for=_tag_recs,
+                   search_rows=_all)
         _cards_ok = True
     except Exception:                                           # noqa: BLE001 -- the tables below are the fallback
         st.caption("The card view couldn't load just now, so here are the tables.")

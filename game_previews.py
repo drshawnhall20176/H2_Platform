@@ -377,10 +377,46 @@ def prop_tracking(sport: str, p: Dict) -> bool:
     return any(cfg["sport"] == sport and CR.prop_qualifies(rule, row) for rule, cfg in CR.PROP_RULES.items())
 
 
-def prop_bet(sport: str, use_text: str = "", play: Optional[Dict] = None) -> str:
-    """Bet? for a prop (or any tagged pick): a tested tag -> 🃏 Bet; a tracked prop rule -> 🧪 Tracking; else Info only."""
+def break_even(price) -> Optional[float]:
+    """The win rate a price needs to break even (American odds; the vig left in)."""
+    a = _f(price)
+    if a is None or a == 0:
+        return None
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def earned_short(play: Optional[Dict]) -> Optional[Dict]:
+    """Nov 25 (owner: a 🃏 Bet next to a 50% earned chance reads as a contradiction): {"earned", "needed", "price"}
+    when the pick's EARNED chance (the model corrected to its record) is not above the break-even rate for its price;
+    else None. Reads a board play (_earned, RealPrice) or a saved row (earned, price)."""
+    if not play:
+        return None
+    e = _f(play.get("_earned") if play.get("_earned") is not None else play.get("earned"))
+    price = play.get("RealPrice") if play.get("RealPrice") is not None else play.get("price")
+    need = break_even(price)
+    if e is None or need is None or e > need:
+        return None
+    return {"earned": e, "needed": need, "price": _f(price)}
+
+
+def earned_rule_on() -> bool:
+    """The earned-chance check is in the commercial layout first (the owner previews it before it goes live)."""
+    try:
+        import streamlit as st
+        import nav_layout as NL
+        return bool(NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY)))
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def prop_bet(sport: str, use_text: str = "", play: Optional[Dict] = None, earned_rule: Optional[bool] = None) -> str:
+    """Bet? for a prop (or any tagged pick): a tested tag -> 🃏 Bet; a tracked prop rule -> 🧪 Tracking; else Info only.
+    Nov 25: with the earned rule on, a tested tag whose earned chance doesn't clear its price's break-even is 🧪
+    Tracking, not a bet (earned_short says why)."""
     u = str(use_text or "")
     if any(i in u for i in TESTED_ICONS):
+        if (earned_rule_on() if earned_rule is None else earned_rule) and earned_short(play):
+            return BET_TRACK
         return BET_YES
     if play is not None and prop_tracking(sport, play):
         return BET_TRACK

@@ -199,10 +199,22 @@ def read_bullets(p: Dict, bet: str = "") -> List[str]:
     verdict = {"🃏": "🃏 **Bet** — this pick type has passed testing on real results.",
                "🧪": "🧪 **Tracking** — a candidate rule we're testing with small stakes; not proven yet.",
                "Info": "**Info only** — shown for context; this kind of pick hasn't earned a bet."}
-    for k, v in verdict.items():
-        if str(bet or "").startswith(k):
-            out.append(v)
-            break
+    short = None
+    try:
+        import game_previews as GP
+        short = GP.earned_short(p) if str(bet or "").startswith("🧪") else None
+    except Exception:                                           # noqa: BLE001
+        short = None
+    if short:
+        pr = "" if short["price"] is None else f" at {short['price']:+.0f}"
+        out.append(f"🧪 **Tracking, not a bet** — his pick type has a winning record, but this pick's earned chance "
+                   f"({short['earned']:.0%}) doesn't clear the {short['needed']:.1%} it needs to break even{pr}. "
+                   "We track it instead of betting it.")
+    else:
+        for k, v in verdict.items():
+            if str(bet or "").startswith(k):
+                out.append(v)
+                break
     flags = why.split(" · ", 1)[1] if " · " in why else ""
     for f in [x.strip() for x in flags.split(";") if x.strip()]:
         out.append(f"ℹ️ {f}")

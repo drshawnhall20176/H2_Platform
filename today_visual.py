@@ -205,7 +205,8 @@ def game_tile_html(w: Dict) -> str:
 
 
 def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: str,
-           records_for: Optional[Callable] = None, line_rows: Optional[Callable] = None) -> None:
+           records_for: Optional[Callable] = None, line_rows: Optional[Callable] = None,
+           search_rows: Optional[Sequence[Dict]] = None) -> None:
     """The Cards view: one row per sport (busiest first), its pick cards, then its game strip."""
     import streamlit as st
     import game_card as GC
@@ -224,7 +225,7 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
         return
     sections.sort(key=lambda x: (-len(x[1]), -len(x[2])))
     try:
-        _search_and_favorites(rows, player_dlg)
+        _search_and_favorites(list(rows or []) + list(search_rows or []), player_dlg)
     except Exception:                                           # noqa: BLE001 -- extras never blank the page
         pass
     for s, cards, games in sections:
@@ -268,8 +269,14 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                                "switch to **Table** above.")
 
 
+def pick_text(r: Dict) -> str:
+    """The pick without the player's name in front ("Tre Jones Pts+Reb+Ast Under 22.5" -> "Pts+Reb+Ast Under 22.5")."""
+    pick, name = str(r.get("pick") or ""), player_of(r)
+    return pick[len(name):].strip() if name and pick.startswith(name) else pick
+
+
 def search_options(rows: Sequence[Dict]) -> List[Dict]:
-    """Every player pick on today's boards, one per player and market, earliest game first."""
+    """Every player pick on today's boards, one per player and market, A to Z by player."""
     seen, out = set(), []
     for r in rows or []:
         if r.get("kind") != "Prop" or not player_of(r):
@@ -278,7 +285,7 @@ def search_options(rows: Sequence[Dict]) -> List[Dict]:
         if k not in seen:
             seen.add(k)
             out.append(r)
-    return out
+    return sorted(out, key=lambda r: player_of(r).lower())
 
 
 def _open_search():
@@ -295,7 +302,8 @@ def _search_and_favorites(rows: Sequence[Dict], player_dlg) -> None:
         i = st.selectbox(f"🔎 Find a player tonight ({len(opts)} picks)", [None] + list(range(len(opts))),
                          key="tv_search", on_change=_open_search,
                          format_func=lambda i: "Type a name…" if i is None else
-                         f"{player_of(opts[i])} — {opts[i].get('pick')} ({opts[i].get('sport')}, {opts[i].get('time') or ''})")
+                         f"{player_of(opts[i])} — {pick_text(opts[i])} ({opts[i].get('sport')}, "
+                         f"{opts[i].get('time') or ''})")
     if i is not None and st.session_state.pop("tv_search_open", False):
         player_dlg(opts[i], opts[i].get("sport") or "")
     favs = favorites()
