@@ -119,3 +119,46 @@ def game_buttons(sport: str, day: str, title: str = "🃏 Game cards") -> None:
                     TV._game_dialog(w, TV.players_in_game(TV.all_props(sport), w))
     _grid()
     st.caption("Tap a game for its card: the model vs the market, who's out, the players and their props.")
+
+
+def mentioned(text: str, rows, games) -> tuple:
+    """(players named in the text who have a line tonight, games of the write-up), in the order they appear."""
+    import today_visual as TV
+    low = " " + TV._norm(text) + " "
+    seen, names = set(), []
+    for r in rows or []:
+        n = TV.player_of(r)
+        k = TV._norm(n)
+        if not n or k in seen:
+            continue
+        for form in (f" {k} ", f" {k}s "):                     # "Brunson's" normalizes to "brunsons"
+            if form in low:
+                seen.add(k)
+                names.append((low.index(form), n))
+                break
+    return [n for _, n in sorted(names)], [g for g in games or [] if g]
+
+
+def mentions(sport: str, day: str, text: str, games) -> None:
+    """Buttons for every player and game the daily write-up names: each opens its card."""
+    import streamlit as st
+    import today_visual as TV
+    rows = TV.all_props(sport, day)
+    names, gl = mentioned(text, rows, games)
+    if not names and not gl:
+        return
+    st.markdown("**Open the cards for what's named above**")
+
+    @st.fragment
+    def _chips():
+        if names:
+            cols = st.columns(4)
+            for i, n in enumerate(names[:24]):
+                if cols[i % 4].button(f"👤 {n}", key=f"cl_wu_p_{i}", width="stretch"):
+                    open_player_named(sport)({"player": n})
+        if gl:
+            cols = st.columns(3)
+            for i, g in enumerate(gl[:15]):
+                if cols[i % 3].button(f"🏟️ {g}", key=f"cl_wu_g_{i}", width="stretch"):
+                    open_game(lambda r: sport)({"game": g, "date": day})
+    _chips()
