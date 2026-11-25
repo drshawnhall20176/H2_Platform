@@ -392,7 +392,8 @@ def review_sport(sport: str, morning: str, open_bets: Sequence[Dict], fetch: Cal
             "calibration": cal, "game_picks": games_rep,
             "trend": {"days": TREND_DAYS, "slates": len(trend), "graded": len(trend_rows),
                       "use": PG.use_record(trend_rows), "beat": PG.beat_model(trend_rows),
-                      "sides": PG.side_record(trend_rows), "clv": _clv(trend)},
+                      "sides": PG.side_record(trend_rows), "clv": _clv(trend),
+                      "lines": PG.line_record(trend_rows)},
             "suggestions": sugg, "settlement": settlement, "auto_tuning": auto_tune}
 
 

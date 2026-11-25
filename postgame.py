@@ -471,6 +471,35 @@ def side_record(graded: Sequence[Dict]) -> List[Dict]:
     return out
 
 
+def line_record(graded: Sequence[Dict]) -> List[Dict]:
+    """Nov 25 (PropSeason scrub item 6, their "Line History"): how often the book's posted line went over, per market --
+    every graded read, whatever the model said. A check on the market, not on the model: over 50% means the books set
+    that market low. Each player-market counted once per slate (the snapshot's line). Pushes are left out of the rate."""
+    by: Dict[str, Dict] = {}
+    seen = set()
+    for r in graded:
+        if r.get("actual") is None or r.get("line") is None or r.get("result") not in ("hit", "miss", "push"):
+            continue
+        k = (r.get("slate_date") or r.get("date"), r.get("player"), r.get("market"))
+        if k in seen:
+            continue
+        seen.add(k)
+        thr = float(r["line"])                                  # a whole-number line that lands exactly is a push
+        m = by.setdefault(r.get("market") or "?", {"over": 0, "under": 0, "push": 0, "diff": 0.0, "n": 0})
+        v = float(r["actual"])
+        m["over" if v > thr else "under" if v < thr else "push"] += 1
+        m["diff"] += v - float(r["line"])
+        m["n"] += 1
+    out = []
+    for mk, m in by.items():
+        dec = m["over"] + m["under"]
+        if not dec:
+            continue
+        out.append({"Market": mk, "Lines": m["n"], "Went over": m["over"], "Went under": m["under"],
+                    "Pushes": m["push"], "Over rate": m["over"] / dec, "Avg vs line": m["diff"] / m["n"]})
+    return sorted(out, key=lambda x: -x["Lines"])
+
+
 def lock_record(graded: Sequence[Dict]) -> Optional[Dict]:
     """The 🔒 Most probable picks (Best Bets' lock: 60%+ chance, 15%+ cushion, books not far off) as one row in
     use_record's shape, plus profit per $1 at the posted price where one was saved. None when none were graded."""
