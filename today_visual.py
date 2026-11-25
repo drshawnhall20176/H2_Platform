@@ -549,7 +549,7 @@ def pick_card_html(c: Dict) -> str:
         import injury_check as IC
         inj = (f'<div style="color:{HB.GOLD};font-size:12px;font-weight:700;margin-top:3px;">'
                f'{IC.chip(c["_inj"])} — check news before betting</div>')
-    return (f'<div style="min-height:132px;">{top}'
+    return (f'<div class="h2-card" style="min-height:132px;">{top}'
             f'<div style="color:{HB.INK};font-weight:800;font-size:15.5px;margin-top:7px;line-height:1.25;">'
             f'{icons}{c.get("pick") or ""}</div>' + inj + big +
             f'<div style="color:{HB.INK_SOFT};font-size:12px;margin-top:2px;">{c.get("game") or ""}'
@@ -573,7 +573,7 @@ def fight_tile_html(w: Dict) -> str:
         v = GC._num(x.get("price"))
         return "—" if v is None else f"{v:+.0f}"
     fav = max(g["fighters"], key=lambda x: x.get("market") or 0)
-    return (f'<div style="min-height:108px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
+    return (f'<div class="h2-card" style="min-height:108px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
             f'{g.get("time") or ""}</div><div style="color:{HB.INK};font-weight:800;font-size:14px;margin-top:3px;'
             f'line-height:1.25;">{g["game"]}</div><div style="color:{HB.GOLD};font-size:12.5px;margin-top:4px;">'
             f'{(a["name"] or "").split()[-1]} {px(a)} · {(b["name"] or "").split()[-1]} {px(b)}</div>'
@@ -598,7 +598,7 @@ def game_tile_html(w: Dict) -> str:
                        if x) or (str(w.get("lean_detail") or "").replace("market: ", "Market: ")
                                  or (f"{w['winner']} {float(w['price']):+.0f}" if w.get("winner")
                                      and isinstance(w.get("price"), (int, float)) else "No line yet"))
-    return (f'<div style="min-height:108px;{"opacity:.55;" if gone else ""}">'
+    return (f'<div class="h2-card" style="min-height:108px;{"opacity:.55;" if gone else ""}">'
             f'<div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
             f'{w.get("time") or ""}{" · started" if gone else ""}</div>'
             f'<div style="color:{HB.INK};font-weight:800;font-size:14px;margin-top:3px;line-height:1.25;">'
@@ -819,7 +819,7 @@ def _moves_strip(winners: Sequence[Dict], game_dlg, rows) -> None:
             w = m["w"]
             arrow = "" if m["our_way"] is None else ("📈 toward the model" if m["our_way"] else "📉 away from the model")
             with cols[j].container(border=True):
-                st.markdown(f'<div style="min-height:92px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;">'
+                st.markdown(f'<div class="h2-card" style="min-height:92px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;">'
                             f'{w.get("sport")} · {w.get("time") or ""}</div><div style="color:{HB.INK};font-weight:800;'
                             f'font-size:13.5px;margin-top:2px;line-height:1.25;">{w.get("game")}</div>'
                             f'<div style="color:{HB.GOLD};font-size:13px;font-weight:700;margin-top:4px;">{m["text"]}'
@@ -845,7 +845,7 @@ def _streaks_strip(rows: Sequence[Dict], player_dlg) -> None:
             bet = GP.prop_bet(r.get("sport") or "", use, r)
             ch = r.get("chance")
             with cols[j].container(border=True):
-                st.markdown(f'<div style="min-height:118px;">{HB.bet_chip(bet)}<div style="color:{HB.INK};font-weight:800;'
+                st.markdown(f'<div class="h2-card" style="min-height:118px;">{HB.bet_chip(bet)}<div style="color:{HB.INK};font-weight:800;'
                             f'font-size:14.5px;margin-top:6px;line-height:1.25;">{r.get("pick")}</div>'
                             f'<div style="color:{HB.GOLD};font-size:13px;font-weight:700;margin-top:3px;">🔥 '
                             f'{r["_streak"]} straight</div><div style="color:{HB.INK_SOFT};font-size:12px;">'

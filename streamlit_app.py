@@ -171,6 +171,9 @@ html, body, [class*="st-"] { font-feature-settings: "tnum" 1, "cv11" 1; }
 [data-testid="stDataFrame"] { font-variant-numeric: tabular-nums; }
 [data-testid="stCaptionContainer"] { color: #9aa4b2; }
 h1 { letter-spacing: -0.02em; } h2, h3, h4 { letter-spacing: -0.01em; }
+/* Nov 25: player-name links in the cards stay left-aligned when a long name wraps */
+div[role="dialog"] [data-testid="stBaseButton-tertiary"] { justify-content: flex-start !important; text-align: left !important; }
+div[role="dialog"] [data-testid="stBaseButton-tertiary"] p { text-align: left !important; }
 /* Nov 23 (owner: "unusable, especially on a phone"): phone-sized spacing. The banner drops its logo and shrinks,
    metric tiles and tick-box rows go two to a row instead of one per line, headings and padding tighten. */
 @media (max-width: 640px) {
@@ -188,6 +191,18 @@ h1 { letter-spacing: -0.02em; } h2, h3, h4 { letter-spacing: -0.01em; }
   [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"], [data-testid="stCheckbox"]):not(:has([data-testid="stDataFrame"], [data-testid="stPlotlyChart"], [data-testid="stVegaLiteChart"], [data-testid="stImage"])) > [data-testid="stColumn"] {
     flex: 1 1 calc(50% - 0.75rem) !important; min-width: calc(50% - 0.75rem) !important; width: auto !important; }
   [data-testid="stBaseButton-pills"], [data-testid="stBaseButton-pillsActive"] { padding: 0 9px !important; min-height: 1.75rem !important; font-size: 0.8rem !important; }
+  /* Nov 25 (owner: compact phone layout): card grids (picks, games, moves, streaks) go two to a row instead of one
+     full-width card per line; the cards drop their fixed height, tighten their type, and pop-ups use the screen. */
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)):has(.h2-card) {
+    flex-wrap: wrap !important; gap: 0.45rem !important; }
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3)):has(.h2-card) > [data-testid="stColumn"] {
+    flex: 1 1 calc(50% - 0.45rem) !important; min-width: calc(50% - 0.45rem) !important; width: auto !important; }
+  .h2-card { min-height: 0 !important; }
+  .h2-card div { font-size: 12px !important; line-height: 1.3 !important; }
+  .h2-card div[style*="font-weight:800"] { font-size: 13.5px !important; }
+  .h2-card div[style*="font-size:24px"] { font-size: 19px !important; }
+  [data-testid="stColumn"]:has(.h2-card) [data-testid="stBaseButton-secondary"] { min-height: 2rem !important; padding: 0.15rem 0.4rem !important; font-size: 0.8rem !important; }
+  div[role="dialog"] { width: 100vw !important; max-width: 100vw !important; margin: 0 !important; padding: 0.9rem 0.7rem !important; border-radius: 0 !important; }
 }
 </style>
 """
@@ -211,8 +226,12 @@ def run():
         _owner = True
     keys = [s.key for s in _sports.selectable_sports(_owner)]     # Nov 5: in-season sports + the labs
     if st.session_state.get("sport") not in keys:
-        st.session_state["sport"] = _sports.default_selectable(_owner)
+        # Nov 25 (owner: "Page not found" after a restart): a restart forgets the session, so a sport-only page's
+        # link landed on the default sport, where that page doesn't exist. The sport rides in the link (?sport=NBA)
+        # and a fresh session starts on it.
+        st.session_state["sport"] = _sports.from_link(keys) or _sports.default_selectable(_owner)
     active_sport = st.session_state["sport"]
+    _sports.keep_in_link(active_sport)
 
     # Sidebar sport picker -- called here so it renders in the sidebar. Streamlit places
     # st.navigation() page links at the top of the sidebar regardless of call order, so the

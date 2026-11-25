@@ -393,6 +393,30 @@ def enabled_sports() -> List[Sport]:
     return [s for s in REGISTRY.values() if s.enabled]
 
 
+LINK_PARAM = "sport"
+
+
+def from_link(keys) -> Optional[str]:
+    """The sport named in the page's link (?sport=NBA), if it's one this deployment offers."""
+    try:
+        import streamlit as st
+        v = st.query_params.get(LINK_PARAM)
+    except Exception:                                           # noqa: BLE001
+        return None
+    v = str(v or "").upper()
+    return next((k for k in keys if str(k).upper() == v), None) if v else None
+
+
+def keep_in_link(sport: str) -> None:
+    """Put the active sport in the page's link so a restart or a shared link reopens on it."""
+    try:
+        import streamlit as st
+        if st.query_params.get(LINK_PARAM) != sport:
+            st.query_params[LINK_PARAM] = sport
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
 def active_key() -> str:
     """The currently-selected sport key from session state (defaults to MLB)."""
     try:

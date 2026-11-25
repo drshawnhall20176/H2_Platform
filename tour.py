@@ -44,7 +44,12 @@ def seen() -> bool:
             return True
     except Exception:                                           # noqa: BLE001
         pass
-    return bool(st.session_state.get("_tour_done"))
+    if st.session_state.get("_tour_done"):
+        return True
+    try:                                                        # Nov 25 (owner): every restart reopened it for him;
+        return st.secrets.get("AUDIENCE", "owner") == "owner"   # on his site it opens only from its button
+    except Exception:                                           # noqa: BLE001
+        return False
 
 
 def finish() -> None:
