@@ -53,10 +53,13 @@ def _tag(league, p):
 
 
 def _commercial() -> bool:
-    """Nov 16: the customer view (a commercial deployment, or the owner previewing it) -- nav_layout.py."""
+    """Nov 16: the customer view (a commercial deployment). Nov 25 (owner: "What happened to ... the ability to log bets
+    from the Game lab"): the owner previewing the commercial layout keeps his own Game Lab -- tick boxes, log panel and
+    Use column -- so he never has to leave the preview to log a bet."""
     try:
         import nav_layout as NL
-        return NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY))
+        aud = str(st.secrets.get("AUDIENCE", "owner") or "owner").lower()
+        return aud != "owner" and NL.is_commercial(aud, st.session_state.get(NL.PREVIEW_KEY))
     except Exception:                                           # noqa: BLE001 -- no secrets: a local / owner run
         return False
 
