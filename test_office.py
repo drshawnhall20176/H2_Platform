@@ -65,3 +65,19 @@ def test_the_preview_still_runs_with_the_owner_section():
     at.run()
     assert not at.exception
     assert 'sections["🔐 OWNER (only you see this)"]' in open("streamlit_app.py").read()
+
+
+def test_the_office_sidebar_has_a_real_sport_picker():
+    # Nov 25 (owner): change sport inside the Office without going back to Today
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("streamlit_app.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.secrets["OWNER_OFFICE_PASSWORD"] = "pw"
+    at.session_state[OF.UNLOCKED] = True
+    at.session_state[OF.MODE] = True
+    at.run()
+    assert not at.exception
+    pick = at.sidebar.selectbox(key="_office_sport")
+    other = "NHL" if pick.value != "NHL" else "NBA"
+    pick.set_value(other).run()
+    assert not at.exception and at.session_state["sport"] == other

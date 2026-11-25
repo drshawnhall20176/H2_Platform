@@ -906,20 +906,33 @@ def model_split(bets: List[Dict]) -> Dict[str, Dict]:
     # Nov 24 (owner): three groups. "with": a tested pick (model chance 50%+), a 💰 Money pick, or a 🧪 close-gap test
     # bet; "lean": an Info-only lean ticked from a board (logged with the "lean" note); "own": everything else. A
     # board bet logged before the notes existed (no chance, category H2) counts as with the model.
-    def _tags(b):
-        return {t.strip() for t in str(b.get("notes") or "").split(",") if t.strip()}
-    w, ln, o = [], [], []
+    groups = {"with": [], "lean": [], "own": []}
     for b in bets:
-        t = _tags(b)
-        if (_p(b) or 0) >= 0.5 or t & {"close-gap-test", "money-pick"}:
-            w.append(b)
-        elif "lean" in t:
-            ln.append(b)
-        elif _p(b) is None and str(b.get("category") or "") in ("H2", "H2-beta"):
-            w.append(b)
-        else:
-            o.append(b)
-    return {"with": summary(w), "lean": summary(ln), "own": summary(o)}
+        groups[model_group(b)].append(b)
+    return {k: summary(v) for k, v in groups.items()}
+
+
+def model_group(b: Dict) -> str:
+    """Nov 25 (owner: "why does my coach say 10 out of 10 picks yesterday had no model support"): one bet's group --
+    "with" (a tested pick at 50%+, a 💰 Money pick, a 🧪 close-gap test bet, or a board bet logged before the notes
+    existed), "lean" (an Info-only lean ticked from a board) or "own". The Bet Log's split and My Coach both use it, so
+    they never disagree."""
+    try:
+        p = float(b.get("model_prob"))
+    except (TypeError, ValueError):
+        p = None
+    t = {x.strip() for x in str(b.get("notes") or "").split(",") if x.strip()}
+    # Nov 25 (owner: long shots the model priced as value showed as "no model support"): the model backs a bet when
+    # its chance clears what the PRICE needs to break even -- 50% only for an even-money bet
+    if p is not None and p >= _break_even(b.get("entry_odds")):
+        return "with"
+    if t & {"close-gap-test", "money-pick"}:
+        return "with"
+    if "lean" in t:
+        return "lean"
+    if p is None and str(b.get("category") or "") in ("H2", "H2-beta"):
+        return "with"
+    return "own"
 
 
 # "book" = captured from a sportsbook feed; "manual" = the price the owner typed from the book's own screen (Edge
@@ -1185,3 +1198,14 @@ def compare_parlay_vs_singles(legs: List[Dict], parlay_stake: float,
                        if (singles_total is not None and parlay_pnl is not None) else None),
         "legs": leg_detail,
     }
+
+
+def _break_even(odds) -> float:
+    """The win rate an American price needs to break even (0.5 when there's no price)."""
+    try:
+        a = float(odds)
+    except (TypeError, ValueError):
+        return 0.5
+    if a == 0:
+        return 0.5
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
