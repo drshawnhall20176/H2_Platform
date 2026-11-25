@@ -322,3 +322,37 @@ def test_tennis_opens_a_match_card_not_a_basketball_box():
     assert "B Player 62% to win" in tile and "B Player -150" in tile
     unpriced = GC.build_tennis(dict(r, _full={"home": "B Player", "away": "A Player"}))
     assert unpriced["priced"] is False and "no market line yet" in GC.tennis_html(unpriced)
+
+
+def _bout():
+    return {"id": "x", "commence": "2099-01-01T03:00:00Z", "a": "Fighter One", "b": "Fighter Two", "p_a": 0.64,
+            "best_a": -170, "best_b": 150, "books": 6, "prices": {"draftkings": {"a": -175, "b": 145}},
+            "lines": {"draftkings": {"total": {"Over": (2.5, -120), "Under": (2.5, -105)}}},
+            "book_keys": ["draftkings"]}
+
+
+def test_ufc_fight_card_is_market_only_and_labeled_so():
+    g = GC.build_fight(_bout())
+    assert [x["name"] for x in g["fighters"]] == ["Fighter One", "Fighter Two"]
+    assert abs(g["fighters"][1]["market"] - 0.36) < 1e-9 and "O/U 2.5" in g["total"]
+    html = GC.fight_html(g)
+    assert "market 64%" in html and "-170" in html and "Info only" in html and "model" not in html.lower()
+    rows = TV.ufc_bouts("2099-01-01", loader=lambda d: [_bout()])
+    assert rows[0]["sport"] == "UFC" and rows[0]["game"] == "Fighter One vs Fighter Two"
+    tile = TV.game_tile_html(rows[0])
+    assert "One -170" in tile and "Two +150" in tile and "Market: Fighter One 64%" in tile
+
+
+def test_ufc_and_nfl_show_only_on_days_they_play(monkeypatch):
+    import importlib
+    import customer_today as CT
+    import nfl_engine as NE
+    import ufc_engine as UE
+    real = importlib.reload(CT).has_games                     # the autouse fixture patched the module attribute
+    monkeypatch.setattr(CT, "odds_key", lambda: "k")
+    monkeypatch.setattr(UE, "card_dates", lambda k: ["2026-11-28"])
+    assert real("UFC", "2026-11-28") is True and real("UFC", "2026-11-25") is False
+    monkeypatch.setattr(CT, "odds_key", lambda: None)
+    assert real("UFC", "2026-11-28") is None                  # no key: unknown, so it stays on the bar
+    monkeypatch.setattr(NE, "get_schedule", lambda season: [{"game_date": "2026-11-26"}, {"game_date": "2026-11-29"}])
+    assert real("NFL", "2026-11-26") is True and real("NFL", "2026-11-25") is False

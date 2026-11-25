@@ -146,6 +146,25 @@ def has_games(key: str, day: str):
         if key in sports.LAB_SPORTS:
             import lab_schedule as LS
             return bool(LS.rows(key, LS.load(key), _dt.strptime(day, "%Y-%m-%d").date()))
+        if key == "UFC":                                        # Nov 25: fight days only (the free events list)
+            import ufc_engine as UE
+            k = odds_key()
+            return None if not k else day in UE.card_dates(k)
+        if key == "NFL":                                        # Nov 25: its schedule is the whole season
+            import nfl_engine as NE
+            d = _dt.strptime(day, "%Y-%m-%d").date()
+            season = d.year if d.month >= 3 else d.year - 1
+            return any(str(g.get("game_date") or "")[:10] == day for g in NE.get_schedule(season) or [])
         return bool(sports.get(key).engine.get_schedule(day))
     except Exception:                                           # noqa: BLE001
         return None
+
+
+def odds_key():
+    import os
+    try:
+        import streamlit as st
+        k = st.secrets.get("ODDS_API_KEY")
+    except Exception:                                           # noqa: BLE001
+        k = None
+    return k or os.environ.get("ODDS_API_KEY")
