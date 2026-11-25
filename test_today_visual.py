@@ -455,3 +455,29 @@ def test_today_cards_show_the_moves_and_streak_strips(monkeypatch):
     assert "tv_move_0" in keys and "tv_streak_0" in keys
     at.button(key="tv_streak_0").click().run()
     assert not at.exception
+
+
+def test_player_card_can_log_the_pick_on_the_owner_build_only(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import player_card as PC
+    card = {"Player": "Devin X", "PlayerId": 9, "Side": "Over", "Line": 2.5, "Market": "Threes Made",
+            "RealPrice": 120, "RealPriceBook": "draftkings", "ModelProb": 0.5, "_earned": 0.47, "Game": "A @ B"}
+    it = PC.log_item(card, "NBA")
+    assert it["pick"] == "Devin X Threes Made Over 2.5" and it["chance"] == 0.47 and it["price"] == 120
+    assert PC.log_item(dict(card, Line=None), "NBA") is None and PC.log_item(dict(card, Side=""), "NBA") is None
+
+    def app(aud):
+        import player_card as P
+        P.render({"Player": "Devin X", "PlayerId": 9, "Side": "Over", "Line": 2.5, "Market": "Threes Made",
+                  "RealPrice": 120, "_values": [3, 1, 4]}, "NBA", extras=False)
+    import components as Cm
+    monkeypatch.setattr(Cm, "is_owner", lambda: True)
+    own = AppTest.from_function(app, args=("owner",), default_timeout=60)
+    own.secrets["AUDIENCE"] = "owner"
+    own.run()
+    assert not own.exception and any(c.label.startswith("📝 Log Devin X") for c in own.checkbox)
+    monkeypatch.setattr(Cm, "is_owner", lambda: False)      # the public Discord build
+    pub = AppTest.from_function(app, args=("public",), default_timeout=60)
+    pub.secrets["AUDIENCE"] = "public"
+    pub.run()
+    assert not pub.exception and not any(c.label.startswith("📝 Log") for c in pub.checkbox)

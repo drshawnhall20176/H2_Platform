@@ -382,3 +382,41 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
                    "hurts Overs and helps Unders.")
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 25: log it from the card (owner build only)
+        log_box(p, sport)
+    except Exception:                                           # noqa: BLE001 -- the card never breaks on the log box
+        pass
+
+
+def log_item(p: Dict, sport: str) -> Optional[Dict]:
+    """The card's pick as a log_ui item (the same shape the boards' tick boxes log), or None when it can't be graded
+    (no player, side or line -- e.g. a King of the Court read)."""
+    side, line = p.get("Side"), p.get("Line")
+    if not p.get("Player") or side not in ("Over", "Under") or line is None:
+        return None
+    chance = p.get("_earned") if p.get("_earned") is not None else p.get("ModelProb")
+    return {"sport": sport, "kind": "Prop", "player": p.get("Player"), "pid": p.get("PlayerId"),
+            "market": p.get("Market"), "side": side, "line": line, "game": p.get("Game"),
+            "price": p.get("RealPrice"), "book": p.get("RealPriceBook") or p.get("PricedAt"),
+            "chance": None if chance is None else float(chance),
+            "pick": f"{p.get('Player')} {p.get('Market')} {side} {float(line):g}"}
+
+
+def log_box(p: Dict, sport: str) -> None:
+    """Owner build only (Nov 25, owner: "the ability to log bets straight from the player card ... an owner platform
+    option but not discord user"): tick and log this pick with the usual log panel."""
+    import streamlit as st
+    import components as C
+    if not C.is_owner():
+        return
+    it = log_item(p, sport)
+    if it is None:
+        return
+    import log_ui as LU
+    import pytz
+    from datetime import datetime
+    k = f"pclog_{p.get('PlayerId') or p.get('Player')}_{p.get('Market')}_{p.get('Side')}_{p.get('Line')}"
+    if st.checkbox(f"📝 Log {it['pick']}", key=f"{k}_tick", help="Only you see this. The price, stake and real / "
+                   "tracking choice are in the box that opens."):
+        LU.panel([it], f"{k}_panel", datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d"),
+                 tag=f"{str(sport).lower()}-props")
