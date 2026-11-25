@@ -400,13 +400,9 @@ def earned_short(play: Optional[Dict]) -> Optional[Dict]:
 
 
 def earned_rule_on() -> bool:
-    """The earned-chance check is in the commercial layout first (the owner previews it before it goes live)."""
-    try:
-        import streamlit as st
-        import nav_layout as NL
-        return bool(NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY)))
-    except Exception:                                           # noqa: BLE001
-        return False
+    """Nov 25: on everywhere -- owner, public Discord and commercial builds (the owner approved it after previewing it
+    in the commercial layout). Kept as a function so it can be switched off in one place."""
+    return True
 
 
 def prop_bet(sport: str, use_text: str = "", play: Optional[Dict] = None, earned_rule: Optional[bool] = None) -> str:
