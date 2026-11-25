@@ -153,7 +153,40 @@ def _player_dialog(row: Dict, sport: str):
 @_st.dialog("Game card", width="large")
 def _game_dialog(w: Dict, props: List[Dict]):
     import game_card as GC
+    if w.get("sport") == "SOCCER":                              # Nov 25: soccer's own card (three results)
+        GC.render_soccer(GC.build_soccer(w, props))
+        return
     GC.render(GC.build(w), props, key=f"gcd_{_norm(w.get('game')).replace(' ', '_')}")
+
+
+@_st.dialog("Pick", width="large")
+def _basic_dialog(c: Dict):
+    import game_card as GC
+    GC.render_basic(c)
+
+
+def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
+    """Nov 25 (owner: soccer cards said "isn't on the saved board yet"): the day's soccer games, earliest first."""
+    try:
+        if loader is None:
+            import todays_best as TB
+            from datetime import datetime as _dt
+            import pytz
+            past = day < _dt.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+            rows = TB.soccer_rows(day, past=past)
+        else:
+            rows = loader(day)
+    except Exception:                                           # noqa: BLE001
+        rows = []
+    return sorted(rows, key=kickoff_key)
+
+
+def soccer_flags(day: str) -> List[Dict]:
+    try:
+        import todays_best as TB
+        return TB.soccer_flags(day)
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 def _chance(x) -> str:
@@ -193,14 +226,14 @@ def game_tile_html(w: Dict) -> str:
     except Exception:                                           # noqa: BLE001
         gone = False
     lines = " · ".join(x for x in (w.get("spread_txt") or "", f"O/U {w['total_txt']}" if w.get("total_txt") else "")
-                       if x) or "No line yet"
+                       if x) or (str(w.get("lean_detail") or "").replace("market: ", "Market: ") or "No line yet")
     return (f'<div style="min-height:108px;{"opacity:.55;" if gone else ""}">'
             f'<div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
             f'{w.get("time") or ""}{" · started" if gone else ""}</div>'
             f'<div style="color:{HB.INK};font-weight:800;font-size:14px;margin-top:3px;line-height:1.25;">'
             f'{w.get("game") or ""}</div>'
             f'<div style="color:{HB.GOLD};font-size:12.5px;margin-top:4px;">{lines}</div>'
-            f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or "—"}</div>'
+            f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or w.get("best") or "—"}</div>'
             f'<div style="margin-top:6px;">{HB.bet_chip(bet) if bet else ""}</div></div>')
 
 
@@ -217,7 +250,7 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
             cards = sport_cards(s.key, rows, winners, day, records_for, line_rows)
         except Exception:                                       # noqa: BLE001 -- one sport never blanks the page
             cards = []
-        games = games_for(winners, s.key)
+        games = soccer_games(day) if s.key == "SOCCER" else games_for(winners, s.key)
         if cards or games:
             sections.append((s, cards, games))
     if not sections:
@@ -246,11 +279,14 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                                 else:
                                     st.toast("That player's card isn't on the saved board yet.")
                             else:
-                                w = GC.for_game(winners, c.get("game"))
-                                if w is not None:
+                                w = GC.for_game(list(winners or []) + list(games if s.key == "SOCCER" else []),
+                                                c.get("game"))
+                                if w is not None and w.get("sport") == "SOCCER":
+                                    game_dlg(w, soccer_flags(day))
+                                elif w is not None:
                                     game_dlg(w, props_in_game(rows, w))
-                                else:
-                                    st.toast("That game's card isn't on the saved board yet.")
+                                else:                           # Nov 25: never a dead end -- the pick's own facts
+                                    _basic_dialog(dict(c, sport=s.key))
             else:
                 st.caption("No pick clears the bar here yet. Open a game below for the model's read.")
             if games:
@@ -263,7 +299,8 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                         with cols[j].container(border=True):
                             st.markdown(game_tile_html(w), unsafe_allow_html=True)
                             if st.button("Game card →", key=f"tv_game_{s.key}_{start + j}", width="stretch"):
-                                game_dlg(w, props_in_game(rows, w))
+                                game_dlg(w, soccer_flags(day) if w.get("sport") == "SOCCER"
+                                         else props_in_game(rows, w))
                 if len(games) > STRIP_MAX:
                     st.caption(f"{len(games) - STRIP_MAX} more {s.key} games under **Games** in the sidebar, or "
                                "switch to **Table** above.")

@@ -262,3 +262,47 @@ def test_the_full_playable_list_is_saved_for_search(monkeypatch):
     allrows = TB.load_all_props("NBA", "2026-11-25")
     assert len(allrows) == 12 and len(allrows[0]["values"]) == 10 and len(allrows[0]["mins"]) == 10
     assert TB.load_all_props("NHL", "2026-11-25") == []
+
+
+def _soccer_row():
+    return {"sport": "SOCCER", "league": "Premier League", "time": "3:00 PM", "game": "Chelsea vs Arsenal",
+            "winner": "Arsenal", "chance": 0.52, "price": -120, "best": "Arsenal 52% (2-1)",
+            "lean_detail": "market: Arsenal 55%", "_probs": {"home": 0.52, "draw": 0.26, "away": 0.22},
+            "_market": {"home": 0.55, "draw": 0.25, "away": 0.20}, "_prices": {"home": -120, "draw": 260, "away": 380},
+            "_xg": {"home": 1.8, "away": 0.9}, "_sharp": True,
+            "_rec": {"home": "Arsenal", "away": "Chelsea", "kickoff": "2099-01-01T20:00:00Z"}}
+
+
+def test_soccer_game_card_shows_three_results_model_vs_market():
+    g = GC.build_soccer(_soccer_row(), [{"game": "Chelsea vs Arsenal", "pick": "Draw", "price": 260},
+                                        {"game": "Other vs Game", "pick": "X"}])
+    assert [x["name"] for x in g["results"]] == ["Arsenal", "Draw", "Chelsea"] and len(g["flags"]) == 1
+    html = GC.soccer_html(g)
+    assert "model 52%" in html and "market 55%" in html and "EXPECTED GOALS" in html and "Tracking" in html
+
+
+def test_soccer_and_unknown_games_open_a_card_not_a_dead_end():
+    from streamlit.testing.v1 import AppTest
+
+    def app():
+        import today_visual as TV
+        from test_today_visual import _soccer_row
+        import streamlit as st
+        if st.session_state.get("which") == "basic":
+            TV._basic_dialog({"sport": "TENNIS", "pick": "Sinner ML", "chance": 0.7, "price": "-250",
+                              "game": "Sinner vs Alcaraz", "time": "9:00 AM", "bet": "Info only"})
+        else:
+            TV._game_dialog(_soccer_row(), [])
+    at = AppTest.from_function(app, default_timeout=60).run()
+    assert not at.exception and any("Model's most likely result" in m.value for m in at.markdown)
+    at.session_state["which"] = "basic"
+    at.run()
+    assert not at.exception and any("Sinner ML" in m.value for m in at.markdown)
+    assert "That game's card isn't on the saved board yet" not in open("today_visual.py").read()
+
+
+def test_soccer_strip_uses_the_soccer_games():
+    rows = TV.soccer_games("2026-11-25", loader=lambda d: [_soccer_row()])
+    assert rows[0]["game"] == "Chelsea vs Arsenal"
+    html = TV.game_tile_html(rows[0])
+    assert "Market: Arsenal 55%" in html and "Arsenal 52% (2-1)" in html
