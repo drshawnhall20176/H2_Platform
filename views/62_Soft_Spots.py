@@ -52,8 +52,9 @@ if not games or not data:
     st.stop()
 
 c1, c2 = st.columns(2)
-stat = c1.pills("Stat", ["all"] + list(SS.STATS), default="all", key="ss_stat",
-                format_func=lambda k: "All" if k == "all" else SS.STATS[k].title()) or "all"
+# Nov 25 (live check): small numbers make big percentages (centers' threes +84%), so Points is the default view
+stat = c1.pills("Stat", list(SS.STATS) + ["all"], default="pts", key="ss_stat",
+                format_func=lambda k: "All" if k == "all" else SS.STATS[k].title()) or "pts"
 slot = c2.pills("Position", ["all"] + list(SS.SLOT_NAME), default="all", key="ss_slot",
                 format_func=lambda k: "All" if k == "all" else SS.SLOT_NAME[k].title()) or "all"
 tonight = []

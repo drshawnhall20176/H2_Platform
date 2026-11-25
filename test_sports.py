@@ -611,7 +611,7 @@ def test_sidebar_sections_match_the_documented_grouping():
         "25": "🔬 DEEP RESEARCH", "26": "🔬 DEEP RESEARCH", "27": "🔬 DEEP RESEARCH",
         "29": "🔬 DEEP RESEARCH", "30": "🔬 DEEP RESEARCH", "31": "🔬 DEEP RESEARCH",
         "32": "🔬 DEEP RESEARCH", "33": "🔬 DEEP RESEARCH", "34": "🔬 DEEP RESEARCH",
-        "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH",
+        "35": "🔬 DEEP RESEARCH", "36": "🔬 DEEP RESEARCH", "38": "🔬 DEEP RESEARCH", "62": "🔬 DEEP RESEARCH",
         "43": "🔬 DEEP RESEARCH", "44": "🔬 DEEP RESEARCH", "45": "🔬 DEEP RESEARCH",
         "46": "🔬 DEEP RESEARCH", "47": "🔬 DEEP RESEARCH", "55": "🔬 DEEP RESEARCH", "58": "🔬 DEEP RESEARCH",
         "16": "🔍 SELF-GRADING & PROOF", "17": "🔍 SELF-GRADING & PROOF",
@@ -1250,7 +1250,7 @@ def test_sport_only_page_visibility_matches_expected_config():
                      "27": ("MLB",), "29": ("NCAAF",), "30": ("NCAAF",), "31": ("NCAAF",),
                      "32": ("NCAAF",), "33": ("NFL",), "34": ("NFL",),
                      "35": ("NCAAF",), "36": ("NCAAF",),
-                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"), "43": ("TENNIS",), "44": ("INTL",), "55": ("SOCCER",), "45": ("NCAAMB",), "46": ("NBA",), "47": ("NHL",), "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"), "53": ("NBA", "NFL", "NHL", "NCAAF"), "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF", "SOCCER")}, pairs
+                         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"), "62": ("NBA",), "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"), "43": ("TENNIS",), "44": ("INTL",), "55": ("SOCCER",), "45": ("NCAAMB",), "46": ("NBA",), "47": ("NHL",), "50": ("NBA", "NCAAMB", "WNBA", "NFL", "NCAAF", "NHL"), "53": ("NBA", "NFL", "NHL", "NCAAF"), "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF", "SOCCER")}, pairs
     print("✓ sport_only_leads matches expected config (Bullpen Watch/Game Watch/Pitching Lab/"
           "Dinger Engine/Matchup Lab(MLB)/Player Lines/First Innings Totals -> MLB, Hot Hand "
           "Engine/Matchup Lab(WNBA/NBA/NCAAMB) -> WNBA+NBA+NCAAMB, Matchup Lab(NFL)/Anytime TD "
