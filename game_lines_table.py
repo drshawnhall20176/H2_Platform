@@ -15,7 +15,7 @@ tick boxes sat at the far right of a wide preview table. This is the sport desk'
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -244,8 +244,10 @@ def league_of(r: Dict) -> str:
     return sp if (not lg or lg == sp) else f"{sp} · {lg}"
 
 
-def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.DataFrame:
-    """The board as a table, columns in ORDER; empty columns dropped."""
+def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False,
+          extra_cols: Optional[Callable[[Dict], Dict]] = None) -> pd.DataFrame:
+    """The board as a table, columns in ORDER; empty columns dropped. `extra_cols` (a Game Lab's own context columns,
+    Nov 25) are added on the right."""
     import pick_records as PR
     import todays_best as TB
     df = pd.DataFrame([{
@@ -266,7 +268,8 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
         "Record (30d)": r.get("lean_record") or "—",
         "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
         "Spread": r.get("spread_txt") or "", "Total": r.get("total_txt") or "",
-        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": league_of(r)} for r in rows])
+        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": league_of(r),
+        **(_safe_extra(extra_cols, r))} for r in rows])
     if df.empty:
         return df
     drop = [] if past else ["Final", "Money result", "Pick result", "Winner result"]
@@ -278,13 +281,25 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
     return df[[c for c in ORDER if c in df.columns] + [c for c in df.columns if c not in ORDER]]
 
 
+def _safe_extra(fn, r) -> Dict:
+    if fn is None:
+        return {}
+    try:
+        return dict(fn(r) or {})
+    except Exception:                                           # noqa: BLE001 -- an extra column never breaks the board
+        return {}
+
+
 def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport: bool = False,
-           title: Optional[str] = None) -> None:
+           title: Optional[str] = None, keep: Optional[Callable[[Dict], bool]] = None,
+           extra_cols: Optional[Callable[[Dict], Dict]] = None) -> None:
     """The whole board: the Show choice, pies + a hits / misses filter on past days, the tick table and the log box."""
     import components as C
     import log_ui as LU
     import pick_records as PR
     rows = list(rows or [])
+    if keep is not None:                                        # Nov 25: the Game Lab's own filters (slot, game, team)
+        rows = [r for r in rows if keep(r)]
     if title:
         st.markdown(f"##### {title}")
     if not rows:
@@ -331,7 +346,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                     "🔒 Locks only": "No 🔒 game lines for this date — choose All games to see every game."}
                    .get(show, "Nothing to show."))
         return
-    df = frame(rows, past, show_sport)
+    df = frame(rows, past, show_sport, extra_cols)
     import game_previews as _GP
     df, _note = _GP.collapse_use(df)                           # Nov 23: a Use column that's ⚪ on every row goes
     if _note:
@@ -358,19 +373,23 @@ def _rows(league: str, day: str, past: bool) -> List[Dict]:
     return TB.winner_rows(day, leagues=[league], past=past)
 
 
-def lab_section(league: str, key: Optional[str] = None, day=None) -> None:
+def lab_section(league: str, key: Optional[str] = None, day=None, keep: Optional[Callable[[Dict], bool]] = None,
+                extra_cols: Optional[Callable[[Dict], Dict]] = None, title: Optional[str] = None,
+                last=None) -> None:
     """The board at the top of a Game Lab: its own date (default today, New York), the league's games that day."""
     from datetime import datetime
     import pytz
     import components as C
     key = key or f"glt_{league}"
     today = datetime.now(pytz.timezone("US/Eastern")).date()
-    C.section_header("🧾", "Game board: 💰 Money pick · Line pick · Winner pick")
+    C.section_header("🧾", title or "Game board: 💰 Money pick · Line pick · Winner pick")
     if day is None:
         day = st.date_input("Board date", today, key=f"{key}_date", format="MM/DD/YYYY")
-    try:
-        rows = [dict(r) for r in _rows(league, day.strftime("%Y-%m-%d"), day < today)]
+    from datetime import timedelta
+    span = [day + timedelta(days=i) for i in range(max(0, (last - day).days) + 1)] if last else [day]
+    try:                                                        # Nov 25: a weekly league (NFL) lists its whole week
+        rows = [dict(r) for d in span for r in _rows(league, d.strftime("%Y-%m-%d"), d < today)]
     except Exception as exc:                                    # noqa: BLE001 -- the rest of the lab still renders
         st.caption(f"The board is unavailable right now ({type(exc).__name__}).")
         return
-    render(rows, key, day.strftime("%Y-%m-%d"), past=day < today)
+    render(rows, key, day.strftime("%Y-%m-%d"), past=day < today, keep=keep, extra_cols=extra_cols)

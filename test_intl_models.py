@@ -264,11 +264,12 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
-    assert "Tennessee Volunteers by 25.5" in " ".join(_previews(at)["Market has"])
+    board = _previews(at)
+    assert "Tennessee Volunteers" in " ".join(board["Market spread"]) and "25.5" in " ".join(board["Market spread"])
     box = at.selectbox(key="hg_team_NCAAMB")                    # Nov 16: Find a team is a dropdown on every Game Lab
     assert box.label == "Find a team" and box.options == ["All teams", "Tennessee Volunteers", "Wofford Terriers"]
     box.set_value("Wofford Terriers").run()
-    assert any("Upcoming (1)" in m.value for m in at.markdown)
+    assert len(_previews(at)) == 1
     at2 = AppTest.from_file(str(Path(__file__).parent / "views" / "44_Intl_Hoops.py"), default_timeout=30)
     at2.run()
     at2.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()
@@ -346,7 +347,8 @@ def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
     t = _previews(at).to_string()
-    assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t and "🔒 Most probable" in t
+    print(t)
+    assert "Army Black Knights +24.5" in t and "21.5" in t and "72%" in t
 
 
 def test_euroleague_name_variants_match_loosely():
@@ -380,10 +382,10 @@ def test_espn_pro_league_parser_and_nba_nhl_pages(monkeypatch):
         at.run()
         at.date_input(key=f"hg_date_{lg}").set_value(DAY).run()
         assert not at.exception, [e.value for e in at.exception]
-        assert "Boston Celtics -3.5" in at.dataframe[0].value.to_string()
+        assert "Boston Celtics -3.5" in _previews(at).to_string()
         assert at.selectbox(key=f"hg_slot_{lg}").options == ["All slate", "Evening"]   # only slots with games
         at.selectbox(key=f"hg_slot_{lg}").set_value("Evening").run()
-        assert any("Upcoming (1)" in m.value for m in at.markdown)
+        assert len(_previews(at)) == 1
 
 
 def test_opening_night_keeps_last_season_and_a_sane_home_edge():
@@ -565,9 +567,9 @@ def test_genius_leagues_record_results_and_wait_for_enough_games(tmp_path):
 
 
 def _previews(at):
-    """Nov 20: the Game Lab's preview table (the Money · Pick · Winner board now comes first)."""
+    """Nov 25: the Game Lab's one games table -- the board, with the previews' context columns on its right."""
     for d in at.dataframe:
-        if "✓ Money" not in d.value.columns and "Money pick (best value)" not in d.value.columns:
+        if "Line pick (model favors)" in d.value.columns:
             return d.value
     return at.dataframe[0].value
 

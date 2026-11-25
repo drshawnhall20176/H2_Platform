@@ -50,9 +50,12 @@ def test_spotlight_lists_only_games_with_a_tested_reason():
     assert GP.spotlight([]) == []
 
 
-def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypatch):
+def test_game_lab_is_one_table_with_the_previews_context_on_the_right(monkeypatch):
+    # Nov 25 (owner: "unnecessary redundancy in the game tables ... it could be consolidated"): the board is the one
+    # games table; the previews' context columns ride on its right; the separate previews / finals tables are gone
     from datetime import datetime, timedelta, timezone
     from streamlit.testing.v1 import AppTest
+    import game_lines_table as GLT
     import model_store as MS
     now = datetime.now(timezone.utc)
     picks = [dict(_g(i, e, hs), sport="NCAAMB", game_id=str(i), kickoff=(now + timedelta(hours=2)).isoformat(),
@@ -60,35 +63,32 @@ def test_game_lab_shows_previews_on_every_build_with_the_owners_columns(monkeypa
                   final_home=None, final_away=None, pick=None, total_pick=None, ml_pick=None)
              for i, e, hs in ((1, 1.1, -10.5), (2, -19.1, -36.5))]
     monkeypatch.setattr(MS, "load_game_picks", lambda league, ungraded=False, db_path=None: picks if league == "NCAAMB" else [])
-    at = AppTest.from_file("views/45_NCAAMB_Game_Lab.py", default_timeout=120)
-    at.secrets["AUDIENCE"] = "commercial"
-    at.run()
-    assert not at.exception
-    games = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
-    assert "Use" not in games.columns and "Why" not in games.columns and "Pick" not in games.columns
-    assert [x.split("· ")[-1] for x in games[GP.SIDE]] == ["H1 -10.5", "A2 +36.5"]
-    assert any("Previews, not picks" in i.value for i in at.info)
-    assert not any("says Pass" in i.value for i in at.info)
+    board = [{"sport": "NCAAMB", "league": "NCAAMB", "game": f"A{i} @ H{i}", "time": "", "best": f"H{i} -5",
+              "winner": f"H{i}", "chance": 0.6, "_full": p} for i, p in ((1, picks[0]), (2, picks[1]))]
+    monkeypatch.setattr(GLT, "_rows", lambda league, day, past: board)
+    for aud in ("commercial", "owner"):
+        at = AppTest.from_file("views/45_NCAAMB_Game_Lab.py", default_timeout=120)
+        at.secrets["AUDIENCE"] = aud
+        at.run()
+        assert not at.exception
+        assert not [d for d in at.dataframe if GP.SIDE in d.value.columns]          # no separate previews table
+        assert not any("Started or final" in m.value for m in at.markdown)
+        assert any("Previews, not picks" in i.value for i in at.info)
+        assert any(e.label.startswith("☑️ Log any side") for e in at.expander) == (aud == "owner")
 
-    at = AppTest.from_file("views/45_NCAAMB_Game_Lab.py", default_timeout=120)
-    at.secrets["AUDIENCE"] = "owner"
-    at.run()
-    assert not at.exception
-    owner = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
-    # the same previews are the standard on the owner build, with the Use column and the owner's extra columns
-    # Nov 23 (owner): both games are ⚪ No edge, so the Use column gives way to one note above the table
-    assert list(owner.columns[:5]) == ["Tip (ET)", "Game", GP.BET, GP.AGREE, GP.blow_col("NCAAMB")]
-    assert list(owner.columns).index("Gap (pts)") == 5 and "Model has" in list(owner.columns)
-    assert {"Long backtest", "Tracking pick", "Why"} <= set(owner.columns) and "Pick" not in owner.columns
-    assert "Use" not in owner.columns and any("every game here reads ⚪ No edge" in c.value for c in at.caption)
-    assert any("Previews, not picks" in i.value for i in at.info)
-    # Nov 18: the owner ticks any side -- a box next to the book's spread, total and moneyline for each team
+
+def test_board_keep_and_context_columns():
     import hoops_games_page as HG
-    assert set(HG.TICK_COLS) <= set(owner.columns)
-    cols = list(owner.columns)                                     # Nov 23 (owner): win chance and total moved left
-    assert cols.index(GP.WIN) == cols.index(GP.SIDE) + 1 and cols.index(GP.TOTAL) == cols.index(GP.WIN) + 1
-    assert cols.index(GP.TOTAL) < cols.index(HG.BOOK_SPREAD)
-    assert not any(c.startswith("✓") for c in games.columns)                  # the customer build has no boxes
+    assert HG.board_keep({"A1 @ H1", "A2 @ H2"}, {"A1 @ H1", "A2 @ H2"}) is None        # filters not narrowing
+    keep = HG.board_keep({"A1 @ H1"}, {"A1 @ H1", "A2 @ H2"})
+    assert keep({"game": "A1 @ H1"}) and not keep({"game": "A2 @ H2"})
+    pv = GP.preview_rows("NCAAMB", [_g(1, 1.1)], RECS, lambda p: "", extras=lambda p: {"Why": "w", "Long backtest": "51%"})
+    extra = HG.context_cols(pv)({"game": "A1 @ H1"})
+    assert extra["Why"] == "w" and extra["Long backtest"] == "51%" and "Form (30 days)" in extra and GP.TOTAL in extra
+    assert HG.context_cols(pv)({"game": "nope"}) == {}
+    import game_lines_table as GLT
+    df = GLT.frame([{"sport": "NCAAMB", "game": "A1 @ H1", "best": "x"}], False, extra_cols=lambda r: {"Why": "w"})
+    assert list(df.columns)[-1] == "Why"
 
 
 def test_owner_rows_carry_use_and_extras_and_keep_their_place_for_logging():
