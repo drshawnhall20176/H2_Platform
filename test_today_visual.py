@@ -104,6 +104,7 @@ def test_today_page_shows_cards_only_in_the_commercial_preview(monkeypatch):
     # preview on: cards with Open buttons, a game strip, no tables
     at = AppTest.from_file("views/57_Today.py", default_timeout=60)
     at.session_state[NL.PREVIEW_KEY] = True
+    at.session_state["_tour_done"] = True                                 # the first-visit tour already seen
     at.run()
     assert not at.exception
     keys = [b.key for b in at.button if b.key]
@@ -510,3 +511,9 @@ def test_player_view_has_prop_chips_and_game_splits():
     assert split.options == ["L5", "L10", "L20"] and split.value == "L10"
     chips.set_value("Assists · Over 6.5").run()
     assert not at.exception
+
+
+def test_nfl_abbreviated_prop_games_match_the_named_board_game():
+    assert TV.same_game("NYJ @ MIA", "Miami Dolphins", "New York Jets")
+    assert TV.same_game("LA @ GB", "Green Bay Packers", "Los Angeles Rams")
+    assert not TV.same_game("NYJ @ MIA", "Buffalo Bills", "New York Jets")

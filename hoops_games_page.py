@@ -550,10 +550,13 @@ def game_cards(league, day, keep=None, last=None) -> None:
                     st.markdown(TV.game_tile_html(w), unsafe_allow_html=True)
                     if st.button("Game card →", key=f"hgc_{league}_{tag}_{start + j}", width="stretch"):
                         TV._game_dialog(w, TV.players_in_game(TV.all_props(league), w))
-    grid(live, "up")
-    if gone:
-        with st.expander(f"⏱️ Started or finished ({len(gone)})", expanded=not live):
-            grid(gone, "gone")
+    @st.fragment
+    def tiles():                                                # Nov 25: a tap reruns only the tiles -- the card opens
+        grid(live, "up")                                        # in a second, not after the whole page reruns
+        if gone:
+            with st.expander(f"⏱️ Started or finished ({len(gone)})", expanded=not live):
+                grid(gone, "gone")
+    tiles()
 
 
 def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, cust, last=None):

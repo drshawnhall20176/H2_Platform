@@ -34,9 +34,23 @@ def _nick(team) -> str:
     return w[-1] if w else ""
 
 
+def _full_names(game) -> str:
+    """Nov 25: the NFL boards label games by abbreviation ("NYJ @ MIA"); the game boards by name. Abbreviations become
+    names so a game card finds its players."""
+    txt = str(game or "")
+    if " @ " not in txt:
+        return txt
+    try:
+        import position_lines as PL
+        a, h = txt.split(" @ ", 1)
+        return f"{PL.NFL_TEAMS.get(a.strip(), a.strip())} @ {PL.NFL_TEAMS.get(h.strip(), h.strip())}"
+    except Exception:                                           # noqa: BLE001
+        return txt
+
+
 def same_game(prop_game, home, away) -> bool:
     """A prop row's game string against a board game's teams: exact, or both teams' last names in it."""
-    g = _norm(prop_game)
+    g = _norm(_full_names(prop_game))
     if not g:
         return False
     if g == _norm(f"{away} @ {home}"):
@@ -479,51 +493,54 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
         _streaks_strip([r for r in list(rows or []) + list(search_rows or []) if r.get("sport") in keys], player_dlg)
     except Exception:                                           # noqa: BLE001
         pass
-    for s, cards, games in sections:
-        with st.container(border=True):
-            st.markdown(f"#### {s.icon} {s.key}  \n<span style='opacity:.7'>{len(games)} {'fight' if s.key == 'UFC' else 'game'}"
-                        f"{'s' if len(games) != 1 else ''} today</span>", unsafe_allow_html=True)
-            if cards:
-                for i, (col, c) in enumerate(zip(st.columns(CARDS_PER_SPORT), cards)):
-                    with col.container(border=True):
-                        st.markdown(pick_card_html(c), unsafe_allow_html=True)
-                        if st.button("Open →", key=f"tv_card_{s.key}_{i}", width="stretch",
-                                     help="Open this pick's player card" if c.get("kind") == "Prop"
-                                     else "Open this game's card"):
-                            if c.get("kind") == "Prop":
-                                row = prop_row_for(rows, c)
-                                if row is not None:
-                                    player_dlg(row, s.key)
+    @st.fragment
+    def _cards():                                           # Nov 25: a tap reruns only the cards
+        for s, cards, games in sections:
+            with st.container(border=True):
+                st.markdown(f"#### {s.icon} {s.key}  \n<span style='opacity:.7'>{len(games)} {'fight' if s.key == 'UFC' else 'game'}"
+                            f"{'s' if len(games) != 1 else ''} today</span>", unsafe_allow_html=True)
+                if cards:
+                    for i, (col, c) in enumerate(zip(st.columns(CARDS_PER_SPORT), cards)):
+                        with col.container(border=True):
+                            st.markdown(pick_card_html(c), unsafe_allow_html=True)
+                            if st.button("Open →", key=f"tv_card_{s.key}_{i}", width="stretch",
+                                         help="Open this pick's player card" if c.get("kind") == "Prop"
+                                         else "Open this game's card"):
+                                if c.get("kind") == "Prop":
+                                    row = prop_row_for(rows, c)
+                                    if row is not None:
+                                        player_dlg(row, s.key)
+                                    else:
+                                        st.toast("That player's card isn't on the saved board yet.")
                                 else:
-                                    st.toast("That player's card isn't on the saved board yet.")
-                            else:
-                                w = GC.for_game(list(winners or []) + list(games if s.key == "SOCCER" else []),
-                                                c.get("game"))
-                                if w is not None and w.get("sport") == "SOCCER":
-                                    game_dlg(w, soccer_flags(day))
-                                elif w is not None:
-                                    game_dlg(w, props_in_game(rows, w))
-                                else:                           # Nov 25: never a dead end -- the pick's own facts
-                                    _basic_dialog(dict(c, sport=s.key))
-            else:
-                st.caption("H2 has no UFC model yet — tonight's card at market odds. Open a fight for the odds."
-                           if s.key == "UFC" else "No pick clears the bar here yet. Open a game below for the model's "
-                           "read.")
-            if games:
-                st.markdown(f"<div style='color:{HB.INK_SOFT};font-size:12.5px;margin:6px 0 2px;letter-spacing:.05em;'>"
-                            f"{'FIGHTS' if s.key == 'UFC' else 'GAMES'} · EARLIEST FIRST</div>", unsafe_allow_html=True)
-                shown = games[:STRIP_MAX]
-                for start in range(0, len(shown), 4):
-                    cols = st.columns(4)
-                    for j, w in enumerate(shown[start:start + 4]):
-                        with cols[j].container(border=True):
-                            st.markdown(game_tile_html(w), unsafe_allow_html=True)
-                            if st.button("Game card →", key=f"tv_game_{s.key}_{start + j}", width="stretch"):
-                                game_dlg(w, soccer_flags(day) if w.get("sport") == "SOCCER"
-                                         else props_in_game(rows, w))
-                if len(games) > STRIP_MAX:
-                    st.caption(f"{len(games) - STRIP_MAX} more {s.key} games under **Games** in the sidebar, or "
-                               "switch to **Table** above.")
+                                    w = GC.for_game(list(winners or []) + list(games if s.key == "SOCCER" else []),
+                                                    c.get("game"))
+                                    if w is not None and w.get("sport") == "SOCCER":
+                                        game_dlg(w, soccer_flags(day))
+                                    elif w is not None:
+                                        game_dlg(w, props_in_game(rows, w))
+                                    else:                           # Nov 25: never a dead end -- the pick's own facts
+                                        _basic_dialog(dict(c, sport=s.key))
+                else:
+                    st.caption("H2 has no UFC model yet — tonight's card at market odds. Open a fight for the odds."
+                               if s.key == "UFC" else "No pick clears the bar here yet. Open a game below for the model's "
+                               "read.")
+                if games:
+                    st.markdown(f"<div style='color:{HB.INK_SOFT};font-size:12.5px;margin:6px 0 2px;letter-spacing:.05em;'>"
+                                f"{'FIGHTS' if s.key == 'UFC' else 'GAMES'} · EARLIEST FIRST</div>", unsafe_allow_html=True)
+                    shown = games[:STRIP_MAX]
+                    for start in range(0, len(shown), 4):
+                        cols = st.columns(4)
+                        for j, w in enumerate(shown[start:start + 4]):
+                            with cols[j].container(border=True):
+                                st.markdown(game_tile_html(w), unsafe_allow_html=True)
+                                if st.button("Game card →", key=f"tv_game_{s.key}_{start + j}", width="stretch"):
+                                    game_dlg(w, soccer_flags(day) if w.get("sport") == "SOCCER"
+                                             else props_in_game(rows, w))
+                    if len(games) > STRIP_MAX:
+                        st.caption(f"{len(games) - STRIP_MAX} more {s.key} games under **Games** in the sidebar, or "
+                                   "switch to **Table** above.")
+    _cards()
 
 
 def pick_text(r: Dict) -> str:
