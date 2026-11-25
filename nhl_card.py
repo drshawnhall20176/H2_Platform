@@ -16,6 +16,7 @@ from typing import Dict, Iterable, List, Optional
 
 import h2_brand as HB
 
+MIN_SHARE_PLAYERS = 4      # the board keeps only playable picks; fewer than this per team isn't a team picture
 URL = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?dates={d}"
 
 
@@ -89,7 +90,7 @@ def point_share(rows: Iterable[Dict], team: str, abbr: str = "", n: int = 4) -> 
         if name and pj > 0:
             mine[name] = max(pj, mine.get(name, 0.0))
     tot = sum(mine.values())
-    if tot <= 0:
+    if tot <= 0 or len(mine) < MIN_SHARE_PLAYERS:               # a share of two players' projections says nothing
         return []
     return [{"name": k, "proj": v, "share": v / tot} for k, v in sorted(mine.items(), key=lambda kv: -kv[1])][:n]
 

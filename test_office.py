@@ -98,3 +98,15 @@ def test_the_office_sidebar_has_a_real_sport_picker():
     other = "NHL" if pick.value != "NHL" else "NBA"
     pick.set_value(other).run()
     assert not at.exception and at.session_state["sport"] == other
+
+
+def test_customer_layout_has_a_real_sport_picker():
+    # Nov 25 (owner: "there is no way to return to a sports selector"): the customer sidebar's sport is a picker
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("streamlit_app.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.run()
+    assert not at.exception
+    pick = [s for s in at.selectbox if s.label == "Sport"]
+    assert pick, "no Sport picker in the customer sidebar"
+    assert pick[0].value == at.session_state["sport"] and len(pick[0].options) > 1

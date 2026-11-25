@@ -484,6 +484,15 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
     _log_boxes(g, w, day, key)
 
 
+def _future(day) -> bool:
+    """ESPN leaves an old expected-return date on long-term injuries; only a date still ahead is worth showing."""
+    try:
+        from datetime import date as _d
+        return bool(day) and _d.fromisoformat(str(day)[:10]) >= _d.today()
+    except ValueError:
+        return False
+
+
 def injuries_html(team: str, flagged) -> str:
     """One team's column of tonight's injury report: out first, then questionable, with the expected return."""
     import injury_check as IC
@@ -492,7 +501,7 @@ def injuries_html(team: str, flagged) -> str:
         f'<b>{e["name"]}</b>{" · " + e["pos"] if e.get("pos") else ""}'
         f'<span style="color:{HB.INK_SOFT};"> — {e.get("label") or e["status"]}'
         f'{" (" + e["type"] + ")" if e.get("type") else ""}'
-        f'{" · back ~" + e["returns"][5:].replace("-", "/") if e.get("returns") and e["status"] == "out" else ""}'
+        f'{" · back ~" + e["returns"][5:].replace("-", "/") if _future(e.get("returns")) and e["status"] == "out" else ""}'
         f'</span></div>' for e in flagged) or f'<div style="color:{HB.INK_SOFT};font-size:13px;">Nobody listed</div>'
     return (f'<div style="flex:1;min-width:220px;"><div style="color:{HB.INK_SOFT};font-size:12px;'
             f'letter-spacing:.05em;margin-bottom:3px;">{str(team).upper()}</div>{items}</div>')

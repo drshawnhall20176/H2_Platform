@@ -45,7 +45,7 @@ JS = {"injuries": [
     {"displayName": "Boston Bruins", "injuries": [
         {"status": "Injured Reserve", "shortComment": "Hagens (back) is wearing a non-contact sweater.",
          "athlete": {"displayName": "James Hagens", "team": {"abbreviation": "BOS", "displayName": "Boston Bruins"},
-                     "position": {"abbreviation": "C"}}, "details": {"type": "Back", "returnDate": "2026-11-27"}},
+                     "position": {"abbreviation": "C"}}, "details": {"type": "Back", "returnDate": "2099-11-27"}},
         {"status": "Day-To-Day", "shortComment": "Zacha (lower body) is questionable for Wednesday.",
          "athlete": {"displayName": "Pavel Zacha", "team": {"abbreviation": "BOS", "displayName": "Boston Bruins"}}},
         {"status": "Day-To-Day", "shortComment": "day-to-day",
@@ -58,7 +58,7 @@ def test_parse_keeps_flagged_players_with_their_team():
     got = IC.parse(JS)
     assert [e["name"] for e in got] == ["James Hagens", "Pavel Zacha", "Some Guard"]      # plain day-to-day isn't news
     hag = got[0]
-    assert hag["status"] == "out" and hag["abbr"] == "BOS" and hag["returns"] == "2026-11-27" and hag["pos"] == "C"
+    assert hag["status"] == "out" and hag["abbr"] == "BOS" and hag["returns"] == "2099-11-27" and hag["pos"] == "C"
     assert got[2]["team"] == "Duke Blue Devils"
     assert IC.parse({}) == [] and IC.parse(None) == []
 
@@ -93,3 +93,10 @@ def test_game_card_injury_column():
     html = GC.injuries_html("Boston Bruins", IC.for_team("NHL", "BOS", IC.parse(JS)))
     assert "James Hagens" in html and "back ~11/27" in html and "Pavel Zacha" in html
     assert "Nobody listed" in GC.injuries_html("Jets", [])
+
+
+def test_game_card_hides_a_stale_return_date():
+    import game_card as GC
+    old = [{"name": "Ariel Hukporti", "pos": "C", "status": "out", "label": "Out", "type": "Achilles",
+            "returns": "2026-10-01"}]
+    assert "back ~" not in GC.injuries_html("76ers", old)
