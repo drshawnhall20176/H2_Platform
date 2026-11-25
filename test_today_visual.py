@@ -535,3 +535,26 @@ def test_every_read_is_saved_for_the_game_card(monkeypatch):
     assert {r["player"] for r in reads} == {"A", "B"} and len(reads[0]["values"]) == 10
     assert {r["player"] for r in TB.load_all_props("NBA", "2026-11-25")} == {"A"}     # the search keeps playable only
     assert TB.load_reads("NBA", "2026-11-24") == []
+
+
+def test_rotation_names_are_links_that_open_the_player_inside_the_game_card(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    def app():
+        import streamlit as st
+        import game_card as GC
+        GC.player_link("Bam Adebayo", "Bam Adebayo", "gcd_x", "gcd_x_rot_0")
+        st.write("picked:", st.session_state.get("gcd_x_player"))
+    at = AppTest.from_function(app, default_timeout=30)
+    at.run()
+    b = at.button(key="gcd_x_rot_0")
+    assert b.label == "Bam Adebayo"
+    b.click().run()
+    assert at.session_state["gcd_x_player"] == "Bam Adebayo"
+
+
+def test_rotation_bar_html():
+    import rotation_panel as RP
+    r = {"name": "Bam Adebayo", "avg_min": 33.0}
+    assert "→ <b" in RP.bar_html(r, 36, {"bam adebayo": 34.0}) and "opacity" in RP.bar_html(r, 36, None, {"bam adebayo": "out"})
+    assert RP.tag("Bam Adebayo", {"bam adebayo": "questionable"}) == "⚠️ " and RP.tag("X") == ""
