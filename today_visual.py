@@ -230,8 +230,9 @@ def _game_dialog(w: Dict, props: List[Dict]):
         row = next((r for r in game_props if _norm(player_of(r)) == _norm(who)), None)
         if row is not None:
             player_view(row, w.get("sport") or "", game_props, key=f"{k}_pv")
-            return
-        _st.session_state.pop(f"{k}_player", None)
+        else:                                                   # a name from Who's out / the rotation, no prop tonight
+            no_prop_card(who, w)
+        return
     g = GC.build(w)
     GC.render(g, props, key=k)
     try:                                                        # Nov 25: pace, form, team strength, log boxes
@@ -242,6 +243,19 @@ def _game_dialog(w: Dict, props: List[Dict]):
         _players_section(w, game_props, k)
     except Exception:                                           # noqa: BLE001
         pass
+
+
+def no_prop_card(name: str, w: Dict) -> None:
+    """A player tapped in the game card who has no prop on tonight's board: his name, the injury report, and why
+    there's no card."""
+    import player_card as PC
+    _st.markdown(f"### {name}")
+    _st.caption(f"{w.get('game') or ''}")
+    note = PC.injury_note({"Player": name}, w.get("sport") or "")
+    if note:
+        (_st.error if note.startswith("🚑") else _st.warning)(note)
+    _st.info("No prop on him on tonight's board yet, so there's no player card to show — the books may not have posted "
+             "his lines, or he's out. His minutes are in the game card's rotation.")
 
 
 def players_in_game(rows: Sequence[Dict], w: Dict) -> List[Dict]:

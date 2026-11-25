@@ -468,7 +468,7 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
                    "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
                    "Context only — the projection already counts all of it.")
     try:
-        _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day)
+        _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day, key)
     except Exception:                                           # noqa: BLE001
         pass
     if (w.get("sport") or lg) == "NHL":
@@ -478,7 +478,7 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
             pass
     if (w.get("sport") or lg) == "NBA":
         try:
-            _rotations(g.get("away") or "", g.get("home") or "", day)
+            _rotations(g.get("away") or "", g.get("home") or "", day, key=key)
         except Exception:                                       # noqa: BLE001
             pass
     _log_boxes(g, w, day, key)
@@ -507,8 +507,19 @@ def injuries_html(team: str, flagged) -> str:
             f'letter-spacing:.05em;margin-bottom:3px;">{str(team).upper()}</div>{items}</div>')
 
 
-def _injuries(sport: str, away: str, home: str, day: str) -> None:
-    """Nov 25 (PropSeason scrub): who's out on each side tonight, from ESPN's injury report (today's games only)."""
+def player_link(name: str, label: str, key: str, wkey: str) -> None:
+    """Nov 25 (owner: "the players' names inside the game cards ... a link that opens their player card with a return to
+    the game card"): a name drawn as a link; tapping it opens his card inside the game card (today_visual._game_dialog
+    reads `{key}_player` and shows "← Back to the game")."""
+    import streamlit as st
+    if st.button(label, key=wkey, type="tertiary", help=f"Open {name}'s player card"):
+        st.session_state[f"{key}_player"] = name
+        st.rerun(scope="fragment")
+
+
+def _injuries(sport: str, away: str, home: str, day: str, key: str = "gc") -> None:
+    """Nov 25 (PropSeason scrub): who's out on each side tonight, from ESPN's injury report (today's games only). Each
+    name opens his player card."""
     import streamlit as st
     import injury_check as IC
     if sport not in IC.LEAGUES or not IC.live_for(day):
@@ -517,10 +528,26 @@ def _injuries(sport: str, away: str, home: str, day: str) -> None:
     if not rep:
         return
     st.markdown("**Who's out**")
-    st.markdown('<div style="display:flex;gap:18px;flex-wrap:wrap;">' + injuries_html(away, IC.for_team(sport, away, rep))
-                + injuries_html(home, IC.for_team(sport, home, rep)) + '</div>', unsafe_allow_html=True)
+    for col, team in zip(st.columns(2), (away, home)):
+        with col:
+            st.markdown(f'<div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;">{str(team).upper()}</div>',
+                        unsafe_allow_html=True)
+            flagged = IC.for_team(sport, team, rep)
+            if not flagged:
+                st.caption("Nobody listed")
+            for i, e in enumerate(flagged):
+                c1, c2 = st.columns([2, 3])
+                with c1:
+                    player_link(e["name"], f'{IC.chip(e["status"]).split(" ")[0]} {e["name"]}', key,
+                                f"{key}_inj_{IC._norm(team)}_{i}")
+                c2.markdown(f'<div style="color:{HB.INK_SOFT};font-size:12.5px;padding-top:6px;">'
+                            f'{e.get("pos") or ""} — {e.get("label") or e["status"]}'
+                            f'{" (" + e["type"] + ")" if e.get("type") else ""}'
+                            f'{" · back ~" + e["returns"][5:].replace("-", "/") if _future(e.get("returns")) and e["status"] == "out" else ""}'
+                            f'</div>', unsafe_allow_html=True)
     st.caption("🚑 out · ⚠️ questionable — ESPN's injury report, checked every 10 minutes. The saved projection was "
-               "built before some of this news; picks on players ruled out are taken off the boards.")
+               "built before some of this news; picks on players ruled out are taken off the boards. Tap a name for "
+               "his card.")
 
 
 def _nhl(away: str, home: str, day: str) -> None:
@@ -574,8 +601,9 @@ def _rotation_data(sport: str, day: str, away: str, home: str):
     return load(sport, day, away, home)
 
 
-def _rotations(away: str, home: str, day: str, sport: str = "NBA") -> None:
-    """Nov 25 (PropSeason scrub item 3): starters / bench / deep bench with last-10 minutes and H2's projection."""
+def _rotations(away: str, home: str, day: str, sport: str = "NBA", key: str = "gc") -> None:
+    """Nov 25 (PropSeason scrub item 3): starters / bench / deep bench with last-10 minutes and H2's projection. Each
+    name opens his player card (owner, Nov 25)."""
     import streamlit as st
     import injury_check as IC
     import rotation_panel as RP
@@ -589,10 +617,24 @@ def _rotations(away: str, home: str, day: str, sport: str = "NBA") -> None:
     ra, rh = RP.rotation(pg, x["away_id"]), RP.rotation(pg, x["home_id"])
     if not ra and not rh:
         return
+    top = RP.top_minutes(ra, rh)
     st.markdown("**Rotation & minutes**")
-    st.markdown('<div style="display:flex;gap:18px;flex-wrap:wrap;">' + RP.team_html(x["away"], ra, proj, inj)
-                + RP.team_html(x["home"], rh, proj, inj) + '</div>', unsafe_allow_html=True)
-    st.caption(RP.CAPTION)
+    for col, team, rot in zip(st.columns(2), (x["away"], x["home"]), (ra, rh)):
+        with col:
+            st.markdown(f'<div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;">{str(team).upper()}</div>',
+                        unsafe_allow_html=True)
+            for label, lst in RP.groups(rot).items():
+                if not lst:
+                    continue
+                st.markdown(f'<div style="color:{HB.GOLD};font-size:11.5px;font-weight:700;margin-top:4px;">'
+                            f'{label.upper()}</div>', unsafe_allow_html=True)
+                for i, r in enumerate(lst):
+                    c1, c2 = st.columns([2, 3], vertical_alignment="center")
+                    with c1:
+                        player_link(r["name"], RP.tag(r["name"], inj) + r["name"], key,
+                                    f"{key}_rot_{IC._norm(team)}_{label}_{i}")
+                    c2.markdown(RP.bar_html(r, top, proj, inj), unsafe_allow_html=True)
+    st.caption(RP.CAPTION + " Tap a name for his card.")
 
 
 def _season(league: str, day: str):

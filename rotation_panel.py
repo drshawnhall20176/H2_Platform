@@ -92,6 +92,28 @@ def team_html(team: str, rot: List[Dict], proj: Optional[Dict[str, float]] = Non
     return "".join(parts)
 
 
+def bar_html(r: Dict, top: float, proj: Optional[Dict[str, float]] = None, inj: Optional[Dict[str, str]] = None) -> str:
+    """One player's bar and minutes (the name is drawn separately, as a tappable link, in the game card)."""
+    k = _norm(r["name"])
+    st = (inj or {}).get(k)
+    w = max(4, int(100 * r["avg_min"] / max(top, 1.0)))
+    col = HB.GRAY if st == "out" else HB.BLUE
+    pm = (proj or {}).get(k)
+    right = f'{r["avg_min"]:.0f}' + (f' → <b style="color:{HB.GOLD};">{pm:.0f}</b>' if pm else "")
+    return (f'<div style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:{HB.INK};min-height:28px;'
+            f'{"opacity:.55;" if st == "out" else ""}"><div style="flex:1;background:{HB.EDGE};border-radius:4px;'
+            f'height:8px;"><div style="width:{w}%;background:{col};height:8px;border-radius:4px;"></div></div>'
+            f'<div style="width:52px;text-align:right;">{right}</div></div>')
+
+
+def tag(name: str, inj: Optional[Dict[str, str]] = None) -> str:
+    return {"out": "🚑 ", "questionable": "⚠️ "}.get((inj or {}).get(_norm(name)) or "", "")
+
+
+def top_minutes(*rots: List[Dict]) -> float:
+    return max([r["avg_min"] for rot in rots for r in rot] + [36.0])
+
+
 def proj_minutes(rows: Iterable[Dict]) -> Dict[str, float]:
     """{normalized player name: H2's projected minutes} from tonight's saved board rows."""
     out: Dict[str, float] = {}
