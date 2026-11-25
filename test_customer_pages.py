@@ -118,6 +118,7 @@ def test_players_page_runs_only_the_chosen_view(monkeypatch):
     monkeypatch.setattr(runpy, "run_path", lambda path, run_name=None: ran.append(Path(path).name) or {})
     at = AppTest.from_file("views/58_Players.py", default_timeout=60)
     at.session_state["sport"] = "NFL"
+    at.session_state["h2_view_pref"] = "Table"                  # Nov 25: Cards is the default; the tools are Table
     at.run()
     assert not at.exception and ran == ["38_Position_Matchups.py"]
     ran.clear()
@@ -127,6 +128,7 @@ def test_players_page_runs_only_the_chosen_view(monkeypatch):
     ran.clear()
     at = AppTest.from_file("views/58_Players.py", default_timeout=60)
     at.session_state["sport"] = "UFC"
+    at.session_state["h2_view_pref"] = "Table"
     at.run()
     assert not at.exception and ran == [] and at.info
 

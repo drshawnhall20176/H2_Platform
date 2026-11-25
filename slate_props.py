@@ -465,6 +465,8 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[s
         "_proj_min": round(float(row["opp"]), 1) if isinstance(row.get("opp"), (int, float)) and row.get("mins") else None,
         "_factor": row.get("factor") if isinstance(row.get("factor"), (int, float)) else None,
         "_slot": row.get("slot") if isinstance(row.get("slot"), str) else None,
+        # Nov 25 (owner: the Players tab's head-to-head / defense trend / rest, merged into the player card)
+        "_team_id": row.get("team_id"), "_opp_id": row.get("opp_id"),
         "Lean": lean, "EV": td_value if td_value is not None else row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],

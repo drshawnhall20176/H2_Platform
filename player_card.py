@@ -287,7 +287,8 @@ def from_row(r: Dict) -> Dict:
             "_earned": r.get("earned"), "_values": r.get("values") or [], "Why": r.get("why"),
             "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game"),
             "_mins": r.get("mins") or [], "_proj_min": r.get("proj_min"), "_factor": r.get("factor"),
-            "_slot": r.get("slot"), "_inj": r.get("_inj")}
+            "_slot": r.get("slot"), "_inj": r.get("_inj"),
+            "_team_id": r.get("team_id"), "_opp_id": r.get("opp_id")}
 
 
 def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> None:
@@ -393,6 +394,12 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
                 st.caption(f"🧪 Tracking, not a bet: its earned chance ({sh['earned']:.0%}) doesn't clear the "
                            f"{sh['needed']:.1%} its price needs to break even.")
         except Exception:                                       # noqa: BLE001
+            pass
+    if extras:                                                  # Nov 25 (owner): the Players tab's context, merged in
+        try:
+            import player_context as PCX
+            PCX.render(p, sport)
+        except Exception:                                       # noqa: BLE001 -- the card never breaks on context
             pass
     try:
         import game_previews as GP
