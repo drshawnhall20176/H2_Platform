@@ -233,6 +233,16 @@ if not _cards_ok:
         st.info("No playable game lines today. A game line is listed only when a tested rule supports it or leans of "
                 "its kind have won 55% or more.")
 
+# Nov 25 (PropSeason scrub item 4): stack filters over every playable pick, not just the top ones
+try:
+    import screener as _SCR
+    _pool = [r for r in _injury_screen(_search_rows(_day, tuple(props_sports)))
+             if not picked or r.get("sport") in picked]
+    with st.expander(f"🔎 Screener — filter all {len(_pool)} playable player picks", expanded=_view == "Table"):
+        _SCR.render(_pool, key="today_scr", parse_time=C._kick_dt)
+except Exception:                                               # noqa: BLE001
+    pass
+
 st.caption("Every game, every lean and the full board are under Games and All picks in the sidebar. "
            "How these pick types have graded is under Track record.")
 
