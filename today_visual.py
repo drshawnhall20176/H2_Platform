@@ -156,6 +156,9 @@ def _game_dialog(w: Dict, props: List[Dict]):
     if w.get("sport") == "SOCCER":                              # Nov 25: soccer's own card (three results)
         GC.render_soccer(GC.build_soccer(w, props))
         return
+    if w.get("sport") == "TENNIS":                              # Nov 25: a match card, not a basketball box
+        GC.render_tennis(GC.build_tennis(w))
+        return
     GC.render(GC.build(w), props, key=f"gcd_{_norm(w.get('game')).replace(' ', '_')}")
 
 
@@ -226,6 +229,14 @@ def pick_card_html(c: Dict) -> str:
             f'{" · " + c["time"] if c.get("time") else ""}</div></div>')
 
 
+def _win_txt(w: Dict) -> str:
+    """Nov 25 (tennis): the model's pick to win, when a game has no spread or total."""
+    try:
+        return f"{w['winner']} {float(w['chance']):.0%} to win" if w.get("winner") else "—"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def game_tile_html(w: Dict) -> str:
     import game_lines_table as GLT
     try:
@@ -237,14 +248,16 @@ def game_tile_html(w: Dict) -> str:
     except Exception:                                           # noqa: BLE001
         gone = False
     lines = " · ".join(x for x in (w.get("spread_txt") or "", f"O/U {w['total_txt']}" if w.get("total_txt") else "")
-                       if x) or (str(w.get("lean_detail") or "").replace("market: ", "Market: ") or "No line yet")
+                       if x) or (str(w.get("lean_detail") or "").replace("market: ", "Market: ")
+                                 or (f"{w['winner']} {float(w['price']):+.0f}" if w.get("winner")
+                                     and isinstance(w.get("price"), (int, float)) else "No line yet"))
     return (f'<div style="min-height:108px;{"opacity:.55;" if gone else ""}">'
             f'<div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
             f'{w.get("time") or ""}{" · started" if gone else ""}</div>'
             f'<div style="color:{HB.INK};font-weight:800;font-size:14px;margin-top:3px;line-height:1.25;">'
             f'{w.get("game") or ""}</div>'
             f'<div style="color:{HB.GOLD};font-size:12.5px;margin-top:4px;">{lines}</div>'
-            f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or w.get("best") or "—"}</div>'
+            f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or w.get("best") or _win_txt(w)}</div>'
             f'<div style="margin-top:6px;">{HB.bet_chip(bet) if bet else ""}</div></div>')
 
 
