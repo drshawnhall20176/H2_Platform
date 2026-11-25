@@ -379,6 +379,28 @@ def team_groups(rows: Sequence[Dict]) -> Dict[str, List[Dict]]:
     return out
 
 
+@_st.cache_data(ttl=900, show_spinner=False, max_entries=16)
+def _long_shots_cached(sport: str, day: str) -> List[Dict]:
+    try:
+        import long_shots_scan as LSS
+        return LSS.sorted_rows(LSS.load(sport, day)) or []
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+def long_shots_for(sport: str, name: str, day: Optional[str] = None) -> List[Dict]:
+    """Nov 25 (owner): his value long shots tonight -- the long-shot scan's rungs (+400 or longer, worth more than the
+    price at the honest chance), most probable first."""
+    if not name:
+        return []
+    k = _norm(name)
+    return [r for r in _long_shots_cached(sport, day or _today_et()) if _norm(r.get("Player")) == k]
+
+
+def ls_mark(sport: str, name: str) -> str:
+    return "💎 " if long_shots_for(sport, name) else ""
+
+
 def _bet_mark(r: Dict) -> str:
     """🃏 / 🧪 in front of a player whose best pick is a bet or a tracked pick; nothing for info only."""
     try:
@@ -406,7 +428,8 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
             for i, r in enumerate(lst[:15]):
                 n_props = sum(1 for x in rows if _norm(player_of(x)) == _norm(player_of(r)))
                 ch = _chance(r.get("earned") if r.get("earned") is not None else r.get("chance"))
-                label = (f"{_bet_mark(r)}{player_of(r)} — {market_label(r)} · "
+                label = (f"{_bet_mark(r)}{ls_mark(r.get('sport') or w.get('sport') or '', player_of(r))}"
+                         f"{player_of(r)} — {market_label(r)} · "
                          f"{ch}{'' if r.get('earned') is not None else ' model'}"
                          + (f" (+{n_props - 1} more)" if n_props > 1 else ""))
                 # Nov 25 (owner): a pick that passes the board's checks is highlighted, not a gate on who's listed
@@ -414,7 +437,8 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
                               type="primary" if _bet_mark(r).startswith("🃏") else "secondary"):
                     _st.session_state[f"{k}_player"] = player_of(r)
                     _st.rerun(scope="fragment")
-    _st.caption("🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows a bet if he has "
+    _st.caption("💎 has a value long shot tonight (an alternate line at +400 or longer) · "
+                "🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows a bet if he has "
                 "one, else his main stat. The % is the earned chance (how picks like it have actually done); \"model\" "
                 "marks the model's own chance where there's no earned one yet. Tap a player for his card and every "
                 "prop he has tonight; anyone without a prop opens from Who's out or the rotation above.")

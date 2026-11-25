@@ -151,7 +151,7 @@ def card_section(p: Dict, sport: str, day: Optional[str] = None) -> None:
     @st.cache_data(ttl=900, show_spinner=False, max_entries=8)
     def _scan(sp, d):
         import long_shots_scan as LSS
-        return LSS.all_rows(LSS.load(sp, d)) or []
+        return LSS.sorted_rows(LSS.load(sp, d)) or []
     rs = card_rows(p, sport, day, long_shots=_scan(sport, day))
     if not rs:
         return

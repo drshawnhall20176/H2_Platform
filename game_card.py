@@ -521,6 +521,15 @@ def player_link(name: str, label: str, key: str, wkey: str) -> None:
         st.rerun(scope="fragment")
 
 
+def _ls(sport: str, name: str) -> str:
+    """💎 in front of a player with a value long shot tonight (today_visual.ls_mark)."""
+    try:
+        import today_visual as TV
+        return TV.ls_mark(sport, name)
+    except Exception:                                           # noqa: BLE001
+        return ""
+
+
 def _injuries(sport: str, away: str, home: str, day: str, key: str = "gc") -> None:
     """Nov 25 (PropSeason scrub): who's out on each side tonight, from ESPN's injury report (today's games only). Each
     name opens his player card."""
@@ -675,10 +684,10 @@ def _rotations(away: str, home: str, day: str, sport: str = "NBA", key: str = "g
                 for i, r in enumerate(lst):
                     c1, c2 = st.columns([2, 3], vertical_alignment="center")
                     with c1:
-                        player_link(r["name"], RP.tag(r["name"], inj) + r["name"], key,
+                        player_link(r["name"], RP.tag(r["name"], inj) + _ls(sport, r["name"]) + r["name"], key,
                                     f"{key}_rot_{IC._norm(team)}_{label}_{i}")
                     c2.markdown(RP.bar_html(r, top, proj, inj), unsafe_allow_html=True)
-    st.caption(RP.CAPTION + " Tap a name for his card.")
+    st.caption(RP.CAPTION + " 💎 = a value long shot tonight. Tap a name for his card.")
 
 
 def _season(league: str, day: str):

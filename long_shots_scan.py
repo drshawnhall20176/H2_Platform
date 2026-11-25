@@ -145,9 +145,14 @@ def lead_cards(saved: Optional[Dict], n: int = TOP_N) -> List[Dict]:
              "note": TESTED_NOTE if r.get("tested") else UNTESTED_NOTE} for r in top[:n]]
 
 
+def sorted_rows(saved: Optional[Dict]) -> List[Dict]:
+    """The scan's own rows (Player, Bet, Market ...), in all_rows' order."""
+    return sorted((saved or {}).get("rows") or [], key=lambda r: (not r.get("tested"), -(r.get("Honest chance") or 0)))
+
+
 def all_rows(saved: Optional[Dict]) -> List[Dict]:
     """Every value long shot in the day's scan as table rows, tested markets first, then the most probable."""
-    rows = sorted((saved or {}).get("rows") or [], key=lambda r: (not r.get("tested"), -(r.get("Honest chance") or 0)))
+    rows = sorted_rows(saved)
     return [{"Time": r.get("time") or "", "Game": r.get("game") or "", "Pick": r.get("pick"), "Price": r.get("Price"),
              "Honest chance": r.get("Honest chance"), "Book says": r.get("Book says"), "EV per $1": r.get("EV per $1"),
              "Market": ("✅ " if r.get("tested") else "") + str(r.get("Market") or "")} for r in rows]

@@ -259,6 +259,30 @@ def opponent(game, team) -> Optional[str]:
     return None
 
 
+def long_shot_strip(p: Dict, sport: str, rows: Optional[List[Dict]] = None) -> None:
+    """💎 his value long shots tonight (the long-shot scan: +400 or longer, worth more than the price at the honest
+    chance), every market, most probable first."""
+    import streamlit as st
+    if rows is None:
+        import today_visual as TV
+        rows = TV.long_shots_for(sport, p.get("Player") or p.get("player"))
+    if not rows:
+        return
+    chips = " ".join(
+        f'<span style="display:inline-block;margin:2px 6px 2px 0;padding:4px 10px;border-radius:12px;'
+        f'border:1px solid {HB.GOLD};color:{HB.INK};font-size:12.5px;">💎 <b>{r.get("Bet")}</b> '
+        f'{float(r["Price"]):+.0f} · honest {float(r.get("Honest chance") or 0):.0%}'
+        f'{" · book " + format(float(r["Book says"]), ".0%") if r.get("Book says") is not None else ""}'
+        f'{" · ✅ tested" if r.get("tested") else ""}</span>' for r in rows[:6] if r.get("Price") is not None)
+    if not chips:
+        return
+    st.markdown(f'<div style="margin:2px 0 8px;"><span style="color:{HB.GOLD};font-weight:700;font-size:13px;">'
+                f'Long shots tonight</span><br>{chips}</div>', unsafe_allow_html=True)
+    st.caption("Alternate lines priced +400 or longer where the honest (tail-corrected) chance is better than the price "
+               "says. Most long shots lose — small stakes. ✅ tested = a market whose long shots have made money in "
+               "testing. His full alt ladder for this prop is lower on the card.")
+
+
 def injury_note(p: Dict, sport: str, status=None) -> str:
     """Nov 25 (PropSeason scrub): what tonight's ESPN injury report says about him, checked when the card opens."""
     try:
@@ -341,6 +365,11 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
     note = injury_note(p, sport)
     if note:
         (st.error if note.startswith("🚑") else st.warning)(note)
+    if extras:                                                  # Nov 25 (owner): his long shots, right under the header
+        try:
+            long_shot_strip(p, sport)
+        except Exception:                                       # noqa: BLE001
+            pass
     C.kpi_row(kpis or [
         {"icon": "📐", "value": "—" if p.get("Projection") is None else f"{float(p['Projection']):g}",
          "label": "Projection"},

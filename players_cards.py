@@ -59,11 +59,12 @@ def render(sport: str) -> None:
                                     f"{str(team).upper()}</div>", unsafe_allow_html=True)
                         for i, r in enumerate(lst):
                             ch = TV._chance(r.get("earned") if r.get("earned") is not None else r.get("chance"))
-                            label = (f"{TV._bet_mark(r)}{TV.player_of(r)} — {TV.market_label(r)} · {ch}"
+                            label = (f"{TV._bet_mark(r)}{TV.ls_mark(sport, TV.player_of(r))}"
+                                     f"{TV.player_of(r)} — {TV.market_label(r)} · {ch}"
                                      f"{'' if r.get('earned') is not None else ' model'}")
                             if st.button(label, key=f"pl_{sport}_{gi}_{TV._norm(team)}_{i}", width="stretch",
                                          type="primary" if TV._bet_mark(r).startswith("🃏") else "secondary"):
                                 TV._player_dialog(r, sport, rows)
-        st.caption("🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows his bet if "
+        st.caption("💎 a value long shot tonight · 🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows his bet if "
                    "he has one, else his main stat; his card has every prop he has tonight.")
     cards()
