@@ -548,10 +548,13 @@ if True:
         if not _ws and _w:                                      # Nov 24 (owner): say why the board is empty
             _kind = {"🔒 Locks only": "🔒 Lock", "💰 Money picks": "💰 Money", "🧪 Tracking": "🧪 Tracking",
                      "Info only": "Info-only"}.get(_show, "matching")
+            _wup = _w if _past else [r for r in _w if not _GLTb.started(r)]   # Nov 25: games still to start only
             _lg = ", ".join(sorted({r["sport"] for r in _w}))
-            _ntr = sum(1 for r in _w if _GLTb.bet(r).startswith(_GPb.BET_TRACK))
-            st.info(f"No {_kind} game lines for {_lg} today — **{len(_w)} games** are on the board. Choose **All picks** "
-                    "above to see them"
+            _ntr = sum(1 for r in _wup if _GLTb.bet(r).startswith(_GPb.BET_TRACK))
+            st.info((f"No {_kind} game lines for {_lg} today — **{len(_wup)} game{'s' if len(_wup) != 1 else ''} still "
+                     "to start** on the board. Choose **All picks** above to see them" if _wup else
+                     f"No {_kind} game lines for {_lg} today — every game on the board has started (see the "
+                     "**Started or finished** list below)")
                     + (f" ({_ntr} are 🧪 Tracking — choose **🧪 Only Tracking**)" if _ntr and _show != "🧪 Tracking" else "")
                     + ". Games with no tested or tracked rule read **Info only** in the Bet? column.")
         if _past and _ws:                                       # Nov 19: the picks' split, by chance range, and a filter

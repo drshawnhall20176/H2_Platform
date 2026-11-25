@@ -64,20 +64,44 @@ C.kpi_row([{"icon": "🎯", "value": str(s["picks"]), "label": "Player picks tod
            {"icon": "🏟️", "value": str(s["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(len(s["sports"])), "label": "Sports with a pick"}])
 
-PCT = {"Chance": st.column_config.NumberColumn(format="percent")}
-C.section_header("🎯", "Player picks")
-if props:
-    st.dataframe(pd.DataFrame(props), hide_index=True, width="stretch", column_config=PCT)
-else:
-    st.info("No player picks yet today. Boards are built through the day as the books post their lines."
-            + ("" if include_new else " Switch on the toggle above to include pick types that are too new to judge."))
+# Nov 25 (owner: "the ability to click a card and have it jump to a game or prop"): a Cards view -- every pick and game
+# opens its player card or game card (today_visual.py). Commercial layout only (this page already is); the tables are
+# one click away, and if the cards ever fail the page falls back to the tables.
+try:
+    import nav_layout as _NL
+    _commercial = _NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(_NL.PREVIEW_KEY))
+except Exception:                                               # noqa: BLE001
+    _commercial = False
+_view = "Table"
+if _commercial:
+    _view = st.segmented_control("View", ["Cards", "Table"], default="Cards", key="today_view",
+                                 help="Cards: tap Open on any pick or game for its player card or game card. "
+                                      "Table: every pick in one list.") or "Cards"
+_cards_ok = False
+if _view == "Cards":
+    try:
+        import today_visual as _TV
+        _TV.render([s for s in live if not picked or s.key in picked], rows, winners, _day, records_for=_tag_recs)
+        _cards_ok = True
+    except Exception:                                           # noqa: BLE001 -- the tables below are the fallback
+        st.caption("The card view couldn't load just now, so here are the tables.")
 
-C.section_header("🏟️", "Game lines")
-if lines:
-    st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch", column_config=PCT)
-else:
-    st.info("No playable game lines today. A game line is listed only when a tested rule supports it or leans of "
-            "its kind have won 55% or more.")
+PCT = {"Chance": st.column_config.NumberColumn(format="percent")}
+if not _cards_ok:
+    C.section_header("🎯", "Player picks")
+    if props:
+        st.dataframe(pd.DataFrame(props), hide_index=True, width="stretch", column_config=PCT)
+    else:
+        st.info("No player picks yet today. Boards are built through the day as the books post their lines."
+                + ("" if include_new else " Switch on the toggle above to include pick types that are too new to "
+                   "judge."))
+
+    C.section_header("🏟️", "Game lines")
+    if lines:
+        st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch", column_config=PCT)
+    else:
+        st.info("No playable game lines today. A game line is listed only when a tested rule supports it or leans of "
+                "its kind have won 55% or more.")
 
 st.caption("Every game, every lean and the full board are under Games and All picks in the sidebar. "
            "How these pick types have graded is under Track record.")
