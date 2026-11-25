@@ -34,7 +34,7 @@ LAYOUT: Dict[str, tuple] = {
     TODAY: (("Today", "Today"), ("Best Bets", "All picks"), ("Pick'em Board", "Pick'em"), ("Live Games", "Live"),
             ("Long Shots", "Long shots"),
             ("UFC Fight Card", "Fight card"), ("Highlights", "My filters")),
-    RESEARCH: (("Game Lab", "Games"), ("Players", "Players"), ("Soft Spots", "Soft spots"), ("League Schedules", "Schedule"),
+    RESEARCH: (("Game Lab", "Games"), ("Players", "Players"), ("Soft Spots", "Soft spots"), ("Alt Lines", "Alt-line hit rates"), ("League Schedules", "Schedule"),
                ("Analyst Desk", "Daily write-up"), ("Game Watch", "Game watch"), ("Bullpen Watch", "Bullpens")),
     RECORD: (("Model Record", "Track record"), ("Analyst Record", "Analyst record")),
     BETA: (("Tennis Lab", "Tennis"), ("International Hoops", "International hoops"), ("Soccer Lab", "Soccer")),
