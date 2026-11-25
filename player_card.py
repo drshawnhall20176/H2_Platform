@@ -367,6 +367,14 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
         st.markdown("\n".join("- " + b for b in bullets))
     else:
         st.markdown("  \n".join(["• " + str(w) for w in why] + ["⚠️ " + str(w) for w in warn]) or "—")
+        try:                                                    # Nov 25: the earned-chance rule, live everywhere
+            import game_previews as GP
+            sh = GP.earned_short(p) if str(bet or "").startswith("🧪") else None
+            if sh:
+                st.caption(f"🧪 Tracking, not a bet: its earned chance ({sh['earned']:.0%}) doesn't clear the "
+                           f"{sh['needed']:.1%} its price needs to break even.")
+        except Exception:                                       # noqa: BLE001
+            pass
     try:
         import game_previews as GP
         blow = GP.game_blowouts(sport, [p.get("Game")]).get(p.get("Game"), "—")

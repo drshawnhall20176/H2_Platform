@@ -216,15 +216,15 @@ def test_the_read_explains_form_matchup_and_projection():
     assert PC.read_bullets({}) == []
 
 
-def test_a_tested_tag_with_an_earned_chance_below_break_even_is_tracking_in_the_preview():
+def test_a_tested_tag_with_an_earned_chance_below_break_even_is_tracking():
     import game_previews as GP
     assert abs(GP.break_even(-110) - 0.5238) < 1e-3 and GP.break_even(150) == 0.4 and GP.break_even(None) is None
     weak = {"earned": 0.50, "price": -111}
     strong = {"_earned": 0.58, "RealPrice": -110}
     assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak, earned_rule=True) == GP.BET_TRACK
     assert GP.prop_bet("NBA", "🎟️ Parlay leg", strong, earned_rule=True) == GP.BET_YES
-    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak, earned_rule=False) == GP.BET_YES     # live site unchanged
-    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak) == GP.BET_YES                        # off-preview default
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak, earned_rule=False) == GP.BET_YES     # the switch
+    assert GP.prop_bet("NBA", "🎟️ Parlay leg", weak) == GP.BET_TRACK                      # Nov 25: on everywhere
     assert GP.prop_bet("NBA", "🎟️ Parlay leg", {"price": -110}, earned_rule=True) == GP.BET_YES   # no earned: as before
     import player_card as PC
     txt = "\n".join(PC.read_bullets({"Side": "Under", "Line": 22.5, "earned": 0.5, "price": -111,
