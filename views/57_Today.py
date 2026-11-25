@@ -198,6 +198,11 @@ except Exception:                                               # noqa: BLE001
     _commercial = False
 _view = "Table"
 if _commercial:
+    try:                                                        # Nov 25 (PropSeason scrub item 7): first-visit tour
+        import tour as _TOUR
+        _TOUR.render()
+    except Exception:                                           # noqa: BLE001
+        pass
     _view = st.segmented_control("View", ["Cards", "Table"], default="Cards", key="today_view",
                                  help="Cards: tap Open on any pick or game for its player card or game card. "
                                       "Table: every pick in one list.") or "Cards"
