@@ -346,11 +346,21 @@ def players_in_game(rows: Sequence[Dict], w: Dict) -> List[Dict]:
     return [r for r in rows or [] if r.get("game") and same_game(r.get("game"), home, away)]
 
 
+MAIN_MARKETS = ("points", "pts+reb+ast", "pra", "passing yards", "pass yards", "rushing yards", "rush yards",
+                "receiving yards", "receptions", "shots on goal", "goals", "rebounds", "assists", "threes made", "threes")
+
+
+def _main(r: Dict) -> int:
+    m = str(r.get("market") or r.get("Market") or "").lower()
+    return MAIN_MARKETS.index(m) if m in MAIN_MARKETS else len(MAIN_MARKETS)
+
+
 def _rank(r: Dict):
-    """Playable picks (a tested tag, 🔒, 💰) ahead of the model's other reads, then the higher chance."""
+    """Playable picks (a tested tag, 🔒, 💰) first; otherwise his main stat (points, yards, shots...) rather than a
+    side market that happens to carry a big Under chance; then the higher chance."""
     import todays_best as TB
     playable = bool(r.get("lock") or r.get("money") or r.get("use") in TB.PLAYABLE)
-    return (not playable, -(r.get("chance") or 0))
+    return (not playable, 0 if playable else _main(r), -(r.get("chance") or 0))
 
 
 def team_groups(rows: Sequence[Dict]) -> Dict[str, List[Dict]]:
@@ -395,16 +405,19 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
                          unsafe_allow_html=True)
             for i, r in enumerate(lst[:15]):
                 n_props = sum(1 for x in rows if _norm(player_of(x)) == _norm(player_of(r)))
-                label = (f"{_bet_mark(r)}{player_of(r)} — {market_label(r)} · {_chance(r.get('chance'))}"
+                ch = _chance(r.get("earned") if r.get("earned") is not None else r.get("chance"))
+                label = (f"{_bet_mark(r)}{player_of(r)} — {market_label(r)} · "
+                         f"{ch}{'' if r.get('earned') is not None else ' model'}"
                          + (f" (+{n_props - 1} more)" if n_props > 1 else ""))
                 # Nov 25 (owner): a pick that passes the board's checks is highlighted, not a gate on who's listed
                 if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch",
                               type="primary" if _bet_mark(r).startswith("🃏") else "secondary"):
                     _st.session_state[f"{k}_player"] = player_of(r)
                     _st.rerun(scope="fragment")
-    _st.caption("🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Chance = the earned chance where "
-                "it has one (how picks like it have actually done). Tap a player for his card and every prop he has "
-                "tonight; anyone without a prop opens from Who's out or the rotation above.")
+    _st.caption("🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows a bet if he has "
+                "one, else his main stat. The % is the earned chance (how picks like it have actually done); \"model\" "
+                "marks the model's own chance where there's no earned one yet. Tap a player for his card and every "
+                "prop he has tonight; anyone without a prop opens from Who's out or the rotation above.")
 
 
 @_st.dialog("Pick", width="large")
