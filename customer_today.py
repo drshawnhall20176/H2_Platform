@@ -135,3 +135,17 @@ def top_cards(rows: List[Dict], records_for: Optional[Callable] = None, n: int =
         if len(out) >= n:
             break
     return out
+
+
+def has_games(key: str, day: str):
+    """Nov 25 (owner: on Today, sport buttons only for sports with games that day): True / False from the sport's own
+    schedule; None when it couldn't be read (the sport then stays on the bar rather than vanish on a feed hiccup)."""
+    import sports
+    from datetime import datetime as _dt
+    try:
+        if key in sports.LAB_SPORTS:
+            import lab_schedule as LS
+            return bool(LS.rows(key, LS.load(key), _dt.strptime(day, "%Y-%m-%d").date()))
+        return bool(sports.get(key).engine.get_schedule(day))
+    except Exception:                                           # noqa: BLE001
+        return None

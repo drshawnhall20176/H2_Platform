@@ -5,7 +5,7 @@ own 30-day record. Commercial layout only (the owner's front page is Home).
 Reads only what the platform already saved (customer_today.py): no Odds API credits, nothing written, nothing from
 anyone's Bet Log.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -18,28 +18,61 @@ import todays_best as TB
 
 C.base_css()
 _now = datetime.now(pytz.timezone("US/Eastern"))
-_day = _now.strftime("%Y-%m-%d")
-C.hero_banner("🏠", f"Today · {_now:%A, %B %-d}",
-              "The model's picks for today across every sport in season. Each pick shows how that kind of pick has "
-              "actually done over the last 30 days.")
+_today = _now.date()
+# Nov 25 (owner): a date selector -- back to see how a day's picks did, forward to what's posted early
+PAST_DAYS, AHEAD_DAYS = 30, 7
+_lo, _hi = _today - timedelta(days=PAST_DAYS), _today + timedelta(days=AHEAD_DAYS)
+st.session_state.setdefault("today_day", _today)
+if not (_lo <= st.session_state["today_day"] <= _hi):
+    st.session_state["today_day"] = _today
+
+
+def _shift(n):
+    d = st.session_state.get("today_day", _today) + timedelta(days=n)
+    st.session_state["today_day"] = min(max(d, _lo), _hi)
+
+
+def _to_today():
+    st.session_state["today_day"] = _today
+
+
+_sel = st.session_state["today_day"]
+_day = _sel.strftime("%Y-%m-%d")
+_past = _sel < _today
+_when = "Today" if _sel == _today else ("Yesterday" if (_today - _sel).days == 1 else
+                                        "Tomorrow" if (_sel - _today).days == 1 else "")
+C.hero_banner("🏠", f"{_when + ' · ' if _when else ''}{_sel:%A, %B %-d}",
+              "The model's picks for the day across every sport. Each pick shows how that kind of pick has actually "
+              "done over the last 30 days." + (" Past days show the picks as they were posted." if _past else ""))
+d1, d2, d3, d4 = st.columns([1, 2, 1, 1])
+d1.button("◀ Previous day", key="today_prev", on_click=_shift, args=(-1,), width="stretch", disabled=_sel <= _lo)
+d2.date_input("Date", key="today_day", min_value=_lo, max_value=_hi, format="MM/DD/YYYY",
+              label_visibility="collapsed")
+d3.button("Next day ▶", key="today_next", on_click=_shift, args=(1,), width="stretch", disabled=_sel >= _hi)
+d4.button("Today", key="today_back", on_click=_to_today, width="stretch", disabled=_sel == _today)
 
 live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]
 props_sports = [s.key for s in live if s.key in CT.PROPS_SPORTS]
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def _load(day, keys):
-    best = TB.collect(day, list(keys))
+@st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+def _load(day, keys, past=False):
+    best = TB.collect(day, list(keys), past=past)
     try:
-        winners = TB.winner_rows(day)
+        winners = TB.winner_rows(day, past=past)
     except Exception:                                           # noqa: BLE001
         winners = []
     return best.get("rows") or [], winners
 
 
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=128)
+def _has_games(key, day):
+    return CT.has_games(key, day)
+
+
 @st.cache_data(ttl=600, show_spinner=False, max_entries=4)
 def _search_rows(day, keys):
-    """Nov 25: every playable pick saved today (the player search), not just Today's top picks."""
+    """Nov 25: every playable pick saved for the day (the player search), not just the top picks."""
     out = []
     for k in keys:
         out += TB.load_all_props(k, day)
@@ -58,7 +91,7 @@ def _lean_recs(lg):
     return PR.lean_records(lg)
 
 
-rows, winners = _load(_day, tuple(props_sports))
+rows, winners = _load(_day, tuple(props_sports), _past)
 
 # Nov 25 (owner): one sport bar at the top -- "All sports" by default, one sport at a time (it also sets the sidebar's
 # sport, so the old "Explore a sport" buttons at the bottom are gone), and several at once only when switched on.
@@ -67,6 +100,14 @@ _bar = [sp.key for sp in sports.selectable_sports(False)]
 for _sp in live:                                                # anything in season the selector doesn't list
     if _sp.key not in _bar:
         _bar.append(_sp.key)
+# Nov 25 (owner): only sports with games scheduled on the chosen day -- a pick or game on the boards counts, else the
+# sport's own schedule is asked (cached an hour)
+_with = {r.get("sport") for r in list(rows) + list(winners) if r.get("sport")}
+_bar = [k for k in _bar if k in _with or _has_games(k, _day) is not False]
+if st.session_state.get("today_one") not in (None, ALL) and st.session_state.get("today_one") not in _bar:
+    st.session_state["today_one"] = ALL                         # the sport has no games that day
+if st.session_state.get("today_sports"):
+    st.session_state["today_sports"] = [k for k in st.session_state["today_sports"] if k in _bar]
 
 
 def _label(k):
@@ -144,7 +185,8 @@ if _view == "Cards":
             _all = _search_rows(_day, tuple(props_sports))
         except Exception:                                       # noqa: BLE001
             _all = []
-        _TV.render([s for s in live if not picked or s.key in picked], rows, winners, _day, records_for=_tag_recs,
+        _TV.render([sports.get(k) for k in _bar if (not picked or k in picked)], rows, winners, _day,
+                   records_for=_tag_recs,
                    search_rows=_all)
         _cards_ok = True
     except Exception:                                           # noqa: BLE001 -- the tables below are the fallback
