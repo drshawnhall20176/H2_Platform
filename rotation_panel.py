@@ -84,7 +84,7 @@ def team_html(team: str, rot: List[Dict], proj: Optional[Dict[str, float]] = Non
             parts.append(
                 f'<div style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:1px 0;color:{HB.INK};'
                 f'{"opacity:.55;text-decoration:line-through;" if st == "out" else ""}">'
-                f'<div style="width:118px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{r["name"]}{tag}'
+                f'<div style="width:118px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{tag.strip() + " " if tag else ""}{r["name"]}'
                 f'</div><div style="flex:1;background:{HB.EDGE};border-radius:4px;height:8px;">'
                 f'<div style="width:{w}%;background:{col};height:8px;border-radius:4px;"></div></div>'
                 f'<div style="width:58px;text-align:right;">{right}</div></div>')

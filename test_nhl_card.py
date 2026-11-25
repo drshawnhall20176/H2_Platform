@@ -37,9 +37,13 @@ def test_point_share_is_among_tonights_points_props():
     rows = [{"market": "Points", "team": "WPG", "player": "Kyle Connor", "projection": 1.2},
             {"market": "Points", "team": "WPG", "player": "Mark Scheifele", "projection": 0.8},
             {"market": "Shots on Goal", "team": "WPG", "player": "Kyle Connor", "projection": 3.5},
+            {"market": "Points", "team": "WPG", "player": "Gabriel Vilardi", "projection": 0.6},
+            {"market": "Points", "team": "WPG", "player": "Josh Morrissey", "projection": 0.4},
             {"market": "Points", "team": "BOS", "player": "David Pastrnak", "projection": 1.3}]
     got = NC.point_share(rows, "Winnipeg Jets", "WPG")
-    assert [(p["name"], round(p["share"], 2)) for p in got] == [("Kyle Connor", 0.6), ("Mark Scheifele", 0.4)]
+    assert [(p["name"], round(p["share"], 2)) for p in got] == [("Kyle Connor", 0.4), ("Mark Scheifele", 0.27),
+                                                                ("Gabriel Vilardi", 0.2), ("Josh Morrissey", 0.13)]
+    assert NC.point_share(rows, "Boston Bruins", "BOS") == []            # one player is no team picture
     assert NC.point_share([], "Winnipeg Jets") == []
 
 
