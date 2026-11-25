@@ -344,6 +344,7 @@ def run():
         "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF", "SOCCER"),   # Live Games: in-game reads (Nov 12)
         "53": ("NBA", "NFL", "NHL", "NCAAF"),             # Long Shots: tail + price tests cover these (Nov 14)   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
+        "62": ("NBA",),                                  # Soft Spots (Nov 25): NBA league ranks only
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
     }
@@ -444,6 +445,7 @@ def run():
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
         "57": ("Today", "🏠", "today"),                  # the customer's front page (commercial layout only, Nov 16)
         "61": ("Pick'em Board", "🎲", "pickem_board"),  # PrizePicks / Underdog / Pick6 lines, books-checked (Nov 18)
+        "62": ("Soft Spots", "🎯", "soft_spots"),        # tonight's softest defense-vs-position spots, NBA (Nov 25)
         "59": ("Promotions", "🎁", "promotions"),       # the books' recurring promotions + the tools that play them (Nov 17)
         "58": ("Players", "👤", "players"),              # every player tool behind one switcher (commercial only, Nov 16)
         "56": ("Model Record", "📊", "model_record"),    # the model's graded record, no Bet Log: the public proof page (Nov 16)
@@ -478,7 +480,7 @@ def run():
         SECTION_OF[k] = "🎯 RECOMMENDATIONS"
     for k in ("5", "6", "54"):
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
-    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "58", "38"):
+    for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "58", "38", "62"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
     for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51", "56"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
