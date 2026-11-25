@@ -93,6 +93,23 @@ def _lean_recs(lg):
 
 rows, winners = _load(_day, tuple(props_sports), _past)
 
+
+def _injury_screen(rs):
+    """Nov 25 (PropSeason scrub): saved picks re-checked against tonight's injury report -- players ruled out
+    since the board was built drop off; questionable ones are flagged on their cards."""
+    if _past or not rs:
+        return rs
+    try:
+        import injury_check as IC
+        if not IC.live_for(_day):
+            return rs
+        return IC.screen(rs, lambda r: r.get("sport"), lambda r: r.get("player") or r.get("Player"))
+    except Exception:                                           # noqa: BLE001
+        return rs
+
+
+rows = _injury_screen(rows)
+
 # Nov 25 (owner): one sport bar at the top -- "All sports" by default, one sport at a time (it also sets the sidebar's
 # sport, so the old "Explore a sport" buttons at the bottom are gone), and several at once only when switched on.
 ALL = "ALL"
@@ -181,6 +198,11 @@ except Exception:                                               # noqa: BLE001
     _commercial = False
 _view = "Table"
 if _commercial:
+    try:                                                        # Nov 25 (PropSeason scrub item 7): first-visit tour
+        import tour as _TOUR
+        _TOUR.render()
+    except Exception:                                           # noqa: BLE001
+        pass
     _view = st.segmented_control("View", ["Cards", "Table"], default="Cards", key="today_view",
                                  help="Cards: tap Open on any pick or game for its player card or game card. "
                                       "Table: every pick in one list.") or "Cards"
@@ -189,7 +211,7 @@ if _view == "Cards":
     try:
         import today_visual as _TV
         try:
-            _all = _search_rows(_day, tuple(props_sports))
+            _all = _injury_screen(_search_rows(_day, tuple(props_sports)))
         except Exception:                                       # noqa: BLE001
             _all = []
         _TV.render([sports.get(k) for k in _bar if (not picked or k in picked)], rows, winners, _day,
@@ -215,6 +237,16 @@ if not _cards_ok:
     else:
         st.info("No playable game lines today. A game line is listed only when a tested rule supports it or leans of "
                 "its kind have won 55% or more.")
+
+# Nov 25 (PropSeason scrub item 4): stack filters over every playable pick, not just the top ones
+try:
+    import screener as _SCR
+    _pool = [r for r in _injury_screen(_search_rows(_day, tuple(props_sports)))
+             if not picked or r.get("sport") in picked]
+    with st.expander(f"🔎 Screener — filter all {len(_pool)} playable player picks", expanded=_view == "Table"):
+        _SCR.render(_pool, key="today_scr", parse_time=C._kick_dt)
+except Exception:                                               # noqa: BLE001
+    pass
 
 st.caption("Every game, every lean and the full board are under Games and All picks in the sidebar. "
            "How these pick types have graded is under Track record.")

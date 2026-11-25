@@ -55,7 +55,7 @@ def money_picks(rows: List[Dict], parse_time: Optional[Callable] = None, now=Non
             if t is not None and t <= now:
                 continue
         seen.add(r.get("player"))
-        out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"), "edge": r.get("edge"),
+        out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"), "_inj": r.get("_inj"), "edge": r.get("edge"),
                     "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None
                                                        else ""),
                     "game": r.get("game") or "", "time": r.get("time") or "", "lock": bool(r.get("lock")),
@@ -80,11 +80,16 @@ def prop_picks(rows: List[Dict], include_new: bool = False, sports: Optional[Lis
     keep.sort(key=lambda x: (x[1] != WINNING, 0 if x[0].get("lock") else 1, -(x[0].get("chance") or 0)))
     keep = keep[:top_n]
     keep.sort(key=lambda x: _tkey(x[0].get("time"), parse_time))                      # stable: strength kept
-    return [{"Time": r.get("time") or "", "Sport": r.get("sport"), "Pick": r.get("pick"),
+    return [{"Time": r.get("time") or "", "Sport": r.get("sport"), "Pick": _q(r),
              "Chance": r.get("chance"),
              "Best price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None else ""),
              "Record (30 days)": r.get("record") or "—", "Standing": st, "Game": r.get("game") or ""}
             for r, st in keep]
+
+
+def _q(r: Dict) -> str:
+    """Nov 25: a pick on a player now listed questionable says so (injury_check.screen tags the row)."""
+    return f"{r.get('pick')} ⚠️ questionable" if r.get("_inj") == "questionable" else r.get("pick")
 
 
 def line_picks(rows: List[Dict], sports: Optional[List[str]] = None, records_for: Optional[Callable] = None,

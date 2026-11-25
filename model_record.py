@@ -54,3 +54,30 @@ def lines_table(leagues: Iterable[str], records_for: Optional[Callable] = None) 
             if n:
                 out.append(row(lg, mk, int(w), int(n), line_market=True))
     return out
+
+
+def line_history(sport: str) -> List[Dict]:
+    """Nov 25 (PropSeason scrub item 6): how often the books' posted prop lines went over, per market, from the sport's
+    latest morning review (postgame.line_record over its 30-day window). [] until a review carries it."""
+    try:
+        import model_store as MS
+        for m in MS.daily_review_mornings(sport)[:3]:
+            rep = MS.load_daily_review(sport, m) or {}
+            lines = (rep.get("trend") or {}).get("lines")
+            if lines:
+                return list(lines)
+    except Exception:                                           # noqa: BLE001
+        pass
+    return []
+
+
+def line_history_table(sport_keys: Iterable[str], history_for: Optional[Callable] = None) -> List[Dict]:
+    history_for = history_for or line_history
+    out: List[Dict] = []
+    for sp in sport_keys:
+        try:
+            rows = history_for(sp) or []
+        except Exception:                                       # noqa: BLE001
+            rows = []
+        out += [dict({"Sport": sp}, **r) for r in rows if (r.get("Lines") or 0) >= 20]
+    return out

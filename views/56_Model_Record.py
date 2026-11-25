@@ -140,6 +140,23 @@ if lines:
 else:
     st.info("No graded game-line leans in the last 30 days yet.")
 
+# Nov 25 (PropSeason scrub item 6): a check on the market itself, next to the model's record
+C.section_header("📏", "How often the posted line went over")
+try:
+    _lh = MR.line_history_table([k for k in live if sports.get(k).has_projections])
+except Exception:                                               # noqa: BLE001
+    _lh = []
+if _lh:
+    st.dataframe(pd.DataFrame(_lh), hide_index=True, width="stretch",
+                 column_config={"Over rate": st.column_config.NumberColumn(format="percent"),
+                                "Avg vs line": st.column_config.NumberColumn(format="%+.2f")})
+    st.caption("Every player prop the model read, graded against the book's posted line at the time — whatever the "
+               "model said. Over rate above 50% means the books set that market low lately; below, high. It's the "
+               "market's record, not the model's, and it moves around: a few points either side of 50% is normal "
+               "noise. Markets with 20+ graded lines, last 30 days.")
+else:
+    st.info("This table starts with the next morning review (each morning about 3:30 AM ET).")
+
 st.caption("How to read this: a hit rate is before the price. Above 50% is not by itself a profit; a standard −110 "
            f"line needs {MR.BREAK_EVEN_110:.1%}. \"Small sample\" means fewer than 20 graded picks, too few to judge. "
            "Soccer, International Hoops and Tennis are tracking only and are not counted here.")

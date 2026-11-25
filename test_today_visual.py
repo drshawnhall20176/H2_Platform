@@ -481,3 +481,11 @@ def test_player_card_can_log_the_pick_on_the_owner_build_only(monkeypatch):
     pub.secrets["AUDIENCE"] = "public"
     pub.run()
     assert not pub.exception and not any(c.label.startswith("📝 Log") for c in pub.checkbox)
+
+
+def test_pick_card_says_questionable_and_top_cards_carry_the_flag():
+    import customer_today as CT
+    html = TV.pick_card_html({"pick": "Dean Wade Over 6.5 Rebounds", "chance": 0.6, "_inj": "questionable"})
+    assert "Questionable tonight" in html
+    assert "Questionable" not in TV.pick_card_html({"pick": "x", "chance": 0.6})
+    assert CT._q({"pick": "p", "_inj": "questionable"}) == "p ⚠️ questionable" and CT._q({"pick": "p"}) == "p"

@@ -56,3 +56,15 @@ def _game_money_not_paused(monkeypatch, request):
         monkeypatch.setattr(_MSC, "PAUSED", {})
     except Exception:                                           # noqa: BLE001
         pass
+
+
+@pytest.fixture(autouse=True)
+def _no_live_injury_report(monkeypatch):
+    """Nov 25: cards re-check tonight's ESPN injury report; tests never reach the network for it."""
+    try:
+        import injury_check as IC
+        monkeypatch.setattr(IC, "_get_json", lambda sport: {})
+        IC._cache.clear()
+        IC._full.clear()
+    except Exception:                                           # noqa: BLE001
+        pass

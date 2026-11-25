@@ -257,6 +257,20 @@ def opponent(game, team) -> Optional[str]:
     return None
 
 
+def injury_note(p: Dict, sport: str, status=None) -> str:
+    """Nov 25 (PropSeason scrub): what tonight's ESPN injury report says about him, checked when the card opens."""
+    try:
+        import injury_check as IC
+        state = p.get("_inj") or (status or IC.status)(sport, p.get("Player") or p.get("player"))
+    except Exception:                                           # noqa: BLE001
+        return ""
+    if state == "out":
+        return "🚑 Out tonight on the injury report — this pick won't play. Don't bet it."
+    if state == "questionable":
+        return "⚠️ Questionable tonight on the injury report — check the news before betting."
+    return ""
+
+
 def from_row(r: Dict) -> Dict:
     """Nov 24: a saved pick row (Today's best, the college props section, a long shot) in the board-play shape the
     card reads. Board plays pass through unchanged."""
@@ -271,7 +285,7 @@ def from_row(r: Dict) -> Dict:
             "_earned": r.get("earned"), "_values": r.get("values") or [], "Why": r.get("why"),
             "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game"),
             "_mins": r.get("mins") or [], "_proj_min": r.get("proj_min"), "_factor": r.get("factor"),
-            "_slot": r.get("slot")}
+            "_slot": r.get("slot"), "_inj": r.get("_inj")}
 
 
 def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> None:
@@ -321,6 +335,9 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             f'</div><div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""}'
             + (f' · {float(price):+.0f}' if price is not None else "") + '</div></div></div></div>')
     st.markdown(head, unsafe_allow_html=True)
+    note = injury_note(p, sport)
+    if note:
+        (st.error if note.startswith("🚑") else st.warning)(note)
     C.kpi_row(kpis or [
         {"icon": "📐", "value": "—" if p.get("Projection") is None else f"{float(p['Projection']):g}",
          "label": "Projection"},

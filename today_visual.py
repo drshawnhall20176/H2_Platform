@@ -258,9 +258,14 @@ def pick_card_html(c: Dict) -> str:
            f'<span style="color:{HB.GOLD};font-size:13px;font-weight:700;"> {price}</span></div>' if ch != "—" else
            f'<div style="color:{HB.INK_SOFT};font-size:13px;margin-top:6px;">{c.get("basis") or "No chance shown"}'
            + (f'<span style="color:{HB.GOLD};font-weight:700;"> · {price}</span>' if price else "") + '</div>')
+    inj = ""
+    if c.get("_inj"):                                           # Nov 25: tonight's injury report says questionable
+        import injury_check as IC
+        inj = (f'<div style="color:{HB.GOLD};font-size:12px;font-weight:700;margin-top:3px;">'
+               f'{IC.chip(c["_inj"])} — check news before betting</div>')
     return (f'<div style="min-height:132px;">{top}'
             f'<div style="color:{HB.INK};font-weight:800;font-size:15.5px;margin-top:7px;line-height:1.25;">'
-            f'{icons}{c.get("pick") or ""}</div>' + big +
+            f'{icons}{c.get("pick") or ""}</div>' + inj + big +
             f'<div style="color:{HB.INK_SOFT};font-size:12px;margin-top:2px;">{c.get("game") or ""}'
             f'{" · " + c["time"] if c.get("time") else ""}</div></div>')
 

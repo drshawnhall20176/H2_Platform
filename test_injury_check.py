@@ -39,3 +39,57 @@ def test_report_is_cached(monkeypatch):
     IC.report("NBA", now=2000)
     assert calls == ["NBA", "NBA"]
     IC._cache.clear()
+
+
+JS = {"injuries": [
+    {"displayName": "Boston Bruins", "injuries": [
+        {"status": "Injured Reserve", "shortComment": "Hagens (back) is wearing a non-contact sweater.",
+         "athlete": {"displayName": "James Hagens", "team": {"abbreviation": "BOS", "displayName": "Boston Bruins"},
+                     "position": {"abbreviation": "C"}}, "details": {"type": "Back", "returnDate": "2026-11-27"}},
+        {"status": "Day-To-Day", "shortComment": "Zacha (lower body) is questionable for Wednesday.",
+         "athlete": {"displayName": "Pavel Zacha", "team": {"abbreviation": "BOS", "displayName": "Boston Bruins"}}},
+        {"status": "Day-To-Day", "shortComment": "day-to-day",
+         "athlete": {"displayName": "Charlie McAvoy", "team": {"abbreviation": "BOS", "displayName": "Boston Bruins"}}}]},
+    {"displayName": "Duke Blue Devils", "injuries": [
+        {"status": "Out", "shortComment": "", "athlete": {"displayName": "Some Guard"}}]}]}
+
+
+def test_parse_keeps_flagged_players_with_their_team():
+    got = IC.parse(JS)
+    assert [e["name"] for e in got] == ["James Hagens", "Pavel Zacha", "Some Guard"]      # plain day-to-day isn't news
+    hag = got[0]
+    assert hag["status"] == "out" and hag["abbr"] == "BOS" and hag["returns"] == "2026-11-27" and hag["pos"] == "C"
+    assert got[2]["team"] == "Duke Blue Devils"
+    assert IC.parse({}) == [] and IC.parse(None) == []
+
+
+def test_for_team_matches_abbreviation_full_name_nickname_and_school():
+    rep = IC.parse(JS)
+    for t in ("BOS", "Boston Bruins", "Bruins"):
+        assert [e["name"] for e in IC.for_team("NHL", t, rep)] == ["James Hagens", "Pavel Zacha"]
+    assert [e["name"] for e in IC.for_team("NCAAMB", "Duke", rep)] == ["Some Guard"]
+    assert IC.for_team("NHL", "Winnipeg Jets", rep) == [] and IC.for_team("NHL", "", rep) == []
+
+
+def test_screen_drops_out_players_and_flags_questionable_ones():
+    rows = [{"sport": "NBA", "player": "RJ Barrett", "pick": "a"}, {"sport": "NBA", "player": "Dean Wade", "pick": "b"},
+            {"sport": "NBA", "player": "Davion Mitchell", "pick": "c"}, {"sport": "SOCCER", "player": "RJ Barrett"}]
+    st = {"RJ Barrett": "out", "Dean Wade": "questionable"}
+    got = IC.screen(rows, lambda r: r["sport"], lambda r: r.get("player"), status=lambda sp, n: st.get(n))
+    assert [r["pick"] for r in got[:2]] == ["b", "c"] and got[0]["_inj"] == "questionable"
+    assert got[2]["sport"] == "SOCCER"                                   # no report for that league: left alone
+    assert IC.screen(rows, None, None) == rows                           # a failure leaves the rows as they were
+
+
+def test_player_card_injury_note():
+    import player_card as PC
+    assert "Out tonight" in PC.injury_note({"Player": "X"}, "NBA", status=lambda s, n: "out")
+    assert "Questionable" in PC.injury_note({"Player": "X", "_inj": "questionable"}, "NBA")
+    assert PC.injury_note({"Player": "X"}, "NBA", status=lambda s, n: None) == ""
+
+
+def test_game_card_injury_column():
+    import game_card as GC
+    html = GC.injuries_html("Boston Bruins", IC.for_team("NHL", "BOS", IC.parse(JS)))
+    assert "James Hagens" in html and "back ~11/27" in html and "Pavel Zacha" in html
+    assert "Nobody listed" in GC.injuries_html("Jets", [])
