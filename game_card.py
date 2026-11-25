@@ -471,6 +471,11 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day)
     except Exception:                                           # noqa: BLE001
         pass
+    if (w.get("sport") or lg) == "NHL":
+        try:
+            _nhl(g.get("away") or "", g.get("home") or "", day)
+        except Exception:                                       # noqa: BLE001
+            pass
     if (w.get("sport") or lg) == "NBA":
         try:
             _rotations(g.get("away") or "", g.get("home") or "", day)
@@ -507,6 +512,25 @@ def _injuries(sport: str, away: str, home: str, day: str) -> None:
                 + injuries_html(home, IC.for_team(sport, home, rep)) + '</div>', unsafe_allow_html=True)
     st.caption("🚑 out · ⚠️ questionable — ESPN's injury report, checked every 10 minutes. The saved projection was "
                "built before some of this news; picks on players ruled out are taken off the boards.")
+
+
+def _nhl(away: str, home: str, day: str) -> None:
+    """Nov 25 (PropSeason scrub item 2): goalies, records, back-to-back, scoring share (nhl_card.py)."""
+    import streamlit as st
+    import nhl_card as NC
+
+    @st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+    def board(d):
+        return NC._get(d)
+
+    @st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+    def props(d):
+        import todays_best as TB
+        try:
+            return TB.load_all_props("NHL", d)
+        except Exception:                                       # noqa: BLE001
+            return []
+    NC.render(away, home, day, props(day), get=board)
 
 
 def _bundle_game(sport: str, games: List[Dict], away: str, home: str) -> Optional[Dict]:
