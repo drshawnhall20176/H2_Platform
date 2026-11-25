@@ -262,6 +262,11 @@ def run():
     st.sidebar.segmented_control("📱 Layout", ["Auto", "Phone", "Full"], key=_TS.LAYOUT_KEY, default="Auto",
                                  help="Auto: cards on a phone, tables everywhere else. Phone: always cards (good on a "
                                       "small tablet). Full: always the full tables.")
+    try:                                                        # Nov 25: site-wide "My sportsbook / pick'em app"
+        import my_books as MB
+        MB.sidebar()
+    except Exception:                                           # noqa: BLE001
+        pass
     commercial = NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
     if commercial and audience == "owner":
         st.sidebar.caption("👀 Previewing the commercial layout")

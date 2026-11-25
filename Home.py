@@ -68,6 +68,12 @@ def _desk_changed():
     st.session_state["_desk_prev"] = new
 
 
+try:                                                            # Nov 25 (owner): the site-wide book / pick'em app
+    import my_books as _MBd
+    st.caption(f"📖 Your sportsbook: **{_MBd.book_label()}** · 🎟️ Your pick'em app: **{_MBd.app_label()}** — change "
+               "them in the sidebar; every page follows.")
+except Exception:                                               # noqa: BLE001
+    pass
 # Nov 24 evening (owner): "have the default be a single sport and a toggle that enables multi sport selections"
 _multi_on = st.toggle("Show several sports at once", value=False, key="desk_multi",
                       help="Off: one sport at a time — clicking a sport switches to it. On: click as many sports as "

@@ -32,7 +32,27 @@ if not api:
 
 date_str = datetime.now(ET).strftime("%Y-%m-%d")
 c1, c2, c3 = st.columns([1.2, 1, 1])
-app = c1.radio("App", list(PK.APPS), format_func=lambda k: PK.APPS[k]["name"], horizontal=True, key="pk_app")
+# Nov 25 (owner): site-wide "My pick'em app" (my_books.py) -- this board opens on it, and a change here changes it
+try:
+    import my_books as _MB
+    _last = st.session_state.get("_pk_app_synced")
+    if _last is None and st.session_state.get("pk_app") in PK.APPS:
+        st.session_state["_pk_app_synced"] = _MB.app()           # a choice already made on this page stands
+    elif _last != _MB.app():                                    # first visit, or changed in the sidebar
+        st.session_state["pk_app"] = _MB.app()
+        st.session_state["_pk_app_synced"] = _MB.app()
+except Exception:                                               # noqa: BLE001
+    _MB = None
+
+
+def _pk_changed():
+    if _MB is not None:
+        _MB.set_app(st.session_state["pk_app"])
+        st.session_state["_pk_app_synced"] = st.session_state["pk_app"]
+
+
+app = c1.radio("App", list(PK.APPS), format_func=lambda k: PK.APPS[k]["name"], horizontal=True, key="pk_app",
+               on_change=_pk_changed)
 cfg = PK.APPS[app]
 priced = PK.is_priced(app)
 if cfg.get("power"):

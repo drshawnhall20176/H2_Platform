@@ -150,6 +150,13 @@ else:
     _one = st.pills("Sports", [ALL] + _bar, selection_mode="single", key="today_one",
                     format_func=_label, on_change=_one_changed, label_visibility="collapsed")
     picked = None if (not _one or _one == ALL) else [_one]
+try:                                                            # Nov 25 (owner): the site-wide book / pick'em app
+    import my_books as _MB
+    st.caption(f"📖 Your sportsbook: **{_MB.book_label()}** · 🎟️ Your pick'em app: **{_MB.app_label()}** — change "
+               "them in the sidebar; every page follows. Cards show the price at the book that posts it (named on "
+               "the card); **All picks** prices the whole board at your book.")
+except Exception:                                               # noqa: BLE001
+    pass
 f1, f2 = st.columns(2)
 f1.toggle("Show several sports at once", key="today_multi", on_change=_mode_changed,
           help="Off: one sport at a time (or All sports), and the sidebar follows it. On: pick any mix of sports.")
