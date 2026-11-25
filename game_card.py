@@ -476,6 +476,10 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
             _nhl(g.get("away") or "", g.get("home") or "", day)
         except Exception:                                       # noqa: BLE001
             pass
+    try:                                                        # Nov 25 (owner): the Game Lab's simulation, in the card
+        _simulation(w)
+    except Exception:                                           # noqa: BLE001
+        pass
     if (w.get("sport") or lg) == "NBA":
         try:
             _rotations(g.get("away") or "", g.get("home") or "", day, key=key)
@@ -567,6 +571,46 @@ def _nhl(away: str, home: str, day: str) -> None:
         except Exception:                                       # noqa: BLE001
             return []
     NC.render(away, home, day, props(day), get=board)
+
+
+def sim_cells(sim: Dict, away: str, home: str, league: str) -> List[tuple]:
+    """(label, value) pairs for the card's simulation strip."""
+    import game_sim as GS
+    noun = GS.unit(league)
+    cells = [(f"{away} likely range", GS.range_text(*sim["away_range"], league)),
+             (f"{home} likely range", GS.range_text(*sim["home_range"], league)),
+             ("Total likely range", GS.range_text(*sim["total_range"], league))]
+    if sim.get("overtime") is not None:
+        cells.append(("Goes to overtime", f"{sim['overtime']:.0%}"))
+        cells.append(("One-goal game", f"{sim['close']:.0%}"))
+    else:
+        cells.append((f"Decided by {GS.CLOSE[sim['family']]} or fewer", f"{sim['close']:.0%}"))
+    cells.append((f"Decided by {GS.BLOWOUT[sim['family']]}+ {noun}", f"{sim['blowout']:.0%}"))
+    return cells
+
+
+def _simulation(w: Dict) -> None:
+    """20,000 games simulated around the model's projection (game_sim.py) -- the Game Lab's "One game, up close",
+    now in the game card: the likely ranges and how often it's close or lopsided. One model, one answer."""
+    import streamlit as st
+    import game_sim as GS
+    p = w.get("_full") or {}
+    league = w.get("sport") or p.get("sport") or ""
+    if p.get("model_margin") is None or p.get("model_total") is None:
+        return
+    sim = GS.simulate(league, p.get("model_margin"), p.get("model_total"), key=p.get("game_id"))
+    if not sim:
+        return
+    away, home = p.get("away") or "", p.get("home") or ""
+    st.markdown("**Simulated finishes**")
+    st.markdown('<div style="display:flex;gap:8px;flex-wrap:wrap;">' + "".join(
+        f'<div style="flex:1;min-width:120px;background:{HB.NAVY};border:1px solid {HB.EDGE};border-radius:10px;'
+        f'padding:8px 10px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;">{lab}</div>'
+        f'<div style="color:{HB.INK};font-size:18px;font-weight:800;">{val}</div></div>'
+        for lab, val in sim_cells(sim, away, home, league)) + '</div>', unsafe_allow_html=True)
+    st.caption(f"{sim['n_sims']:,} games simulated around the model's projected score ({away} "
+               f"{sim['proj_away_score']:.1f} — {home} {sim['proj_home_score']:.1f}). Likely range = 8 of 10 simulated "
+               "games. It doesn't know injuries or rest — see Who's out above.")
 
 
 def _bundle_game(sport: str, games: List[Dict], away: str, home: str) -> Optional[Dict]:

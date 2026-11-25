@@ -583,7 +583,8 @@ def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, 
                         f"{r['Gap (pts)']:.1f} points from the market.")
     keep = board_keep({_label(p) for p in shown}, all_labels)
     import view_mode as VM
-    if VM.choose(f"games_{league}") == VM.CARDS:              # Nov 25 (members): cards by default, tap to open
+    cards_view = VM.choose(f"games_{league}") == VM.CARDS
+    if cards_view:                                              # Nov 25 (members): cards by default, tap to open
         game_cards(league, day, keep, last)
     else:
         GLT.lab_section(league, key=f"hg_board_{league}", day=day, keep=keep, extra_cols=context_cols(previews),
@@ -608,7 +609,7 @@ def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, 
         st.table(pd.DataFrame([{**r, "Hit rate": "—" if r["Hit rate"] is None else f"{r['Hit rate']:.0%}"}
                                for r in PR.band_table(league, lean_recs)]).set_index("Gap size"))
         st.caption("A −110 spread needs 52.4% to break even. Fewer than 20 graded games is too few to judge.")
-    if upcoming:
+    if upcoming and not cards_view:                             # Nov 25: on cards the simulation is in each game card
         try:
             _one_game(league, upcoming, day)
         except Exception as exc:                                # noqa: BLE001 -- never takes the slate down with it

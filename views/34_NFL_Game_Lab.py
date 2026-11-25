@@ -144,7 +144,9 @@ def _injury_block() -> None:
 if _nfl_records():
     import hoops_games_page as HG
     HG.render("NFL")
-    _injury_block()
+    import view_mode as _VM
+    if _VM.current() == _VM.TABLE:                              # Nov 25: on cards, each game card has Who's out
+        _injury_block()
     st.stop()
 
 st.warning("**Informational — not a betting signal.** No NFL game-line model here has beaten the closing line: the "

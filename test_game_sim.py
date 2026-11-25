@@ -59,6 +59,7 @@ def test_game_lab_shows_the_two_sections_for_a_chosen_game(monkeypatch):
     monkeypatch.setattr(MS, "load_results", lambda sport, since=None, db_path=None: res if sport == "NBA" else [])
     at = AppTest.from_file("views/46_NBA_Game_Lab.py", default_timeout=120)
     at.session_state["sport"] = "NBA"
+    at.session_state["h2_view_pref"] = "Table"                 # Nov 25: on Cards the simulation is in each game card
     at.run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     m = {x.label: x.value for x in at.metric}
@@ -98,3 +99,14 @@ def test_football_scoring_rate_sims_give_the_home_team_its_edge():
         home = sim(even, even, even, even, 24.0, seed=1, hfa=hfa)
         assert abs(flat["proj_spread"]) < 0.05 and abs(home["proj_spread"] - hfa) < 0.05
         assert abs(home["proj_total"] - flat["proj_total"]) < 0.05 and home["home_win_prob"] > flat["home_win_prob"]
+
+
+def test_the_game_card_carries_the_simulation():
+    import game_card as GC
+    import game_sim as GS
+    sim = GS.simulate("NBA", 6.0, 226.0, key="g1")
+    labels = [lab for lab, _ in GC.sim_cells(sim, "New York Knicks", "Boston Celtics", "NBA")]
+    assert labels[:3] == ["New York Knicks likely range", "Boston Celtics likely range", "Total likely range"]
+    assert "Decided by 5 or fewer" in labels and "Decided by 15+ points" in labels
+    hockey = [lab for lab, _ in GC.sim_cells(GS.simulate("NHL", 0.4, 6.0, key="h1"), "A", "H", "NHL")]
+    assert "Goes to overtime" in hockey and "One-goal game" in hockey
