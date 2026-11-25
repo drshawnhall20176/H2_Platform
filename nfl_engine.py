@@ -158,10 +158,8 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
     a code fix here -- a genuinely separate, much larger project, not something this function's
     own logic could be changed to unlock. (Unrelated to the game_time fix above -- this remains a
     real, separate, still-open gap.)"""
-    try:
-        df = nfl.load_schedules([season]).to_pandas()
-    except Exception:
-        logger.exception("NFL load_schedules failed for season %s", season)
+    df = _schedule_frame(season)
+    if df is None:
         return []
     if df.empty:
         _diag(f"get_schedule({season}): load_schedules returned 0 rows")
@@ -187,6 +185,38 @@ def get_schedule(season: int) -> List[Dict[str, Any]]:
             continue
     _diag(f"get_schedule({season}): {len(out)} game(s)")
     return out
+
+
+_CSV_CACHE: Dict[str, tuple] = {}            # the whole CSV (~2 MB), kept an hour in this process
+SCHEDULE_CSV = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv"
+
+
+def _schedule_frame(season: int, csv_reader=None):
+    """Nov 25 (owner: NFL player cards said "no NFL game" on Thanksgiving week): nflverse's schedules release dropped
+    games.parquet (only games.csv is left), so nflreadpy 0.1.5's load_schedules 404s and every NFL page saw an empty
+    schedule. nflreadpy first; on failure the release's CSV, filtered to the season. None when both fail."""
+    try:
+        return nfl.load_schedules([season]).to_pandas()
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("NFL load_schedules failed for season %s (%s); trying the CSV", season, exc)
+    try:
+        import time
+        import pandas as pd
+        hit = _CSV_CACHE.get("all")
+        if csv_reader is None and hit and time.time() - hit[0] < 3600:
+            full = hit[1]
+        else:
+            full = (csv_reader or pd.read_csv)(SCHEDULE_CSV)
+            if csv_reader is None:
+                _CSV_CACHE["all"] = (time.time(), full)
+        df = full[full["season"] == int(season)].copy()
+        for c in ("home_score", "away_score", "spread_line", "total_line", "home_rest", "away_rest"):
+            if c in df:
+                df[c] = df[c].astype(object).where(df[c].notna(), None)
+        return df
+    except Exception:                                           # noqa: BLE001
+        logger.exception("NFL schedule CSV failed for season %s", season)
+        return None
 
 
 def _resolve_week(schedule: List[Dict], date_str: str) -> Optional[int]:
