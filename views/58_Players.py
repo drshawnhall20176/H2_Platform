@@ -20,6 +20,10 @@ sport = st.session_state.get("sport", sports.DEFAULT_SPORT)
 # separate tools stay under Table.
 import view_mode as VM
 C.base_css()
+_cards_now = VM.current() == VM.CARDS
+if _cards_now:                                                  # the title first, then the Cards | Table switch
+    C.page_header("👤", "Players", "Tonight's players with a line on the board. Tap a player for his card: the model's "
+                  "projection and chance, his recent games, the matchup, head to head and rest — all in one place.")
 if VM.choose("players", "Cards: tonight's players, each opening his player card. Table: the separate player tools "
                         "(by position, hot players, head to head ...).") == VM.CARDS:
     import players_cards as PCD
