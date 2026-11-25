@@ -22,9 +22,20 @@ def test_home_lists_only_selectable_sports_and_labs_open_their_pages():
     at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=60)
     at.run()
     # Nov 24: the sports are one multi-select chip row (Select Sport), labelled by their full names
-    picker = at.button_group(key="desk_sports")
+    picker = at.button_group(key="desk_one")                    # Nov 24: one sport by default
     labels = [str(o) for o in picker.options]
     assert any("Tennis" in x for x in labels) and any("International Hoops" in x for x in labels)
     assert not any("coming soon" in x for x in labels)
     for key in [k for k in S.SEASON_WINDOWS if not S.in_season(k)]:
         assert not any(S.REGISTRY[key].label in x for x in labels)
+
+
+def test_one_sport_by_default_and_several_on_request():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(Path(__file__).parent / "Home.py"), default_timeout=60)
+    at.run()
+    assert not at.toggle(key="desk_multi").value
+    opts = [str(o) for o in at.button_group(key="desk_one").options]
+    nba = next(o for o in opts if "NBA" in o)
+    at.button_group(key="desk_one").set_value("NBA").run()
+    assert at.session_state["sport"] == "NBA" and at.session_state["desk_sports"] == ["NBA"], nba
