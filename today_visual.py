@@ -162,7 +162,13 @@ def _game_dialog(w: Dict, props: List[Dict]):
     if w.get("sport") == "TENNIS":                              # Nov 25: a match card, not a basketball box
         GC.render_tennis(GC.build_tennis(w))
         return
-    GC.render(GC.build(w), props, key=f"gcd_{_norm(w.get('game')).replace(' ', '_')}")
+    k = f"gcd_{_norm(w.get('game')).replace(' ', '_')}"
+    g = GC.build(w)
+    GC.render(g, props, key=k)
+    try:                                                        # Nov 25: pace, form, team strength, log boxes
+        GC.render_extras(g, w, _today_et(), k)
+    except Exception:                                           # noqa: BLE001 -- the card never breaks on an extra
+        pass
 
 
 @_st.dialog("Pick", width="large")
@@ -181,6 +187,12 @@ def _soccer_rows_cached(day: str, past: bool) -> List[Dict]:
 def _soccer_flags_cached(day: str) -> List[Dict]:
     import todays_best as TB
     return TB.soccer_flags(day)
+
+
+def _today_et() -> str:
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
 
 
 def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
@@ -302,7 +314,9 @@ def game_tile_html(w: Dict) -> str:
             f'{w.get("game") or ""}</div>'
             f'<div style="color:{HB.GOLD};font-size:12.5px;margin-top:4px;">{lines}</div>'
             f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or w.get("best") or _win_txt(w)}</div>'
-            f'<div style="margin-top:6px;">{HB.bet_chip(bet) if bet else ""}</div></div>')
+            + (f'<div style="color:{HB.INK};font-size:12px;margin-top:3px;">📏 Line pick: <b>{w["best"]}</b></div>'
+               if w.get("best") and w.get("sport") not in ("SOCCER", "UFC", "TENNIS") else "")
+            + f'<div style="margin-top:6px;">{HB.bet_chip(bet) if bet else ""}</div></div>')
 
 
 def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: str,
@@ -329,6 +343,15 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
     try:
         _search_and_favorites(list(rows or []) + list(search_rows or []), player_dlg)
     except Exception:                                           # noqa: BLE001 -- extras never blank the page
+        pass
+    keys = {s.key for s in live}
+    try:                                                        # Nov 25 (second PropSeason pass): two strips
+        _moves_strip([w for w in winners or [] if w.get("sport") in keys], game_dlg, rows)
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:
+        _streaks_strip([r for r in list(rows or []) + list(search_rows or []) if r.get("sport") in keys], player_dlg)
+    except Exception:                                           # noqa: BLE001
         pass
     for s, cards, games in sections:
         with st.container(border=True):
@@ -432,3 +455,107 @@ def _search_and_favorites(rows: Sequence[Dict], player_dlg) -> None:
                         st.markdown(pick_card_html(c), unsafe_allow_html=True)
                         if st.button("Open →", key=f"tv_fav_{start + j}", width="stretch"):
                             player_dlg(r, r.get("sport") or "")
+
+
+
+# --------------------------------------------------------------------------- line moves and streaks (Nov 25)
+MOVE_MIN = 1.0
+
+
+def line_moves(winners: Sequence[Dict], n: int = 8) -> List[Dict]:
+    """Today's biggest spread moves (open -> now, 1+ point), biggest first: {"w", "size", "text", "our_way"}."""
+    out = []
+    for w in winners or []:
+        p = w.get("_full") or {}
+        try:
+            o, l = float(p["open_line"]), float(p["line"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if abs(l - o) < MOVE_MIN:
+            continue
+        # line = the market's expected home margin, so the home spread is its negative
+        text = w.get("spread_move_why") or f"{p.get('home')} {-o:+g} → {-l:+g}"
+        out.append({"w": w, "size": abs(l - o), "text": text,
+                    "our_way": None if not w.get("spread_move") else w["spread_move"].startswith("📈")})
+    return sorted(out, key=lambda m: -m["size"])[:n]
+
+
+def streak(values: Sequence[float], line, side: str) -> int:
+    """How many games in a row, newest first, the player cleared tonight's line for the pick's side."""
+    import player_card as PC
+    try:
+        ln = float(line)
+    except (TypeError, ValueError):
+        return 0
+    k = 0
+    for v in values or []:
+        if v is None or not PC.cleared(float(v), ln, side):
+            break
+        k += 1
+    return k
+
+
+def hot_streaks(rows: Sequence[Dict], min_len: int = 5, n: int = 8) -> List[Dict]:
+    """Players on a run against tonight's line (5+ straight), longest first, one per player and market."""
+    seen, out = set(), []
+    for r in rows or []:
+        if r.get("kind") != "Prop" or r.get("side") not in ("Over", "Under") or r.get("line") is None:
+            continue
+        k = (r.get("sport"), player_of(r), r.get("market"), r.get("side"))
+        if k in seen:
+            continue
+        seen.add(k)
+        st_ = streak(r.get("values") or [], r.get("line"), r["side"])
+        if st_ >= min_len:
+            out.append(dict(r, _streak=st_, _of=len(r.get("values") or [])))
+    return sorted(out, key=lambda r: (-r["_streak"], -(r.get("chance") or 0)))[:n]
+
+
+def _moves_strip(winners: Sequence[Dict], game_dlg, rows) -> None:
+    import streamlit as st
+    mv = line_moves(winners)
+    if not mv:
+        return
+    st.markdown(f"#### 📈 Biggest line moves today")
+    st.caption("The spread from its opening number to now. 📈 = moving toward the side the model likes (books agreeing "
+               "with it); 📉 = away from it. Context, not a pick — tap a game for the full read.")
+    for start in range(0, min(len(mv), 8), 4):
+        cols = st.columns(4)
+        for j, m in enumerate(mv[start:start + 4]):
+            w = m["w"]
+            arrow = "" if m["our_way"] is None else ("📈 toward the model" if m["our_way"] else "📉 away from the model")
+            with cols[j].container(border=True):
+                st.markdown(f'<div style="min-height:92px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;">'
+                            f'{w.get("sport")} · {w.get("time") or ""}</div><div style="color:{HB.INK};font-weight:800;'
+                            f'font-size:13.5px;margin-top:2px;line-height:1.25;">{w.get("game")}</div>'
+                            f'<div style="color:{HB.GOLD};font-size:13px;font-weight:700;margin-top:4px;">{m["text"]}'
+                            f'</div><div style="color:{HB.INK_SOFT};font-size:12px;">moved {m["size"]:g} pts'
+                            f'{" · " + arrow if arrow else ""}</div></div>', unsafe_allow_html=True)
+                if st.button("Game card →", key=f"tv_move_{start + j}", width="stretch"):
+                    game_dlg(w, props_in_game(rows, w))
+
+
+def _streaks_strip(rows: Sequence[Dict], player_dlg) -> None:
+    import streamlit as st
+    import game_previews as GP
+    hs = hot_streaks(rows)
+    if not hs:
+        return
+    st.markdown("#### 🔥 Hot streaks against tonight's line")
+    st.caption("Players who cleared tonight's exact line for this side in 5+ straight games. A streak is context, not a "
+               "reason by itself: each card shows the model's earned chance and whether it's a bet.")
+    for start in range(0, len(hs), 4):
+        cols = st.columns(4)
+        for j, r in enumerate(hs[start:start + 4]):
+            use = ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "") + str(r.get("use") or "")
+            bet = GP.prop_bet(r.get("sport") or "", use, r)
+            ch = r.get("chance")
+            with cols[j].container(border=True):
+                st.markdown(f'<div style="min-height:118px;">{HB.bet_chip(bet)}<div style="color:{HB.INK};font-weight:800;'
+                            f'font-size:14.5px;margin-top:6px;line-height:1.25;">{r.get("pick")}</div>'
+                            f'<div style="color:{HB.GOLD};font-size:13px;font-weight:700;margin-top:3px;">🔥 '
+                            f'{r["_streak"]} straight</div><div style="color:{HB.INK_SOFT};font-size:12px;">'
+                            + ("" if ch is None else f"earned chance {float(ch):.0%} · ")
+                            + f'{r.get("sport")} · {r.get("time") or ""}</div></div>', unsafe_allow_html=True)
+                if st.button("Open →", key=f"tv_streak_{start + j}", width="stretch"):
+                    player_dlg(r, r.get("sport") or "")
