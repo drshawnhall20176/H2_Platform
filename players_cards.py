@@ -29,8 +29,6 @@ def render(sport: str) -> None:
     import streamlit as st
     import components as C
     import today_visual as TV
-    C.page_header("👤", "Players", "Tonight's players with a line on the board. Tap a player for his card: the model's "
-                  "projection and chance, his recent games, the matchup, head to head and rest — all in one place.")
     rows = TV.all_props(sport)
     if not rows:
         st.info("No player lines on tonight's board for this sport yet — they're added as the books post them.")
