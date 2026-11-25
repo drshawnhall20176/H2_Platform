@@ -627,11 +627,25 @@ def lessons(bets: Sequence[Dict], day: str) -> List[str]:
         out.append(f"**Parlays were the leak:** {usd(pl_par)} of the {usd(total)}."
                    + (f" {len(big)} paid +1000 or more — long shots that hit less than 1 time in 10." if big else ""))
     picks = [b for b in mine if not B.is_parlay_header(b) and B._result(b) in ("win", "loss")]
-    unbacked = [b for b in picks if _num(b.get("model_prob")) is None or _num(b.get("model_prob")) < 0.5]
+    # Nov 25 (owner: "why does my coach say 10 out of 10 picks yesterday had no model support"): the same three groups
+    # as the Bet Log's split (betlog.model_group). A 🧪 close-gap test bet or a 💰 Money pick IS the model's call even
+    # though it carries no tested chance yet; only an Info-only lean or your own pick is "no model support".
+    grp = {b_id: B.model_group(b) for b_id, b in enumerate(picks)}
+    tests = [b for i, b in enumerate(picks) if grp[i] == "with" and _num(b.get("model_prob")) is None]
+    leans = [b for i, b in enumerate(picks) if grp[i] == "lean"]
+    unbacked = [b for i, b in enumerate(picks) if grp[i] == "own"]
+    if tests:
+        tw, tl = _wl(tests)
+        out.append(f"**{len(tests)} of your {len(picks)} picks were the model's tracked calls** (🧪 close-gap tests or "
+                   f"💰 Money picks — no tested chance yet, by design): {tw}–{tl}. Judge the test on its running "
+                   "record, not one night.")
+    if leans:
+        lw, ll = _wl(leans)
+        out.append(f"**{len(leans)} were Info-only leans** (the model's side, but not a tested bet): {lw}–{ll}.")
     if len(unbacked) >= 2:
         uw, ul = _wl(unbacked)
-        out.append(f"**{len(unbacked)} of your {len(picks)} picks had no model support** (under 50% or no read): "
-                   f"{uw}–{ul}. Check Find a bet first — if it isn't 🟢 or a 🟢 Small-stake Maybe, skip it.")
+        out.append(f"**{len(unbacked)} of your {len(picks)} picks had no model support** (under 50% or your own "
+                   f"pick): {uw}–{ul}. Check Find a bet first — if it isn't 🟢 or a 🟢 Small-stake Maybe, skip it.")
     heavy = [b for b in picks if (_num(b.get("entry_odds")) or 0) <= -150 and not B._ticket(b)]
     if heavy:
         hw, hl = _wl(heavy)
