@@ -196,3 +196,34 @@ def test_owner_brief_sits_at_the_top_of_today(monkeypatch):
     assert at.expander[0].label == "☀️ Morning brief"
     src = open("Today.py").read()
     assert src.index("the owner's brief (Nov 19") < src.index("C.kpi_row(") < src.index("for s in _order:")
+
+
+def test_today_has_one_sport_bar_all_sports_by_default_that_also_sets_the_sidebar(monkeypatch):
+    """Nov 25 (owner): the top bar and the bottom 'Explore a sport' were redundant -- one bar, All sports by default,
+    one sport at a time (sidebar follows), several at once only when switched on."""
+    from streamlit.testing.v1 import AppTest
+    import pick_records as PR
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [_p("NBA", "A Assists Over 5.5", 0.61),
+                                                                               _p("NHL", "B Shots Over 2.5", 0.6)],
+                                                                      "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: {"🎯 Single only": (30, 50)})
+    monkeypatch.setattr(PR, "lean_records", lambda lg, days=30, recs=None: {})
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60).run()
+    assert not at.exception and not at.warning
+    assert not [b for b in at.button if (b.key or "").startswith("today_sport_")]   # no bottom sport buttons
+    bar = at.button_group(key="today_one")
+    assert bar.value == "ALL"
+    assert len(at.dataframe[0].value) == 2                                           # all sports' picks
+    bar.set_value("NBA").run()
+    assert not at.exception and at.session_state["sport"] == "NBA"                   # the sidebar follows
+    assert len(at.dataframe[0].value) == 1
+    at.toggle(key="today_multi").set_value(True).run()
+    assert not at.exception and at.button_group(key="today_sports").value == ["NBA"]   # carried over
+    at.button_group(key="today_sports").set_value(["NBA", "NHL"]).run()
+    assert not at.exception and at.session_state["sport"] == "NHL" and len(at.dataframe[0].value) == 2
+    at.toggle(key="today_multi").set_value(False).run()
+    assert not at.exception and at.button_group(key="today_one").value == "ALL"

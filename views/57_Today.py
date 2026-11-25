@@ -50,9 +50,59 @@ def _lean_recs(lg):
 
 
 rows, winners = _load(_day, tuple(props_sports))
-f1, f2 = st.columns([3, 2])
-picked = f1.pills("Sports", [s.key for s in live], selection_mode="multi", key="today_sports",
-                  format_func=lambda k: f"{sports.get(k).icon} {k}", label_visibility="collapsed")
+
+# Nov 25 (owner): one sport bar at the top -- "All sports" by default, one sport at a time (it also sets the sidebar's
+# sport, so the old "Explore a sport" buttons at the bottom are gone), and several at once only when switched on.
+ALL = "ALL"
+_bar = [sp.key for sp in sports.selectable_sports(False)]
+for _sp in live:                                                # anything in season the selector doesn't list
+    if _sp.key not in _bar:
+        _bar.append(_sp.key)
+
+
+def _label(k):
+    if k == ALL:
+        return "🌐 All sports"
+    sp = sports.get(k)
+    return f"{sp.icon} {k}" + (" · beta" if k in sports.LAB_SPORTS else "")
+
+
+def _one_changed():
+    k = st.session_state.get("today_one")
+    if k and k != ALL:
+        st.session_state["sport"] = k                           # the sidebar follows the sport picked here
+
+
+def _multi_changed():
+    now = list(st.session_state.get("today_sports") or [])
+    new = [k for k in now if k not in st.session_state.get("_today_prev", [])]
+    if new:
+        st.session_state["sport"] = new[-1]
+    st.session_state["_today_prev"] = now
+
+
+def _mode_changed():
+    if st.session_state.get("today_multi"):                     # carry the one sport into the multi bar
+        one = st.session_state.get("today_one")
+        st.session_state["today_sports"] = [one] if one and one != ALL else []
+        st.session_state["_today_prev"] = list(st.session_state["today_sports"])
+    else:
+        sel = list(st.session_state.get("today_sports") or [])
+        st.session_state["today_one"] = sel[-1] if len(sel) == 1 else ALL
+
+
+multi = st.session_state.get("today_multi", False)
+if multi:
+    picked = st.pills("Sports", _bar, selection_mode="multi", key="today_sports", format_func=_label,
+                      on_change=_multi_changed, label_visibility="collapsed") or None
+else:
+    st.session_state.setdefault("today_one", ALL)
+    _one = st.pills("Sports", [ALL] + _bar, selection_mode="single", key="today_one",
+                    format_func=_label, on_change=_one_changed, label_visibility="collapsed")
+    picked = None if (not _one or _one == ALL) else [_one]
+f1, f2 = st.columns(2)
+f1.toggle("Show several sports at once", key="today_multi", on_change=_mode_changed,
+          help="Off: one sport at a time (or All sports), and the sidebar follows it. On: pick any mix of sports.")
 include_new = f2.toggle("Include pick types too new to judge", value=False, key="today_new",
                         help="Pick types with fewer than 20 graded picks in the last 30 days. Losing pick types are "
                              "never shown.")
@@ -106,15 +156,5 @@ if not _cards_ok:
 st.caption("Every game, every lean and the full board are under Games and All picks in the sidebar. "
            "How these pick types have graded is under Track record.")
 
-st.divider()
-C.section_header("🧭", "Explore a sport", "Pick a sport to load its games, players and live pages in the sidebar.")
-current = st.session_state.get("sport", sports.DEFAULT_SPORT)
-with st.container(horizontal=True, horizontal_alignment="left"):
-    for sp in sports.selectable_sports(False):
-        beta = sp.key in sports.LAB_SPORTS
-        if st.button(f"{sp.icon} {sp.label}" + (" · beta" if beta else ""), key=f"today_sport_{sp.key}",
-                     type="primary" if current == sp.key else "secondary", width="content"):
-            st.session_state["sport"] = sp.key
-            st.rerun()
 st.caption("Beta sports are tracking only: their record is not proven yet, and they are not counted in the picks above.")
 st.caption(CT.DISCLAIMER)
