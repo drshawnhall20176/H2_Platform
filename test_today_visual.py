@@ -4,6 +4,16 @@ import today_visual as TV
 from test_customer_pages import RECS, _p
 
 
+
+import pytest as _pytest_today
+
+
+@_pytest_today.fixture(autouse=True)
+def _no_schedule_calls(monkeypatch):
+    """Nov 25: Today asks each sport's schedule which sports have games -- never the network in tests."""
+    import customer_today as _CT
+    monkeypatch.setattr(_CT, "has_games", lambda key, day: False)
+
 def _game(sport="NCAAMB", home="Duke Blue Devils", away="Army Black Knights", kickoff="2026-11-25T00:00:00Z", **kw):
     full = {"home": home, "away": away, "home_spread": -12.5, "line_total": 141.5, "model_margin": 11.0,
             "model_total": 139.0, "kickoff": kickoff, "game_id": "g1"}
