@@ -194,3 +194,79 @@ def render(g: Dict, props: Optional[List[Dict]] = None, key: str = "gc") -> None
         st.markdown(f"**H2's player picks in this game** ({len(props)})")
         PC.picker(props, lambda r: g.get("league") or r.get("sport") or "", key=f"{key}_pc",
                   label="🔎 Open a player card")
+
+
+
+# --------------------------------------------------------------------------- soccer (Nov 25)
+def build_soccer(r: Dict, flags: Optional[List[Dict]] = None) -> Dict:
+    """One soccer row (todays_best.soccer_rows) -> the soccer card's data: three results, model vs market."""
+    rec = r.get("_rec") or {}
+    home, away = rec.get("home"), rec.get("away")
+    probs, mkt, prices = r.get("_probs") or {}, r.get("_market") or {}, r.get("_prices") or {}
+    names = {"home": home, "draw": "Draw", "away": away}
+    results = [{"side": s, "name": names[s], "model": _num(probs.get(s)), "market": _num(mkt.get(s)),
+                "price": prices.get(s)} for s in ("home", "draw", "away")]
+    xg = r.get("_xg") or None
+    return {"league": "SOCCER", "label": r.get("league") or "Soccer", "game": r.get("game"), "home": home,
+            "away": away, "time": r.get("time") or "", "final": r.get("final"), "results": results,
+            "xg": xg, "sharp": bool(r.get("_sharp")), "pick": r.get("winner"), "chance": _num(r.get("chance")),
+            "flags": [f for f in flags or [] if str(f.get("game")) == str(r.get("game"))]}
+
+
+def soccer_html(g: Dict) -> str:
+    status = f'Final: {g["final"]}' if g.get("final") else g.get("time") or ""
+    xg = g.get("xg")
+    score = ("" if not xg else
+             f'<div style="margin-top:10px;color:{HB.INK_SOFT};font-size:12.5px;letter-spacing:.05em;">MODEL\'S '
+             f'EXPECTED GOALS</div><div style="color:{HB.INK};font-size:16px;">{g.get("away")} '
+             f'<b style="color:{HB.BLUE};font-size:20px;">{xg["away"]:.1f}</b> · {g.get("home")} '
+             f'<b style="color:{HB.BLUE};font-size:20px;">{xg["home"]:.1f}</b></div>')
+    head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
+            f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
+            f'<div style="color:{HB.INK_SOFT};font-size:12.5px;letter-spacing:.06em;">{g["label"]} · {status}</div>'
+            f'<div style="color:{HB.INK};font-size:22px;font-weight:800;line-height:1.2;margin-top:3px;">'
+            f'{g.get("away") or ""} <span style="color:{HB.GRAY};">vs</span> {g.get("home") or ""}</div>'
+            f'<div style="margin-top:9px;">{HB.bet_chip("🧪 Tracking" if g.get("flags") else "Info only")}</div>'
+            f'{score}</div>')
+    bars = ""
+    for x in g.get("results") or []:
+        m, k = x.get("model"), x.get("market")
+        pr = _num(x.get("price"))
+        bars += meter(x["name"] or "—", m, "", "", HB.BLUE, "—" if m is None else f"model {m:.0%}")
+        if k is not None:
+            bars += (f'<div style="font-size:11.5px;color:{HB.GOLD};margin:-8px 0 10px;">market {k:.0%}'
+                     + (f' · best price {pr:+.0f}' if pr is not None else "") + '</div>')
+    return head + bars
+
+
+def render_soccer(g: Dict) -> None:
+    import streamlit as st
+    st.markdown(soccer_html(g), unsafe_allow_html=True)
+    if g.get("pick"):
+        st.markdown(f"**Model's most likely result:** {g['pick']}"
+                    + (f" ({g['chance']:.0%})" if g.get("chance") is not None else ""))
+    for f in g.get("flags") or []:
+        pr = _num(f.get("price"))
+        st.markdown(f"📈 **{f.get('pick')}**" + (f" at {pr:+.0f}" if pr is not None else "")
+                    + (f" ({f.get('book')})" if f.get("book") else "")
+                    + " — a US price above the sharp line by 2% or more. 🧪 Tracking, not tested.")
+    st.caption("Blue bars: the goals model's chance of each result. Gold: the market's chance ("
+               + ("Pinnacle's no-vig line" if g.get("sharp") else "the US books' average") + "). "
+               "Soccer is tracking only: the backtest lost to the closing line, so these are reads, not bets.")
+
+
+def render_basic(c: Dict) -> None:
+    """Nov 25: a pick whose game has no saved board row yet (a lab sport, a late line) -- its own facts, no dead end."""
+    import streamlit as st
+    st.markdown(f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
+                f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;"><div style="color:{HB.INK_SOFT};'
+                f'font-size:12.5px;">{c.get("sport") or ""} · {c.get("time") or ""}</div><div style="color:{HB.INK};'
+                f'font-size:20px;font-weight:800;margin-top:3px;">{c.get("game") or ""}</div>'
+                f'<div style="margin-top:9px;">{HB.bet_chip(c.get("bet") or "Info only")}</div></div>',
+                unsafe_allow_html=True)
+    ch = _num(c.get("chance"))
+    st.markdown(f"**{c.get('pick') or '—'}**" + (f" · {ch:.0%}" if ch is not None else "")
+                + (f" · {c['price']}" if c.get("price") not in (None, "", "—") else ""))
+    if c.get("basis"):
+        st.caption(c["basis"])
+    st.caption("The full game card fills in once this game is on the saved board.")

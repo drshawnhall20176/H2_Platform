@@ -652,6 +652,13 @@ def soccer_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                    "best": SP.projected(p), "lean_detail": "market: " + SP.market(p), "status": "tracking only",
                    "bet_market": "Moneyline", "bet_side": side, "bet_line": None, "bet_price": price,
                    "best_chance": None, "best_price": None, "best_value": None, "best_tested": False,
+                   # Nov 25: the soccer game card (Today) -- the three results, model vs market, and expected goals
+                   "_probs": probs, "_prices": {"home": p.get("best_home"), "draw": p.get("best_draw"),
+                                                "away": p.get("best_away")},
+                   "_market": ({"home": p.get("mkt_home"), "draw": p.get("mkt_draw"), "away": p.get("mkt_away")}
+                               if p.get("mkt_home") is not None else None),
+                   "_xg": (None if p.get("xg_home") is None else {"home": p["xg_home"], "away": p["xg_away"]}),
+                   "_sharp": bool(p.get("sharp")),
                    "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
                             "kickoff": p.get("kickoff")}}
             if past:
