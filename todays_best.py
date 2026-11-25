@@ -20,7 +20,11 @@ from typing import Dict, List, Optional, Sequence
 import props_engine as PE
 
 KEY = "todays_best:{sport}:{date}"
-KEY_ALL = "todays_best_all:{sport}:{date}"     # Nov 25: every playable pick on the board (Today's player search)
+KEY_ALL = "todays_best_all:{sport}:{date}"
+KEY_READS = "todays_reads:{sport}:{date}"         # Nov 25: every prop the model read (the game card's player list)
+READ_FIELDS = ("sport", "player", "pid", "team", "game", "time", "market", "market_key", "side", "line", "pick",
+               "price", "book", "chance", "raw_chance", "earned", "use", "lock", "money", "projection", "values",
+               "mins", "proj_min", "factor", "slot", "l10", "l5")     # Nov 25: every playable pick on the board (Today's player search)
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
@@ -56,7 +60,7 @@ def _et_time(iso) -> str:
 MONEY_TOP = 8
 
 
-def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
+def props_rows(sport: str, plays, cap: bool = True, playable_only: bool = True) -> List[Dict]:
     out = []
     for p in plays or []:
         lock = PE.play_is_lock(p)
@@ -67,9 +71,9 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
             except Exception:                                   # noqa: BLE001
                 pass
         money = PE.play_is_money(sport, p)                   # Nov 19: 💰 shown whatever its Use tag
-        if p.get("Use") not in PLAYABLE and not lock and not money:
+        if playable_only and p.get("Use") not in PLAYABLE and not lock and not money:
             continue
-        if p.get("Use") == PE.USE_PASS and not money:
+        if playable_only and p.get("Use") == PE.USE_PASS and not money:
             continue
         line = p.get("Line")
         try:                                                    # Nov 21: the chance the record has earned
@@ -140,6 +144,16 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
                         {"at": datetime.now(timezone.utc).isoformat(), "rows": slim})
     except Exception:                                           # noqa: BLE001
         pass
+    # Nov 25 (members: PropSeason's game card scrolls to every player and his props): every prop the model read, slim,
+    # for the game card's player list -- playable or not (each card still says 🃏 Bet / 🧪 Tracking / Info only)
+    try:
+        import model_store as MS
+        reads = [{k: (list(r.get(k) or [])[:10] if k in ("values", "mins") else r.get(k)) for k in READ_FIELDS}
+                 for r in props_rows(sport, timed, cap=False, playable_only=False)]
+        MS.save_setting(KEY_READS.format(sport=sport, date=date_str),
+                        {"at": datetime.now(timezone.utc).isoformat(), "rows": reads})
+    except Exception:                                           # noqa: BLE001
+        pass
     # Nov 21 (owner: "your 14-1 record is overstated"): the picks as SHOWN -- every 💰 prop the board shows and the
     # Command Center's strongest-15 -- kept the first time they appear (pick_ledger.py)
     try:
@@ -198,6 +212,15 @@ def load_props(sport: str, date_str: str) -> Optional[Dict]:
         return MS.get_setting(KEY.format(sport=sport, date=date_str), None)
     except Exception:                                           # noqa: BLE001
         return None
+
+
+def load_reads(sport: str, date_str: str) -> List[Dict]:
+    """Nov 25: every prop the model read for the day (the game card's players); [] before the board's next build."""
+    try:
+        import model_store as MS
+        return list((MS.get_setting(KEY_READS.format(sport=sport, date=date_str), None) or {}).get("rows") or [])
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 def load_all_props(sport: str, date_str: str) -> List[Dict]:
