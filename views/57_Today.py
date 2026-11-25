@@ -93,6 +93,23 @@ def _lean_recs(lg):
 
 rows, winners = _load(_day, tuple(props_sports), _past)
 
+
+def _injury_screen(rs):
+    """Nov 25 (PropSeason scrub): saved picks re-checked against tonight's injury report -- players ruled out
+    since the board was built drop off; questionable ones are flagged on their cards."""
+    if _past or not rs:
+        return rs
+    try:
+        import injury_check as IC
+        if not IC.live_for(_day):
+            return rs
+        return IC.screen(rs, lambda r: r.get("sport"), lambda r: r.get("player") or r.get("Player"))
+    except Exception:                                           # noqa: BLE001
+        return rs
+
+
+rows = _injury_screen(rows)
+
 # Nov 25 (owner): one sport bar at the top -- "All sports" by default, one sport at a time (it also sets the sidebar's
 # sport, so the old "Explore a sport" buttons at the bottom are gone), and several at once only when switched on.
 ALL = "ALL"
@@ -189,7 +206,7 @@ if _view == "Cards":
     try:
         import today_visual as _TV
         try:
-            _all = _search_rows(_day, tuple(props_sports))
+            _all = _injury_screen(_search_rows(_day, tuple(props_sports)))
         except Exception:                                       # noqa: BLE001
             _all = []
         _TV.render([sports.get(k) for k in _bar if (not picked or k in picked)], rows, winners, _day,

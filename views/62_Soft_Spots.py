@@ -86,6 +86,18 @@ try:
 except Exception:                                               # noqa: BLE001
     player_dlg = None
 import game_previews as GP
+import injury_check as IC
+_live = IC.live_for(day)
+
+
+def _inj(name):
+    """Nov 25: tonight's injury report, so a soft spot never points at a player who won't play."""
+    try:
+        return IC.status("NBA", name) if _live else None
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
 for i, s in enumerate(rows[:24]):
     with st.container(border=True):
         st.markdown(f'<span style="color:{HB.BLUE};font-weight:800;font-size:12px;letter-spacing:.06em;">SOFT · '
@@ -98,8 +110,15 @@ for i, s in enumerate(rows[:24]):
             st.caption("No regular rotation player at this position for them lately.")
         for j, p in enumerate(s["players"]):
             pk = SS.pick_for(p.get("name"), picks, s["stat"])
+            inj = _inj(p.get("name"))
             with cols[j]:
                 st.markdown(f"**{p.get('name')}** · {p.get('avg_min', 0):.0f} min")
+                if inj == "out":
+                    st.caption(IC.chip(inj) + " — not playing")
+                    continue
+                if inj:
+                    st.caption(IC.chip(inj))
+                    pk = dict(pk, _inj=inj) if pk else pk
                 if pk:
                     use = ("💰 " if pk.get("money") else "") + ("🔒 " if pk.get("lock") else "") + str(pk.get("use") or "")
                     bet = GP.prop_bet("NBA", use, pk)

@@ -467,7 +467,41 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         st.caption("Offense / defense: each team's rank in the ratings model the projection uses (adjusted for "
                    "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
                    "Context only — the projection already counts all of it.")
+    try:
+        _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day)
+    except Exception:                                           # noqa: BLE001
+        pass
     _log_boxes(g, w, day, key)
+
+
+def injuries_html(team: str, flagged) -> str:
+    """One team's column of tonight's injury report: out first, then questionable, with the expected return."""
+    import injury_check as IC
+    items = "".join(
+        f'<div style="font-size:13px;margin:2px 0;color:{HB.INK};">{IC.chip(e["status"]).split(" ")[0]} '
+        f'<b>{e["name"]}</b>{" · " + e["pos"] if e.get("pos") else ""}'
+        f'<span style="color:{HB.INK_SOFT};"> — {e.get("label") or e["status"]}'
+        f'{" (" + e["type"] + ")" if e.get("type") else ""}'
+        f'{" · back ~" + e["returns"][5:].replace("-", "/") if e.get("returns") and e["status"] == "out" else ""}'
+        f'</span></div>' for e in flagged) or f'<div style="color:{HB.INK_SOFT};font-size:13px;">Nobody listed</div>'
+    return (f'<div style="flex:1;min-width:220px;"><div style="color:{HB.INK_SOFT};font-size:12px;'
+            f'letter-spacing:.05em;margin-bottom:3px;">{str(team).upper()}</div>{items}</div>')
+
+
+def _injuries(sport: str, away: str, home: str, day: str) -> None:
+    """Nov 25 (PropSeason scrub): who's out on each side tonight, from ESPN's injury report (today's games only)."""
+    import streamlit as st
+    import injury_check as IC
+    if sport not in IC.LEAGUES or not IC.live_for(day):
+        return
+    rep = IC.entries(sport)
+    if not rep:
+        return
+    st.markdown("**Who's out**")
+    st.markdown('<div style="display:flex;gap:18px;flex-wrap:wrap;">' + injuries_html(away, IC.for_team(sport, away, rep))
+                + injuries_html(home, IC.for_team(sport, home, rep)) + '</div>', unsafe_allow_html=True)
+    st.caption("🚑 out · ⚠️ questionable — ESPN's injury report, checked every 10 minutes. The saved projection was "
+               "built before some of this news; picks on players ruled out are taken off the boards.")
 
 
 def _season(league: str, day: str):
