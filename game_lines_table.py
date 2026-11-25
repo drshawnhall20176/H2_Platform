@@ -281,6 +281,15 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False,
     return df[[c for c in ORDER if c in df.columns] + [c for c in df.columns if c not in ORDER]]
 
 
+def _when(r: Dict):
+    """Nov 25 (a weekly board, NFL): sort on the real kickoff when the row carries one -- "1:00 PM" alone put Sunday's
+    games ahead of tonight's 8 PM."""
+    import components as C
+    import sports
+    k = sports.game_dt((r.get("_rec") or {}).get("kickoff") or (r.get("_full") or {}).get("kickoff"))
+    return k if k is not None else C._kick_dt(r.get("time"))
+
+
 def _safe_extra(fn, r) -> Dict:
     if fn is None:
         return {}
@@ -325,8 +334,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
     import game_previews as _GPf
     _bk = _GPf.bet_filter(f"{key}_bet")                         # Nov 24 (owner): 🃏 / 🧪 / Info only filter buttons
     rows = [r for r in rows if any(bet(r).startswith(k) for k in _bk)]
-    rows = sorted(rows, key=lambda r: (C._kick_dt(r.get("time")) is None, str(C._kick_dt(r.get("time")) or ""),
-                                       not r.get("money")))
+    rows = sorted(rows, key=lambda r: (_when(r) is None, str(_when(r) or ""), not r.get("money")))
     if past and rows:
         import money_score as MSC
         proxy = [{"pick": r.get("best_result"),
@@ -389,6 +397,11 @@ def lab_section(league: str, key: Optional[str] = None, day=None, keep: Optional
     span = [day + timedelta(days=i) for i in range(max(0, (last - day).days) + 1)] if last else [day]
     try:                                                        # Nov 25: a weekly league (NFL) lists its whole week
         rows = [dict(r) for d in span for r in _rows(league, d.strftime("%Y-%m-%d"), d < today)]
+        if len(span) > 1:                                       # several days: the day goes in front of the time
+            for r in rows:
+                k = _when(r)
+                if k is not None and hasattr(k, "strftime") and r.get("time") and not str(r["time"])[:3].isalpha():
+                    r["time"] = f"{k.strftime('%a')} {r['time']}"
     except Exception as exc:                                    # noqa: BLE001 -- the rest of the lab still renders
         st.caption(f"The board is unavailable right now ({type(exc).__name__}).")
         return

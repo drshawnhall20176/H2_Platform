@@ -171,3 +171,11 @@ def test_game_blowouts_matches_prop_games_to_saved_game_picks(monkeypatch):
     out = GP.game_blowouts("NBA", ["Detroit Pistons @ Boston Celtics", "Pistons @ Celtics", "Kings @ Suns"])
     assert out["Kings @ Suns"] == "—"
     assert out["Detroit Pistons @ Boston Celtics"] != "—" and out["Pistons @ Celtics"] != "—"
+
+
+def test_a_weekly_board_sorts_on_the_real_kickoff():
+    import game_lines_table as GLT
+    sun = {"time": "1:00 PM", "_full": {"kickoff": "2026-11-29T18:00:00+00:00"}}
+    wed = {"time": "8:00 PM", "_full": {"kickoff": "2026-11-26T01:00:00+00:00"}}
+    rows = sorted([sun, wed], key=lambda r: (GLT._when(r) is None, str(GLT._when(r) or "")))
+    assert rows == [wed, sun]
