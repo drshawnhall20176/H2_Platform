@@ -165,6 +165,18 @@ def _basic_dialog(c: Dict):
     GC.render_basic(c)
 
 
+@_st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+def _soccer_rows_cached(day: str, past: bool) -> List[Dict]:
+    import todays_best as TB
+    return TB.soccer_rows(day, past=past)
+
+
+@_st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+def _soccer_flags_cached(day: str) -> List[Dict]:
+    import todays_best as TB
+    return TB.soccer_flags(day)
+
+
 def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
     """Nov 25 (owner: soccer cards said "isn't on the saved board yet"): the day's soccer games, earliest first."""
     try:
@@ -173,7 +185,7 @@ def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
             from datetime import datetime as _dt
             import pytz
             past = day < _dt.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
-            rows = TB.soccer_rows(day, past=past)
+            rows = _soccer_rows_cached(day, past)              # Nov 25: cached -- reading every league is slow
         else:
             rows = loader(day)
     except Exception:                                           # noqa: BLE001
@@ -183,8 +195,7 @@ def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
 
 def soccer_flags(day: str) -> List[Dict]:
     try:
-        import todays_best as TB
-        return TB.soccer_flags(day)
+        return _soccer_flags_cached(day)
     except Exception:                                           # noqa: BLE001
         return []
 

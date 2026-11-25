@@ -44,12 +44,12 @@ _when = "Today" if _sel == _today else ("Yesterday" if (_today - _sel).days == 1
 C.hero_banner("🏠", f"{_when + ' · ' if _when else ''}{_sel:%A, %B %-d}",
               "The model's picks for the day across every sport. Each pick shows how that kind of pick has actually "
               "done over the last 30 days." + (" Past days show the picks as they were posted." if _past else ""))
-d1, d2, d3, d4 = st.columns([1, 2, 1, 1])
-d1.button("◀ Previous day", key="today_prev", on_click=_shift, args=(-1,), width="stretch", disabled=_sel <= _lo)
-d2.date_input("Date", key="today_day", min_value=_lo, max_value=_hi, format="MM/DD/YYYY",
-              label_visibility="collapsed")
-d3.button("Next day ▶", key="today_next", on_click=_shift, args=(1,), width="stretch", disabled=_sel >= _hi)
-d4.button("Today", key="today_back", on_click=_to_today, width="stretch", disabled=_sel == _today)
+with st.container(horizontal=True, vertical_alignment="center"):     # Nov 25: one row, even on a narrow screen
+    st.button("◀", key="today_prev", on_click=_shift, args=(-1,), disabled=_sel <= _lo, help="Previous day")
+    st.date_input("Date", key="today_day", min_value=_lo, max_value=_hi, format="MM/DD/YYYY",
+                  label_visibility="collapsed", width=150)
+    st.button("▶", key="today_next", on_click=_shift, args=(1,), disabled=_sel >= _hi, help="Next day")
+    st.button("Today", key="today_back", on_click=_to_today, disabled=_sel == _today)
 
 live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]
 props_sports = [s.key for s in live if s.key in CT.PROPS_SPORTS]
