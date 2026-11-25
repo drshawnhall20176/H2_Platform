@@ -220,4 +220,6 @@ def test_game_card_player_list_and_prop_chips():
     assert {r["player"] for r in inside} == {"Jalen Brunson", "Jaylen Brown"}
     g = TV.team_groups(inside)
     assert set(g) == {"NYK", "BOS"} and g["NYK"][0]["market"] == "Assists"            # his best pick leads
+    tagged = dict(rows[0], use="🎯 Single only", chance=0.52)                            # a playable pick beats a
+    assert TV.team_groups([tagged, rows[1]])["NYK"][0]["market"] == "Points"            # higher-chance read
     assert TV.market_label(rows[0]) == "Points · Over 27.5"

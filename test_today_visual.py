@@ -517,3 +517,21 @@ def test_nfl_abbreviated_prop_games_match_the_named_board_game():
     assert TV.same_game("NYJ @ MIA", "Miami Dolphins", "New York Jets")
     assert TV.same_game("LA @ GB", "Green Bay Packers", "Los Angeles Rams")
     assert not TV.same_game("NYJ @ MIA", "Buffalo Bills", "New York Jets")
+
+
+def test_every_read_is_saved_for_the_game_card(monkeypatch):
+    import model_store as MS
+    import todays_best as TB
+    import props_engine as PE
+    saved = {}
+    monkeypatch.setattr(MS, "save_setting", lambda k, v, **kw: saved.__setitem__(k, v))
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None, **kw: saved.get(k, d))
+    plays = [{"Player": "A", "Market": "Points", "Side": "Over", "Line": 20.5, "Use": PE.USE_SINGLE, "ModelProb": 0.6,
+              "Game": "X @ Y", "_values": list(range(15))},
+             {"Player": "B", "Market": "Points", "Side": "Under", "Line": 10.5, "Use": PE.USE_PASS, "ModelProb": 0.55,
+              "Game": "X @ Y", "_values": [1, 2]}]
+    TB.save_props("NBA", "2026-11-25", plays)
+    reads = TB.load_reads("NBA", "2026-11-25")
+    assert {r["player"] for r in reads} == {"A", "B"} and len(reads[0]["values"]) == 10
+    assert {r["player"] for r in TB.load_all_props("NBA", "2026-11-25")} == {"A"}     # the search keeps playable only
+    assert TB.load_reads("NBA", "2026-11-24") == []

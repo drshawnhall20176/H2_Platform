@@ -200,8 +200,8 @@ def player_view(row: Dict, sport: str, siblings: Optional[Sequence[Dict]] = None
 
 
 def all_props(sport: str, day: Optional[str] = None) -> List[Dict]:
-    """Every playable pick saved for the sport today (todays_best.KEY_ALL), cached 10 minutes -- the game card's
-    players and the player card's prop chips."""
+    """Every prop the model read for the sport today (todays_best.KEY_READS; the playable picks before the first save),
+    cached 10 minutes -- the game card's players and the player card's prop chips."""
     try:
         return list(_all_props_cached(sport, day or _today_et()))
     except Exception:                                           # noqa: BLE001
@@ -254,6 +254,13 @@ def players_in_game(rows: Sequence[Dict], w: Dict) -> List[Dict]:
     return [r for r in rows or [] if r.get("game") and same_game(r.get("game"), home, away)]
 
 
+def _rank(r: Dict):
+    """Playable picks (a tested tag, 🔒, 💰) ahead of the model's other reads, then the higher chance."""
+    import todays_best as TB
+    playable = bool(r.get("lock") or r.get("money") or r.get("use") in TB.PLAYABLE)
+    return (not playable, -(r.get("chance") or 0))
+
+
 def team_groups(rows: Sequence[Dict]) -> Dict[str, List[Dict]]:
     """{team: [one row per player, his highest-chance pick]} -- the game card's player list."""
     best: Dict[str, Dict] = {}
@@ -262,12 +269,23 @@ def team_groups(rows: Sequence[Dict]) -> Dict[str, List[Dict]]:
         if not name:
             continue
         cur = best.get(name)
-        if cur is None or (r.get("chance") or 0) > (cur.get("chance") or 0):
+        if cur is None or _rank(r) < _rank(cur):
             best[name] = r
     out: Dict[str, List[Dict]] = {}
-    for r in sorted(best.values(), key=lambda r: -(r.get("chance") or 0)):
+    for r in sorted(best.values(), key=_rank):
         out.setdefault(str(r.get("team") or "—"), []).append(r)
     return out
+
+
+def _bet_mark(r: Dict) -> str:
+    """🃏 / 🧪 in front of a player whose best pick is a bet or a tracked pick; nothing for info only."""
+    try:
+        import game_previews as GP
+        use = ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "") + str(r.get("use") or "")
+        b = GP.prop_bet(r.get("sport") or "", use, r)
+        return "🃏 " if b.startswith("🃏") else "🧪 " if b.startswith("🧪") else ""
+    except Exception:                                           # noqa: BLE001
+        return ""
 
 
 def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
@@ -283,14 +301,15 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
         with col:
             _st.markdown(f"<div style='color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;'>{team.upper()}</div>",
                          unsafe_allow_html=True)
-            for i, r in enumerate(lst[:12]):
+            for i, r in enumerate(lst[:15]):
                 n_props = sum(1 for x in rows if _norm(player_of(x)) == _norm(player_of(r)))
-                label = (f"{player_of(r)} — {market_label(r)} · {_chance(r.get('chance'))}"
+                label = (f"{_bet_mark(r)}{player_of(r)} — {market_label(r)} · {_chance(r.get('chance'))}"
                          + (f" (+{n_props - 1} more)" if n_props > 1 else ""))
                 if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch"):
                     _st.session_state[f"{k}_player"] = player_of(r)
                     _st.rerun(scope="fragment")
-    _st.caption("Chance = the earned chance (how picks like it have actually done). Tap a player for his card.")
+    _st.caption("🃏 a bet · 🧪 tracking · no mark = the model's read only. Chance = the earned chance where it has one "
+                "(how picks like it have actually done). Tap a player for his card and every prop he has tonight.")
 
 
 @_st.dialog("Pick", width="large")
@@ -302,7 +321,7 @@ def _basic_dialog(c: Dict):
 @_st.cache_data(ttl=600, show_spinner=False, max_entries=16)
 def _all_props_cached(sport: str, day: str) -> List[Dict]:
     import todays_best as TB
-    rows = TB.load_all_props(sport, day)
+    rows = TB.load_reads(sport, day) or TB.load_all_props(sport, day)   # every read when saved, else the playable
     try:
         import injury_check as IC                               # players ruled out drop off here too
         if IC.live_for(day):
