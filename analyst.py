@@ -675,7 +675,7 @@ def coverage_text(cov: Dict[str, int], book: Optional[str], scope: str) -> str:
     other_txt = ", ".join(f"{O.book_label(b)} {n}" for n, b in others[:6])
     if bk and mine == 0:
         return (f"{O.book_label(bk)} has no player props posted for {scope}. "
-                f"Other books do ({other_txt}) — pick one of them in the Sportsbook selector to see the analysis there.")
+                f"Other books do ({other_txt}) — pick one of them as 📖 My sportsbook in the sidebar to see the analysis there.")
     if bk:
         return f"Player props posted for {scope}: {O.book_label(bk)} {mine}" + (f" · {other_txt}" if other_txt else "")
     return f"Player props posted for {scope}: " + other_txt
