@@ -22,6 +22,8 @@ def test_office_menu_has_today_link_that_leaves_the_office():
     at = AppTest.from_file("streamlit_app.py", default_timeout=120)
     at.secrets["AUDIENCE"] = "owner"
     at.secrets["OWNER_OFFICE_PASSWORD"] = "pw"
+    import nav_layout as NL
+    at.session_state[NL.PREVIEW_KEY] = False                    # the classic workbench
     at.session_state[OF.UNLOCKED] = True
     at.session_state[OF.MODE] = True
     at.run()
@@ -29,6 +31,21 @@ def test_office_menu_has_today_link_that_leaves_the_office():
     at.switch_page("Today.py")
     at.run()
     assert not at.exception and at.session_state[OF.MODE] is False and at.session_state[OF.UNLOCKED] is True
+
+
+def test_office_today_link_in_the_customer_layout():
+    # Nov 25: the customer layout is the owner's default now -- its Today (views/57) is the way out of the Office
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("streamlit_app.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.secrets["OWNER_OFFICE_PASSWORD"] = "pw"
+    at.session_state[OF.UNLOCKED] = True
+    at.session_state[OF.MODE] = True
+    at.run()
+    assert not at.exception and "🔒 Lock the Office" in [b.label for b in at.button]
+    at.switch_page("views/57_Today.py")
+    at.run()
+    assert at.session_state[OF.MODE] is False and at.session_state[OF.UNLOCKED] is True
 
 
 def test_owner_office_works_while_previewing_the_commercial_layout():

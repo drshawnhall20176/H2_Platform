@@ -255,9 +255,10 @@ def run():
     import nav_layout as NL
     import players_hub as PH
     if audience == "owner":
-        st.sidebar.toggle("👀 Preview the commercial layout", key=NL.PREVIEW_KEY,
-                          help="Shows what a paying customer would see: a Today front page, four sections, owner tools hidden. "
-                               "Layout only: pages still show your own log boxes while you preview.")
+        st.session_state.setdefault(NL.PREVIEW_KEY, True)       # Nov 25: the customer layout is live -- on by default
+        st.sidebar.toggle("👀 Customer layout", key=NL.PREVIEW_KEY,
+                          help="What members see: a Today front page, four sections, your Owner tools at the bottom. "
+                               "Turn off for the classic workbench. Your log boxes show either way.")
     # Nov 23 (owner: phones and tablets): every build -- Auto picks cards on a phone; anyone can switch
     st.sidebar.segmented_control("📱 Layout", ["Auto", "Phone", "Full"], key=_TS.LAYOUT_KEY, default="Auto",
                                  help="Auto: cards on a phone, tables everywhere else. Phone: always cards (good on a "
@@ -269,12 +270,12 @@ def run():
         pass
     commercial = NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
     if commercial and audience == "owner":
-        st.sidebar.caption("👀 Previewing the commercial layout")
+        st.sidebar.caption("👀 Customer layout — what members see, plus your Owner tools")
     # Nov 10: both builds run this same code, so if their numbers differ it's their settings. Everything the model
     # has learned (the record, calibration, tunings, cold markets) lives in the shared database -- a build that isn't
     # connected to it shows unlearned numbers.
     try:
-        if audience != "commercial":                            # Nov 16: an internal note, not for a paying customer
+        if audience == "owner" or not commercial:               # Nov 16: an internal note, not for a paying customer
             st.sidebar.caption(connection_status())
     except Exception:                                           # noqa: BLE001
         pass
@@ -560,7 +561,7 @@ def run():
             continue  # Today / Players are the customer's pages; the owner and Discord sidebars keep their own
         if key == "58" and active_sport not in PH.SPORTS:
             continue  # Players: only sports that have player views
-        if title == "Model Record" and audience == "public":
+        if title == "Model Record" and audience == "public" and not commercial:
             continue  # Nov 16: the Discord build stays exactly as it was until the owner switches it over
         if commercial and NL.commercial_section(title) is None:
             continue  # not part of the customer product (Command Center, Retrospective ...)
@@ -600,7 +601,7 @@ def run():
         # Today leaves the Office the same way the "Back to Today" button does.
         door = [st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐", url_path="owner_office",
                         default=True)]
-        today_pg = next((p for p in sections.get("🏠 START HERE", []) if getattr(p, "title", None) == "Today"), None)
+        today_pg = next((p for ps in sections.values() for p in ps if getattr(p, "title", None) == "Today"), None)
         office_nav = {"🏠 START HERE": [today_pg]} if today_pg is not None else {}
         office_nav["🔐 OWNER OFFICE"] = door
         for sec in OF.SECTION_ORDER[1:]:

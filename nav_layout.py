@@ -8,9 +8,9 @@ or expose one by accident), and everything not listed here hidden.
 
 Who sees it:
   * a deployment whose AUDIENCE secret is "commercial" (it is a non-owner build: every owner-only gate applies), and
-  * the owner app when "Preview the commercial layout" is switched on in its sidebar -- the layout only; pages still
-    show the owner's own log boxes there.
-The public Discord build (AUDIENCE = "public") is unchanged until the owner switches it.
+  * the owner app while "Customer layout" is on in its sidebar (the default since Nov 25) -- the layout only; pages
+    still show the owner's own log boxes there, and the toggle goes back to the classic workbench.
+The public Discord build (AUDIENCE = "public") switched to it on Nov 25 (PUBLIC_LIVE); the owner app opens in it.
 
 Soccer, International Hoops and Tennis sit in their own "Beta" section: tracking only, record not proven.
 """
@@ -45,10 +45,17 @@ _LABEL = {title: label for pairs in LAYOUT.values() for title, label in pairs}
 _RANK = {label: i for pairs in LAYOUT.values() for i, (_, label) in enumerate(pairs)}
 
 
+# Nov 25 (owner: "let's build 1-7 then we can publish the live sites on owners and discord"): the customer layout is
+# live. The Discord build ("public") gets it outright; the owner app opens in it (the sidebar toggle, on by default,
+# goes back to the classic workbench).
+PUBLIC_LIVE = True
+
+
 def is_commercial(audience, preview=False) -> bool:
-    """The customer layout: a "commercial" deployment, or the owner previewing it."""
+    """The customer layout: a "commercial" deployment, the Discord build once it went live, or the owner with the
+    layout switched on (the default since Nov 25)."""
     a = str(audience or "owner").lower()
-    return a == COMMERCIAL or (a == "owner" and bool(preview))
+    return a == COMMERCIAL or (a == "public" and PUBLIC_LIVE) or (a == "owner" and bool(preview))
 
 
 def commercial_section(title: str) -> Optional[str]:

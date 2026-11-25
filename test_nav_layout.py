@@ -13,7 +13,7 @@ def test_who_gets_the_commercial_layout():
     assert NL.is_commercial("commercial") and NL.is_commercial("Commercial")
     assert NL.is_commercial("owner", preview=True) and NL.is_commercial(None, preview=True)
     assert not NL.is_commercial("owner") and not NL.is_commercial(None)
-    assert not NL.is_commercial("public") and not NL.is_commercial("public", preview=True)   # Discord build unchanged
+    assert NL.is_commercial("public") and NL.is_commercial("public", preview=True)   # Nov 25: the Discord build is live
 
 
 def test_four_sections_plain_names_and_no_page_listed_twice():
@@ -55,11 +55,12 @@ def test_arrange_orders_sections_and_pages_and_today_replaces_home():
 
 
 def test_the_app_wires_the_layout_and_leaves_the_owner_and_public_builds_alone():
-    assert 'if audience == "owner":\n        st.sidebar.toggle("👀 Preview the commercial layout", key=NL.PREVIEW_KEY' in SRC
+    assert 'if audience == "owner":\n        st.session_state.setdefault(NL.PREVIEW_KEY, True)' in SRC
+    assert 'st.sidebar.toggle("👀 Customer layout", key=NL.PREVIEW_KEY' in SRC
     assert "sections = NL.arrange(sections)" in SRC
     assert 'NL.commercial_section(title) if commercial else SECTION_OF.get(key' in SRC
     assert 'if title in NL.COMMERCIAL_ONLY and not commercial:\n            continue' in SRC
-    assert 'if title == "Model Record" and audience == "public":\n            continue' in SRC
+    assert 'if title == "Model Record" and audience == "public" and not commercial:\n            continue' in SRC
     assert "title=NL.label(title) if commercial else title" in SRC
 
 
