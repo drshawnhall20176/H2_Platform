@@ -20,11 +20,11 @@ from typing import Dict, List, Optional, Sequence
 import props_engine as PE
 
 KEY = "todays_best:{sport}:{date}"
-KEY_ALL = "todays_best_all:{sport}:{date}"
+KEY_ALL = "todays_best_all:{sport}:{date}"     # Nov 25: every playable pick on the board (Today's player search)
 KEY_READS = "todays_reads:{sport}:{date}"         # Nov 25: every prop the model read (the game card's player list)
 READ_FIELDS = ("sport", "player", "pid", "team", "game", "time", "market", "market_key", "side", "line", "pick",
                "price", "book", "chance", "raw_chance", "earned", "use", "lock", "money", "projection", "values",
-               "mins", "proj_min", "factor", "slot", "l10", "l5")     # Nov 25: every playable pick on the board (Today's player search)
+               "mins", "proj_min", "factor", "slot", "l10", "l5", "team_id", "opp_id")
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
@@ -100,6 +100,7 @@ def props_rows(sport: str, plays, cap: bool = True, playable_only: bool = True) 
                     # Nov 25: minutes chart + matchup chip on the player card
                     "mins": list(p.get("_mins") or [])[:20], "proj_min": p.get("_proj_min"),
                     "factor": p.get("_factor"), "slot": p.get("_slot"),
+                    "team_id": p.get("_team_id"), "opp_id": p.get("_opp_id"),
                     "why": p.get("Why"), "warnings": p.get("Warnings") or []})
     out.sort(key=_order)
     if not cap:                                                 # Nov 21: every pick, for the shown-picks ledger

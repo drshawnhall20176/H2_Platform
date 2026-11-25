@@ -13,6 +13,18 @@ import players_hub as PH
 import sports
 
 sport = st.session_state.get("sport", sports.DEFAULT_SPORT)
+
+# Nov 25 (owner: "merge the data we see in the Players tab into the player card so we do not have two data points
+# showing different things"): Cards (the default) list tonight's players and open the one player card -- the model's
+# projection plus the head-to-head, defense-lately and rest context these views used to show on their own. The
+# separate tools stay under Table.
+import view_mode as VM
+C.base_css()
+if VM.choose("players", "Cards: tonight's players, each opening his player card. Table: the separate player tools "
+                        "(by position, hot players, head to head ...).") == VM.CARDS:
+    import players_cards as PCD
+    PCD.render(sport)
+    st.stop()
 tools = PH.tools_for(sport)
 if not tools:
     C.base_css()
