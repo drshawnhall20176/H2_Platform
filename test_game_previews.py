@@ -179,3 +179,45 @@ def test_a_weekly_board_sorts_on_the_real_kickoff():
     wed = {"time": "8:00 PM", "_full": {"kickoff": "2026-11-26T01:00:00+00:00"}}
     rows = sorted([sun, wed], key=lambda r: (GLT._when(r) is None, str(GLT._when(r) or "")))
     assert rows == [wed, sun]
+
+
+def test_games_pages_open_on_cards_with_a_game_card_per_game(monkeypatch):
+    # Nov 25 (members: "keep the card theme throughout as the default"): the Games page starts on cards
+    from datetime import datetime, timedelta, timezone
+    from streamlit.testing.v1 import AppTest
+    import game_lines_table as GLT
+    import model_store as MS
+    now = datetime.now(timezone.utc)
+    picks = [dict(_g(1, 1.1, -10.5), sport="NCAAMB", game_id="1", kickoff=(now + timedelta(hours=2)).isoformat(),
+                  line=10.5, use=PE.USE_PASS, lock=False, result=None, final_home=None, final_away=None, pick=None)]
+    monkeypatch.setattr(MS, "load_game_picks", lambda league, ungraded=False, db_path=None: picks if league == "NCAAMB" else [])
+    board = [{"sport": "NCAAMB", "league": "NCAAMB", "game": "A1 @ H1", "time": "7:00 PM", "best": "H1 -5",
+              "winner": "H1", "chance": 0.6, "_full": picks[0]}]
+    monkeypatch.setattr(GLT, "_rows", lambda league, day, past: board)
+    at = AppTest.from_file("views/45_NCAAMB_Game_Lab.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.run()
+    assert not at.exception
+    assert at.segmented_control(key="view_games_NCAAMB").value == "Cards"
+    assert any(b.label == "Game card →" for b in at.button)
+    assert not [d for d in at.dataframe if "Line pick (model favors)" in d.value.columns]   # the table is one tap away
+    at.segmented_control(key="view_games_NCAAMB").set_value("Table").run()
+    assert [d for d in at.dataframe if "Line pick (model favors)" in d.value.columns]
+    assert at.session_state["h2_view_pref"] == "Table"                                    # follows to every page
+
+
+def test_game_card_player_list_and_prop_chips():
+    import today_visual as TV
+    rows = [{"player": "Jalen Brunson", "team": "NYK", "market": "Points", "side": "Over", "line": 27.5, "chance": 0.58,
+             "game": "Knicks @ Celtics"},
+            {"player": "Jalen Brunson", "team": "NYK", "market": "Assists", "side": "Over", "line": 6.5, "chance": 0.61,
+             "game": "Knicks @ Celtics"},
+            {"player": "Jaylen Brown", "team": "BOS", "market": "Points", "side": "Under", "line": 25.5, "chance": 0.55,
+             "game": "Knicks @ Celtics"},
+            {"player": "Other Guy", "team": "MIA", "market": "Points", "side": "Over", "line": 10.5, "game": "Heat @ Magic"}]
+    w = {"game": "Knicks @ Celtics", "_full": {"home": "Celtics", "away": "Knicks"}}
+    inside = TV.players_in_game(rows, w)
+    assert {r["player"] for r in inside} == {"Jalen Brunson", "Jaylen Brown"}
+    g = TV.team_groups(inside)
+    assert set(g) == {"NYK", "BOS"} and g["NYK"][0]["market"] == "Assists"            # his best pick leads
+    assert TV.market_label(rows[0]) == "Points · Over 27.5"

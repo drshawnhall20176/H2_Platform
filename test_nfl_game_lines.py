@@ -75,6 +75,7 @@ def test_nfl_game_lab_uses_the_shared_layout_once_games_are_saved_and_the_old_pa
     st.cache_data.clear()
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [rec] if sport == "NFL" else [])
     at = AppTest.from_file("views/34_NFL_Game_Lab.py", default_timeout=120)
+    at.session_state["h2_view_pref"] = "Table"                     # Nov 25: cards are the default
     at.session_state["sport"] = "NFL"
     at.run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]

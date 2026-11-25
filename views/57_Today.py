@@ -203,9 +203,9 @@ if _commercial:
         _TOUR.render()
     except Exception:                                           # noqa: BLE001
         pass
-    _view = st.segmented_control("View", ["Cards", "Table"], default="Cards", key="today_view",
-                                 help="Cards: tap Open on any pick or game for its player card or game card. "
-                                      "Table: every pick in one list.") or "Cards"
+    import view_mode as _VM                                     # Nov 25: one Cards | Table choice for the whole site
+    _view = _VM.choose("today", "Cards: tap Open on any pick or game for its player card or game card. Table: every "
+                                "pick in one list. Your choice follows you to every page.")
 _cards_ok = False
 if _view == "Cards":
     try:

@@ -137,17 +137,61 @@ def player_of(row: Dict) -> str:
 
 
 @_st.dialog("Player card", width="large")
-def _player_dialog(row: Dict, sport: str):
-    import game_previews as GP
-    import player_card as PC
-    c = PC.from_row(row)
+def _player_dialog(row: Dict, sport: str, siblings: Optional[List[Dict]] = None):
     name = player_of(row)
     if name:
         on = _st.toggle("⭐ Favorite", value=name in favorites(), key=f"fav_{_norm(name).replace(' ', '_')}",
                         help="Your favorites show first on Today. Bookmark the page to keep them.")
         if on != (name in favorites()):
             set_favorite(name, on)
-    PC.render(c, sport, bet=GP.prop_bet(sport, str(c.get("Use") or ""), c))
+    player_view(row, sport, siblings if siblings is not None else all_props(sport), key="pd")
+
+
+def market_label(r: Dict) -> str:
+    """'Points · Over 24.5' -- one chip per prop the player has tonight."""
+    ln = r.get("line") if r.get("line") is not None else r.get("Line")
+    side = r.get("side") or r.get("Side") or ""
+    mk = r.get("market") or r.get("Market") or "?"
+    try:
+        return f"{mk} · {side} {float(ln):g}".strip()
+    except (TypeError, ValueError):
+        return str(mk)
+
+
+SPLITS = {"L5": 5, "L10": 10, "L20": 20}
+
+
+def player_view(row: Dict, sport: str, siblings: Optional[Sequence[Dict]] = None, key: str = "pv") -> None:
+    """Nov 25 (members, through the owner: PropSeason's player card "is driven by a lot of clickable filters"): the
+    player card with a chip per prop he has tonight and an L5 / L10 / L20 split over his game-by-game bars."""
+    import game_previews as GP
+    import player_card as PC
+    name = player_of(row)
+    mine = [r for r in siblings or [] if _norm(player_of(r)) == _norm(name)] or [row]
+    by = {}
+    for r in mine:
+        by.setdefault(market_label(r), r)
+    here = market_label(row) if market_label(row) in by else next(iter(by))
+    if len(by) > 1:
+        pick = _st.pills("His props tonight", list(by), default=here, key=f"{key}_mk_{_norm(name).replace(' ', '_')}",
+                         help="Tap a prop to switch the card to it.") or here
+        row = by.get(pick, row)
+    c = PC.from_row(row)
+    n_vals = len([v for v in c.get("_values") or [] if v is not None])
+    opts = [k for k, n in SPLITS.items() if n <= 10 or n_vals > 10]          # L20 only when he has more than 10
+    split = _st.pills("Games shown", opts, default="L10" if "L10" in opts else opts[-1],
+                      key=f"{key}_split_{_norm(name).replace(' ', '_')}",
+                      help="How many of his recent games the bars show (and the minutes under them).") or "L10"
+    PC.render(c, sport, bet=GP.prop_bet(sport, str(c.get("Use") or ""), c), window=SPLITS.get(split, 10))
+
+
+def all_props(sport: str, day: Optional[str] = None) -> List[Dict]:
+    """Every playable pick saved for the sport today (todays_best.KEY_ALL), cached 10 minutes -- the game card's
+    players and the player card's prop chips."""
+    try:
+        return list(_all_props_cached(sport, day or _today_et()))
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 @_st.dialog("Game card", width="large")
@@ -163,18 +207,95 @@ def _game_dialog(w: Dict, props: List[Dict]):
         GC.render_tennis(GC.build_tennis(w))
         return
     k = f"gcd_{_norm(w.get('game')).replace(' ', '_')}"
+    game_props = players_in_game(all_props(w.get("sport") or ""), w) or list(props or [])
+    who = _st.session_state.get(f"{k}_player")
+    if who:                                                     # Nov 25: a player opened from this game card
+        if _st.button("← Back to the game", key=f"{k}_back"):
+            _st.session_state.pop(f"{k}_player", None)
+            _st.rerun(scope="fragment")
+        row = next((r for r in game_props if _norm(player_of(r)) == _norm(who)), None)
+        if row is not None:
+            player_view(row, w.get("sport") or "", game_props, key=f"{k}_pv")
+            return
+        _st.session_state.pop(f"{k}_player", None)
     g = GC.build(w)
     GC.render(g, props, key=k)
     try:                                                        # Nov 25: pace, form, team strength, log boxes
         GC.render_extras(g, w, _today_et(), k)
     except Exception:                                           # noqa: BLE001 -- the card never breaks on an extra
         pass
+    try:
+        _players_section(w, game_props, k)
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def players_in_game(rows: Sequence[Dict], w: Dict) -> List[Dict]:
+    """Every saved pick in this game (any player), playable ones only -- the board's own list."""
+    import game_card as GC
+    full = w.get("_full") or {}
+    home, away = full.get("home") or w.get("home"), full.get("away") or w.get("away")
+    if not (home and away) and " @ " in str(w.get("game") or ""):
+        away, home = str(w["game"]).split(" @ ", 1)
+    return [r for r in rows or [] if r.get("game") and same_game(r.get("game"), home, away)]
+
+
+def team_groups(rows: Sequence[Dict]) -> Dict[str, List[Dict]]:
+    """{team: [one row per player, his highest-chance pick]} -- the game card's player list."""
+    best: Dict[str, Dict] = {}
+    for r in rows or []:
+        name = player_of(r)
+        if not name:
+            continue
+        cur = best.get(name)
+        if cur is None or (r.get("chance") or 0) > (cur.get("chance") or 0):
+            best[name] = r
+    out: Dict[str, List[Dict]] = {}
+    for r in sorted(best.values(), key=lambda r: -(r.get("chance") or 0)):
+        out.setdefault(str(r.get("team") or "—"), []).append(r)
+    return out
+
+
+def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
+    """Nov 25 (members: PropSeason's game card scrolls down to the players and their props): each team's players with
+    a pick tonight; tap one for his card, right here in the game card."""
+    groups = team_groups(rows)
+    _st.markdown("**Players & props**")
+    if not groups:
+        _st.caption("No player props on tonight's board for this game yet — they're added as the books post lines.")
+        return
+    cols = _st.columns(min(2, len(groups)))
+    for (team, lst), col in zip(groups.items(), cols * 2):
+        with col:
+            _st.markdown(f"<div style='color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;'>{team.upper()}</div>",
+                         unsafe_allow_html=True)
+            for i, r in enumerate(lst[:12]):
+                n_props = sum(1 for x in rows if _norm(player_of(x)) == _norm(player_of(r)))
+                label = (f"{player_of(r)} — {market_label(r)} · {_chance(r.get('chance'))}"
+                         + (f" (+{n_props - 1} more)" if n_props > 1 else ""))
+                if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch"):
+                    _st.session_state[f"{k}_player"] = player_of(r)
+                    _st.rerun(scope="fragment")
+    _st.caption("Chance = the earned chance (how picks like it have actually done). Tap a player for his card.")
 
 
 @_st.dialog("Pick", width="large")
 def _basic_dialog(c: Dict):
     import game_card as GC
     GC.render_basic(c)
+
+
+@_st.cache_data(ttl=600, show_spinner=False, max_entries=16)
+def _all_props_cached(sport: str, day: str) -> List[Dict]:
+    import todays_best as TB
+    rows = TB.load_all_props(sport, day)
+    try:
+        import injury_check as IC                               # players ruled out drop off here too
+        if IC.live_for(day):
+            rows = IC.screen(rows, lambda r: sport, player_of)
+    except Exception:                                           # noqa: BLE001
+        pass
+    return rows
 
 
 @_st.cache_data(ttl=600, show_spinner=False, max_entries=8)
