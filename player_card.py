@@ -132,6 +132,87 @@ def minutes_chart(rows: List[Dict], proj: Optional[float]):
     return alt.layer(*layers).properties(height=170)
 
 
+def _f(x) -> Optional[float]:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if v != v else v
+
+
+def read_bullets(p: Dict, bet: str = "") -> List[str]:
+    """Nov 25 (owner: "the read can be more descriptive ... explain why form is 14.5, what the matchup percentage
+    means"): the pick explained in plain bullets, from the same numbers the model used. Markdown strings."""
+    import re
+    side, line, mkt = p.get("Side") or "", _f(p.get("Line")), p.get("Market") or "the stat"
+    vals = [v for v in (p.get("_values") or []) if v is not None]
+    why = str(p.get("Why") or "")
+    out: List[str] = []
+    m = re.search(r"form (-?\d+(?:\.\d+)?)", why)
+    form = float(m.group(1)) if m else None
+    if form is not None:
+        rel = "" if line is None else (f" — {abs(form - line):.1f} {'above' if form > line else 'below'} tonight's "
+                                       f"line of {line:g}" if abs(form - line) >= 0.05 else " — right on tonight's line")
+        out.append(f"**Recent form {form:g} {mkt}.** His average over his recent games, weighted so newer games count "
+                   f"more (a game 4 back counts half as much as his last one)"
+                   + (", including some of last season's games" if "incl. last season" in why else "") + f"{rel}.")
+    elif vals:
+        avg = sum(vals[:10]) / len(vals[:10])
+        out.append(f"**Recent form:** {avg:.1f} {mkt} a game over his last {len(vals[:10])}.")
+    fac = _f(p.get("_factor"))
+    if fac is None:
+        mm = re.search(r"matchup ([+-]\d+)%", why)
+        fac = 1 + int(mm.group(1)) / 100 if mm else None
+    if fac is not None:
+        who = SLOT_NAME.get(str(p.get("_slot") or ""), "players at his position")
+        pct = (fac - 1) * 100
+        if abs(pct) < 0.5:
+            out.append(f"**Matchup: even.** Tonight's defense allows about the league average to {who}, so the model "
+                       "leaves his numbers as they are.")
+        else:
+            out.append(f"**Matchup {pct:+.0f}%.** Tonight's defense has allowed {abs(pct):.0f}% "
+                       f"{'more' if pct > 0 else 'less'} than the league average to {who} this season (blended with "
+                       f"last season early on), so the model moves his projection {'up' if pct > 0 else 'down'} "
+                       f"{abs(pct):.0f}%.")
+    pm = _f(p.get("_proj_min"))
+    mins = [v for v in (p.get("_mins") or []) if v is not None][:10]
+    if pm is not None and mins:
+        avg_m = sum(mins) / len(mins)
+        out.append(f"**Minutes: about {pm:.0f} tonight** vs {avg_m:.1f} a game lately. Minutes drive everything — "
+                   "the projection is his rate per minute times the minutes he's expected to play.")
+    proj = _f(p.get("Projection"))
+    if proj is not None and line is not None:
+        d = proj - line
+        lean = "Over" if d > 0 else "Under"
+        out.append(f"**Projection {proj:.1f} vs the line {line:g}** — {abs(d):.1f} {'above' if d > 0 else 'below'}, "
+                   f"which is why the model leans **{lean}**. It's built from his form, minutes, the matchup and the "
+                   "game's expected pace and score.")
+    if line is not None and vals and side in ("Over", "Under"):
+        out.append(f"**Track record vs this line:** {hit_text(vals, line, side, 10)} of his last "
+                   f"{min(10, len(vals))} games would have cashed the {side}.")
+    mc, ec = _f(p.get("ModelProb")), _f(p.get("_earned"))
+    if mc is not None:
+        out.append(f"**Model chance {mc:.0%}**" + (f", **earned chance {ec:.0%}** — the sportsbook's own chance plus the "
+                                                  "part of the model's disagreement that its track record has earned. "
+                                                  "When the two differ, trust the earned chance" if ec
+                                                  is not None else "") + ".")
+    verdict = {"🃏": "🃏 **Bet** — this pick type has passed testing on real results.",
+               "🧪": "🧪 **Tracking** — a candidate rule we're testing with small stakes; not proven yet.",
+               "Info": "**Info only** — shown for context; this kind of pick hasn't earned a bet."}
+    for k, v in verdict.items():
+        if str(bet or "").startswith(k):
+            out.append(v)
+            break
+    flags = why.split(" · ", 1)[1] if " · " in why else ""
+    for f in [x.strip() for x in flags.split(";") if x.strip()]:
+        out.append(f"ℹ️ {f}")
+    for w in p.get("Warnings") or []:
+        out.append(f"⚠️ {w}")
+    if p.get("UseWhy"):
+        out.append(f"**Use:** {p['UseWhy']}")
+    return out
+
+
 def extras_on() -> bool:
     """Nov 25: the newest card pieces (matchup chip, minutes chart) show only in the commercial layout -- a
     commercial deployment, or the owner previewing it -- until the owner promotes them."""
@@ -150,6 +231,20 @@ def _pct(x) -> str:
         return "—"
 
 
+def opponent(game, team) -> Optional[str]:
+    """Nov 25: "Brooklyn Nets @ Milwaukee Bucks" + "Milwaukee Bucks" -> "Brooklyn Nets" (None when unsure)."""
+    parts = [x.strip() for x in str(game or "").replace(" vs ", " @ ").split(" @ ")]
+    t = str(team or "").strip().lower()
+    if len(parts) != 2 or not t:
+        return None
+    a, b = parts
+    if a.lower() == t or (t and t in a.lower()):
+        return b
+    if b.lower() == t or (t and t in b.lower()):
+        return a
+    return None
+
+
 def from_row(r: Dict) -> Dict:
     """Nov 24: a saved pick row (Today's best, the college props section, a long shot) in the board-play shape the
     card reads. Board plays pass through unchanged."""
@@ -157,7 +252,7 @@ def from_row(r: Dict) -> Dict:
         return r
     use = ("💰 " if r.get("money") else "") + ("🔒 " if r.get("lock") else "") + str(r.get("use") or "")
     return {"Player": r.get("player") or r.get("Player"), "PlayerId": r.get("pid"), "Team": r.get("team") or r.get("Team"),
-            "Opp": None, "Time": r.get("time"), "Side": r.get("side"), "Line": r.get("line"),
+            "Opp": opponent(r.get("game"), r.get("team") or r.get("Team")), "Time": r.get("time"), "Side": r.get("side"), "Line": r.get("line"),
             "Market": r.get("market") or r.get("Market"), "RealPrice": r.get("price"),
             "Projection": r.get("projection") if r.get("projection") is not None else r.get("Projection"),
             "ModelProb": r.get("raw_chance") if r.get("raw_chance") is not None else r.get("chance"),
@@ -250,7 +345,16 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
     why = [x for x in (p.get("Why"), p.get("UseWhy")) if x]
     warn = p.get("Warnings") or []
     st.markdown("**The read**")
-    st.markdown("  \n".join(["• " + str(w) for w in why] + ["⚠️ " + str(w) for w in warn]) or "—")
+    bullets = []
+    if extras:                                                  # Nov 25: the explained read (commercial preview)
+        try:
+            bullets = read_bullets(p, bet)
+        except Exception:                                       # noqa: BLE001
+            bullets = []
+    if bullets:
+        st.markdown("\n".join("- " + b for b in bullets))
+    else:
+        st.markdown("  \n".join(["• " + str(w) for w in why] + ["⚠️ " + str(w) for w in warn]) or "—")
     try:
         import game_previews as GP
         blow = GP.game_blowouts(sport, [p.get("Game")]).get(p.get("Game"), "—")

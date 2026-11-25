@@ -169,11 +169,15 @@ def pick_card_html(c: Dict) -> str:
         f'<span style="color:{HB.INK_SOFT};font-size:12px;">{tag}</span>' if tag else "")
     icons = ("💰 " if c.get("money") else "") + ("🔒 " if c.get("lock") else "")
     price = c.get("price") if c.get("price") not in (None, "", "—") else ""
+    ch = _chance(c.get("chance"))
+    # Nov 25: an untested line pick shows no chance on the boards -- say what it is instead of a bare dash
+    big = (f'<div style="color:{HB.BLUE};font-size:24px;font-weight:800;margin-top:4px;">{ch}'
+           f'<span style="color:{HB.GOLD};font-size:13px;font-weight:700;"> {price}</span></div>' if ch != "—" else
+           f'<div style="color:{HB.INK_SOFT};font-size:13px;margin-top:6px;">{c.get("basis") or "No chance shown"}'
+           + (f'<span style="color:{HB.GOLD};font-weight:700;"> · {price}</span>' if price else "") + '</div>')
     return (f'<div style="min-height:132px;">{top}'
             f'<div style="color:{HB.INK};font-weight:800;font-size:15.5px;margin-top:7px;line-height:1.25;">'
-            f'{icons}{c.get("pick") or ""}</div>'
-            f'<div style="color:{HB.BLUE};font-size:24px;font-weight:800;margin-top:4px;">{_chance(c.get("chance"))}'
-            f'<span style="color:{HB.GOLD};font-size:13px;font-weight:700;"> {price}</span></div>'
+            f'{icons}{c.get("pick") or ""}</div>' + big +
             f'<div style="color:{HB.INK_SOFT};font-size:12px;margin-top:2px;">{c.get("game") or ""}'
             f'{" · " + c["time"] if c.get("time") else ""}</div></div>')
 

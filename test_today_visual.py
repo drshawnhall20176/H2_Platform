@@ -186,3 +186,31 @@ def test_favorites_show_first_on_today_in_the_preview(monkeypatch):
     assert "tv_fav_0" in [b.key for b in at.button if b.key]
     at.selectbox(key="tv_search").set_value(0).run()                    # search opens the player card
     assert not at.exception
+
+
+def test_a_pick_with_no_chance_says_what_it_is_not_a_dash():
+    html = TV.pick_card_html({"pick": "Marquette +5.5", "chance": None, "price": "—", "bet": "🧪 Tracking",
+                              "basis": "Line pick", "game": "Virginia @ Marquette", "time": "12:00 PM"})
+    assert "Line pick" in html and ">—<" not in html
+
+
+def test_player_card_names_the_opponent_from_the_game():
+    import player_card as PC
+    assert PC.opponent("Brooklyn Nets @ Milwaukee Bucks", "Milwaukee Bucks") == "Brooklyn Nets"
+    assert PC.opponent("Brooklyn Nets @ Milwaukee Bucks", "Brooklyn Nets") == "Milwaukee Bucks"
+    assert PC.opponent("A @ B", "C") is None and PC.opponent(None, "A") is None
+    assert PC.from_row({"player": "K", "side": "Under", "game": "Brooklyn Nets @ Milwaukee Bucks",
+                        "team": "Milwaukee Bucks"})["Opp"] == "Brooklyn Nets"
+
+
+def test_the_read_explains_form_matchup_and_projection():
+    import player_card as PC
+    b = PC.read_bullets({"Side": "Under", "Line": 14.5, "Market": "Pts+Reb", "Projection": 11.71, "ModelProb": .57,
+                         "_earned": .54, "_values": [13, 16, 19, 14], "_factor": 0.94, "_slot": "C",
+                         "_mins": [22, 25], "_proj_min": 23,
+                         "Why": "form 14.5, matchup -6%, projects 11.7 vs 14.5 · back-to-back"}, "🃏 Bet")
+    txt = "\n".join(b)
+    assert "Recent form 14.5 Pts+Reb" in txt and "newer games count more" in txt
+    assert "allowed 6% less than the league average to centers" in txt and "down 6%" in txt
+    assert "leans **Under**" in txt and "earned chance 54%" in txt and "ℹ️ back-to-back" in txt
+    assert PC.read_bullets({}) == []
