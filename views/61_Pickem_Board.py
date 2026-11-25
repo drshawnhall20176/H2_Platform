@@ -163,7 +163,11 @@ _shown = sorted(checked if only_checked else legs,
 rows = [_fmt(x) for x in _shown]                                # earliest game first, then the strongest pick
 if rows:
     df = pd.DataFrame(rows)
-    st.dataframe(df, hide_index=True, width="stretch", column_config={
+    import card_links as _CL                                    # Nov 25 (owner): a row opens the player card
+    _CL.table(df, key=f"pk_table_{SPORT_KEY}", items=_shown, open_fn=_CL.open_player_named(SPORT_KEY),
+              hide_index=True, width="stretch",
+              caption="Tap a row to open the player's card — the sportsbooks' line and the model's read are on it.",
+              column_config={
         "Chance": st.column_config.NumberColumn(format="percent"),
         "vs break-even": st.column_config.NumberColumn(format="percent"),
         "Needs": st.column_config.NumberColumn(format="percent"),

@@ -94,3 +94,28 @@ def game_row(row, sport: Optional[str]):
         if full.get("home") and full.get("away") and TV.same_game(label, full["home"], full["away"]):
             return w
     return None
+
+
+def game_buttons(sport: str, day: str, title: str = "🃏 Game cards") -> None:
+    """Every game on the date with a model read, as buttons that open its game card (the schedule page, Nov 25)."""
+    import streamlit as st
+    import today_visual as TV
+    import todays_best as TB
+    try:
+        ws = [w for w in TB.winner_rows(day, leagues=[sport]) if w.get("game")]
+    except Exception:                                           # noqa: BLE001
+        ws = []
+    if not ws:
+        return
+    st.markdown(f"**{title}**")
+
+    @st.fragment
+    def _grid():
+        for start in range(0, len(ws), 3):
+            cols = st.columns(3)
+            for j, w in enumerate(ws[start:start + 3]):
+                if cols[j].button(f"{w['game']} · {w.get('time') or ''}", key=f"cl_gb_{sport}_{day}_{start + j}",
+                                  width="stretch"):
+                    TV._game_dialog(w, TV.players_in_game(TV.all_props(sport), w))
+    _grid()
+    st.caption("Tap a game for its card: the model vs the market, who's out, the players and their props.")
