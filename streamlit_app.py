@@ -248,26 +248,34 @@ def run():
     # SAFE to show publicly hasn't changed, and isn't why it's gated now. Track Record's own
     # docstring was updated to match, not left describing a public-facing purpose it no longer has.
     audience = st.secrets.get("AUDIENCE", "owner")
-    if audience == "public":
-        st.sidebar.caption("🌐 Public build — some tools are owner-only")
-    # Nov 16: the commercial (customer) sidebar -- nav_layout.py. A deployment with AUDIENCE = "commercial" gets it;
-    # the owner can preview the layout here. The public Discord build is unchanged.
+    # Nov 16: the commercial (customer) sidebar -- nav_layout.py. Nov 25: live on the Discord build and the owner's
+    # default (the toggle below goes back to the classic workbench).
     import nav_layout as NL
     import players_hub as PH
     if audience == "owner":
         st.session_state.setdefault(NL.PREVIEW_KEY, True)       # Nov 25: the customer layout is live -- on by default
-        st.sidebar.toggle("👀 Customer layout", key=NL.PREVIEW_KEY,
-                          help="What members see: a Today front page, four sections, your Owner tools at the bottom. "
-                               "Turn off for the classic workbench. Your log boxes show either way.")
-    # Nov 23 (owner: phones and tablets): every build -- Auto picks cards on a phone; anyone can switch
-    st.sidebar.segmented_control("📱 Layout", ["Auto", "Phone", "Full"], key=_TS.LAYOUT_KEY, default="Auto",
-                                 help="Auto: cards on a phone, tables everywhere else. Phone: always cards (good on a "
-                                      "small tablet). Full: always the full tables.")
+    # Nov 25 (owner): the sidebar's controls in this order -- Sport, My sportsbook, My pick'em app, Layout, then the
+    # public-build note. The Sport picker is drawn here in the customer layout (the Owner Office draws its own).
+    import office as _OF0
+    _early_sport = (NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
+                    and not (audience == "owner" and _OF0.active(st.session_state)))
+    if _early_sport:
+        sports.render_sport_selector(picker=True)
     try:                                                        # Nov 25: site-wide "My sportsbook / pick'em app"
         import my_books as MB
         MB.sidebar()
     except Exception:                                           # noqa: BLE001
         pass
+    # Nov 23 (owner: phones and tablets): every build -- Auto picks cards on a phone; anyone can switch
+    st.sidebar.segmented_control("📱 Layout", ["Auto", "Phone", "Full"], key=_TS.LAYOUT_KEY, default="Auto",
+                                 help="Auto: cards on a phone, tables everywhere else. Phone: always cards (good on a "
+                                      "small tablet). Full: always the full tables.")
+    if audience == "public":
+        st.sidebar.caption("🌐 Public build — some tools are owner-only")
+    if audience == "owner":
+        st.sidebar.toggle("👀 Customer layout", key=NL.PREVIEW_KEY,
+                          help="What members see: a Today front page, four sections, your Owner tools at the bottom. "
+                               "Turn off for the classic workbench. Your log boxes show either way.")
     commercial = NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
     if commercial and audience == "owner":
         st.sidebar.caption("👀 Customer layout — what members see, plus your Owner tools")
@@ -591,7 +599,8 @@ def run():
         sections = NL.arrange(sections)      # customer order; Today replaces Home
         # Nov 25 (owner, the day it went live: "there is no way to return to a sports selector"): a real sport picker
         # in the customer sidebar -- Today's bar was the only way to change sport
-        sports.render_sport_selector(picker=True)
+        if not _early_sport:                                    # the layout was switched on this run
+            sports.render_sport_selector(picker=True)
         st.navigation(sections).run()
         return
     # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
