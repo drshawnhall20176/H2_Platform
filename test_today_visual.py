@@ -306,3 +306,19 @@ def test_soccer_strip_uses_the_soccer_games():
     assert rows[0]["game"] == "Chelsea vs Arsenal"
     html = TV.game_tile_html(rows[0])
     assert "Market: Arsenal 55%" in html and "Arsenal 52% (2-1)" in html
+
+
+def test_tennis_opens_a_match_card_not_a_basketball_box():
+    r = {"sport": "TENNIS", "league": "Argentina Open", "time": "1:00 PM", "game": "A Player vs B Player",
+         "winner": "B Player", "chance": 0.62, "price": -150, "use": "",
+         "_rec": {"home": "B Player", "away": "A Player", "kickoff": "2099-01-01T18:00:00Z"},
+         "_full": {"home": "B Player", "away": "A Player", "fair_home": 0.58, "best_home": -150, "best_away": 125}}
+    g = GC.build_tennis(r)
+    assert [x["name"] for x in g["players"]] == ["A Player", "B Player"]
+    assert abs(g["players"][1]["model"] - 0.62) < 1e-9 and abs(g["players"][0]["market"] - 0.42) < 1e-9
+    html = GC.tennis_html(g)
+    assert "model 62%" in html and "market 58%" in html and "+125" in html and "Spread" not in html
+    tile = TV.game_tile_html(dict(r, price=-150))
+    assert "B Player 62% to win" in tile and "B Player -150" in tile
+    unpriced = GC.build_tennis(dict(r, _full={"home": "B Player", "away": "A Player"}))
+    assert unpriced["priced"] is False and "no market line yet" in GC.tennis_html(unpriced)

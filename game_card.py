@@ -270,3 +270,62 @@ def render_basic(c: Dict) -> None:
     if c.get("basis"):
         st.caption(c["basis"])
     st.caption("The full game card fills in once this game is on the saved board.")
+
+
+
+# --------------------------------------------------------------------------- tennis (Nov 25)
+def build_tennis(r: Dict) -> Dict:
+    """One tennis board row -> the match card: each player's chance (model vs market) and best price."""
+    rec, p = r.get("_rec") or {}, r.get("_full") or {}
+    home, away = rec.get("home") or p.get("home"), rec.get("away") or p.get("away")
+    ch = _num(r.get("chance"))
+    hp = None if ch is None else (ch if r.get("winner") == home else 1 - ch)
+    fh = _num(p.get("fair_home"))
+    players = [{"name": away, "model": None if hp is None else 1 - hp, "market": None if fh is None else 1 - fh,
+                "price": p.get("best_away")},
+               {"name": home, "model": hp, "market": fh, "price": p.get("best_home")}]
+    try:
+        import game_lines_table as GLT
+        bet = GLT.bet(r)
+    except Exception:                                           # noqa: BLE001
+        bet = ""
+    return {"league": "TENNIS", "label": r.get("league") or "Tennis", "time": r.get("time") or "",
+            "final": r.get("final"), "game": r.get("game"), "players": players, "bet": bet,
+            "winner": r.get("winner"), "chance": ch, "use": r.get("use") or "",
+            "money_pick": r.get("money_pick") if r.get("money") else None, "money_price": r.get("money_price"),
+            "priced": any(_num(x["price"]) is not None for x in players)}
+
+
+def tennis_html(g: Dict) -> str:
+    status = f'Final: {g["final"]}' if g.get("final") else g.get("time") or ""
+    a, b = g["players"]
+    head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
+            f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
+            f'<div style="color:{HB.INK_SOFT};font-size:12.5px;letter-spacing:.06em;">{g["label"]} · {status}</div>'
+            f'<div style="color:{HB.INK};font-size:22px;font-weight:800;line-height:1.2;margin-top:3px;">'
+            f'{a["name"] or ""} <span style="color:{HB.GRAY};">vs</span> {b["name"] or ""}</div>'
+            f'<div style="margin-top:9px;">{HB.bet_chip(g.get("bet") or "Info only")}</div></div>')
+    bars = ""
+    for x in g["players"]:
+        m, k, pr = x.get("model"), x.get("market"), _num(x.get("price"))
+        bars += meter(x["name"] or "—", m, "", "", HB.BLUE, "—" if m is None else f"model {m:.0%}")
+        bars += (f'<div style="font-size:11.5px;color:{HB.GOLD};margin:-8px 0 10px;">'
+                 + (f"market {k:.0%}" if k is not None else "no market line yet")
+                 + (f" · best price {pr:+.0f}" if pr is not None else "") + '</div>')
+    return head + bars
+
+
+def render_tennis(g: Dict) -> None:
+    import streamlit as st
+    st.markdown(tennis_html(g), unsafe_allow_html=True)
+    if g.get("winner"):
+        st.markdown(f"**Model's pick to win:** {g['winner']}"
+                    + (f" ({g['chance']:.0%})" if g.get("chance") is not None else "")
+                    + (f" · {g['use']}" if g.get("use") else ""))
+    if g.get("money_pick"):
+        pr = _num(g.get("money_price"))
+        st.markdown(f"💰 **Money pick:** {g['money_pick']}" + (f" at {pr:+.0f}" if pr is not None else ""))
+    if not g.get("priced"):
+        st.caption("No sportsbook has posted this match yet — the model's read only. Prices fill in when books post.")
+    st.caption("Blue: the model's chance each player wins. Gold: the market's chance (no-vig) and the best price. "
+               "Tennis is tracking only (beta): its record is not proven yet.")
