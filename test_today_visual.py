@@ -119,3 +119,70 @@ def test_the_game_card_pop_up_draws_the_card(monkeypatch):
     assert not at.exception
     html = " ".join(m.value for m in at.markdown)
     assert "PROJECTED SCORE" in html and "Model vs market" in html and "Line pick" in html
+
+
+def test_matchup_chip_in_words_not_letter_grades():
+    import player_card as PC
+    assert PC.matchup_chip(1.10, "G")["text"].startswith("Soft matchup · allows +10% to guards")
+    assert PC.matchup_chip(1.04, "C")["tone"] == "soft" and "Leans soft" in PC.matchup_chip(1.04, "C")["text"]
+    assert PC.matchup_chip(0.90, "F")["text"].startswith("Tough matchup · allows -10% to forwards")
+    assert PC.matchup_chip(1.0, None)["tone"] == "even" and PC.matchup_chip(None) is None
+    assert PC.matchup_chip(float("nan")) is None
+
+
+def test_minutes_rows_oldest_left_and_saved_rows_carry_minutes():
+    import player_card as PC
+    rows = PC.minutes_rows([34.0, 30.5, None, 28.0])
+    assert [r["Game"] for r in rows] == ["3 ago", "2 ago", "Last"] and rows[-1]["Minutes"] == 34.0
+    c = PC.from_row({"player": "A", "side": "Over", "line": 20.5, "mins": [30, 31], "proj_min": 32.5,
+                     "factor": 1.05, "slot": "G"})
+    assert c["_mins"] == [30, 31] and c["_proj_min"] == 32.5 and c["_factor"] == 1.05 and c["_slot"] == "G"
+
+
+def test_player_card_extras_only_when_asked(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    def app(extras):
+        import player_card as PC
+        PC.render({"Player": "A", "Side": "Over", "Line": 20.5, "Market": "Points", "_values": [22, 18, 25],
+                   "_mins": [33, 30, 35], "_proj_min": 32, "_factor": 1.09, "_slot": "G"}, "NBA", extras=extras)
+    on = AppTest.from_function(app, args=(True,), default_timeout=60).run()
+    off = AppTest.from_function(app, args=(False,), default_timeout=60).run()
+    assert not on.exception and not off.exception
+    txt = lambda at: " ".join(m.value for m in at.markdown) + " ".join(c.value for c in at.caption)
+    assert "Soft matchup" in txt(on) and "His minutes" in txt(on)
+    assert "Soft matchup" not in txt(off) and "His minutes" not in txt(off)
+
+
+def test_search_lists_each_player_pick_once():
+    rows = [dict(_p("NBA", "A Points Over 20.5", 0.6), player="A", market="Points"),
+            dict(_p("NBA", "A Points Over 20.5", 0.6), player="A", market="Points"),
+            dict(_p("NBA", "A Assists Over 5.5", 0.6), player="A", market="Assists"),
+            dict(_p("NBA", "line", 0.6), kind="Game line")]
+    assert [r["pick"] for r in TV.search_options(rows)] == ["A Points Over 20.5", "A Assists Over 5.5"]
+
+
+def test_favorites_show_first_on_today_in_the_preview(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import nav_layout as NL
+    import pick_records as PR
+    import sports
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [
+        dict(_p("NBA", "A Assists Over 5.5", 0.61), player="A", market="Assists"),
+        dict(_p("NBA", "Zed Points Over 9.5", 0.55), player="Zed", market="Points")], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [_game(sport="NBA", home="B", away="A")])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: RECS.get(sp, {}))
+    monkeypatch.setattr(PR, "lean_records", lambda lg, days=30, recs=None: {})
+    monkeypatch.setattr(sports, "in_season", lambda k, day=None: k == "NBA")
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60)
+    at.session_state[NL.PREVIEW_KEY] = True
+    at.session_state[TV.FAV_KEY] = ["Zed"]
+    at.run()
+    assert not at.exception
+    assert any("Your players tonight" in m.value for m in at.markdown)
+    assert "tv_fav_0" in [b.key for b in at.button if b.key]
+    at.selectbox(key="tv_search").set_value(0).run()                    # search opens the player card
+    assert not at.exception

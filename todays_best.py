@@ -90,6 +90,9 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
                     "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5"),
                     # Nov 24: the player card's game-by-game bars (newest first) and its projection
                     "values": list(p.get("_values") or [])[:20], "projection": p.get("Projection"),
+                    # Nov 25: minutes chart + matchup chip on the player card
+                    "mins": list(p.get("_mins") or [])[:20], "proj_min": p.get("_proj_min"),
+                    "factor": p.get("_factor"), "slot": p.get("_slot"),
                     "why": p.get("Why"), "warnings": p.get("Warnings") or []})
     out.sort(key=_order)
     if not cap:                                                 # Nov 21: every pick, for the shown-picks ledger
