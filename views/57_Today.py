@@ -225,7 +225,15 @@ PCT = {"Chance": st.column_config.NumberColumn(format="percent")}
 if not _cards_ok:
     C.section_header("🎯", "Player picks")
     if props:
-        st.dataframe(pd.DataFrame(props), hide_index=True, width="stretch", column_config=PCT)
+        import card_links as _CL                                # Nov 25: a row opens the player card
+
+        def _src(d):
+            pick = str(d.get("Pick") or "").replace(" ⚠️ questionable", "")
+            return next((r for r in rows if r.get("sport") == d.get("Sport") and r.get("pick") == pick), d)
+        _CL.table(pd.DataFrame(props), key="today_props_table", items=[_src(d) for d in props],
+                  open_fn=lambda r: _CL.open_player(r.get("sport") or r.get("Sport") or "")(r),
+                  hide_index=True, width="stretch", column_config=PCT,
+                  caption="Tap a row to open the player's card.")
     else:
         st.info("No player picks yet today. Boards are built through the day as the books post their lines."
                 + ("" if include_new else " Switch on the toggle above to include pick types that are too new to "
@@ -233,7 +241,10 @@ if not _cards_ok:
 
     C.section_header("🏟️", "Game lines")
     if lines:
-        st.dataframe(pd.DataFrame(lines), hide_index=True, width="stretch", column_config=PCT)
+        import card_links as _CL
+        _CL.table(pd.DataFrame(lines), key="today_lines_table", items=lines,
+                  open_fn=_CL.open_game(lambda d: d.get("Sport")), hide_index=True, width="stretch",
+                  column_config=PCT, caption="Tap a row to open the game card.")
     else:
         st.info("No playable game lines today. A game line is listed only when a tested rule supports it or leans of "
                 "its kind have won 55% or more.")

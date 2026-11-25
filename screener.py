@@ -69,8 +69,8 @@ def _pct(x) -> str:
     return "—" if x is None else f"{x:.0%}"
 
 
-def table(rows: Iterable[Dict], bet_of, parse_time=None) -> List[Dict]:
-    """Display rows, earliest start first, then the highest chance."""
+def ordered(rows: Iterable[Dict], parse_time=None) -> List[Dict]:
+    """Earliest start first, then the highest chance -- the order the table lists them."""
     def key(r):
         t = None
         if parse_time is not None:
@@ -79,8 +79,13 @@ def table(rows: Iterable[Dict], bet_of, parse_time=None) -> List[Dict]:
             except Exception:                                   # noqa: BLE001
                 t = None
         return (t is None, str(t or r.get("time") or ""), -(_f(r.get("chance")) or 0))
+    return sorted(rows, key=key)
+
+
+def table(rows: Iterable[Dict], bet_of, parse_time=None) -> List[Dict]:
+    """Display rows, earliest start first, then the highest chance."""
     out = []
-    for r in sorted(rows, key=key):
+    for r in ordered(rows, parse_time):
         price = r.get("price")
         out.append({"Time": r.get("time") or "", "Sport": r.get("sport") or "", "Pick": r.get("pick") or "",
                     "Bet?": bet_of(r), "Our chance": _f(r.get("chance")),
@@ -120,5 +125,9 @@ def render(rows: Sequence[Dict], key: str = "scr", parse_time=None) -> None:
     st.caption(f"{len(got)} of {len(rows)} playable picks match. Hit rates and streaks are against tonight's line; "
                "Bet? is the model's verdict and doesn't change with the filters.")
     if got:
-        st.dataframe(pd.DataFrame(table(got, bet_for, parse_time)), hide_index=True, width="stretch",
-                     column_config={"Our chance": st.column_config.NumberColumn(format="percent")})
+        import card_links as CL                                 # Nov 25: a row opens the player's card
+        items = ordered(got, parse_time)
+        CL.table(pd.DataFrame(table(got, bet_for, parse_time)), key=f"{key}_table", items=items,
+                 open_fn=lambda r: CL.open_player(r.get("sport") or "")(r), hide_index=True, width="stretch",
+                 caption="Tap a row to open the player's card.",
+                 column_config={"Our chance": st.column_config.NumberColumn(format="percent")})

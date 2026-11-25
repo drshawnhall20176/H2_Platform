@@ -52,7 +52,10 @@ show = [r for r in rs if (g == "All games" or r["game"] == g) and r["rate"] >= m
         and (not only or r["margin"] >= AH.EDGE)]
 st.caption(f"{len(show)} of {len(rs)} rungs.")
 if show:
-    st.dataframe(pd.DataFrame(AH.table(show, parse_time=C._kick_dt)), hide_index=True, width="stretch",
-                 column_config={"Hit rate": st.column_config.NumberColumn(format="percent"),
-                                "Break-even": st.column_config.NumberColumn(format="percent")})
+    import card_links as CL                                     # Nov 25: a row opens the player card
+    CL.table(pd.DataFrame(AH.table(show, parse_time=C._kick_dt)), key=f"ah_table_{SPORT}",
+             items=AH.ordered(show, parse_time=C._kick_dt), open_fn=CL.open_player_named(SPORT),
+             hide_index=True, width="stretch", caption="Tap a row to open the player's card — every rung is on it.",
+             column_config={"Hit rate": st.column_config.NumberColumn(format="percent"),
+                            "Break-even": st.column_config.NumberColumn(format="percent")})
 st.caption(AH.CAPTION)

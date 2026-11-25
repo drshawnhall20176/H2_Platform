@@ -222,7 +222,10 @@ if _cards:
     _all = _LSS.all_rows(_saved)
     with st.expander(f"All {len(_all)} value long shots from today's scan"
                      + (f" ({_saved.get('games', 0)} games)" if _saved.get("games") else "")):
-        st.dataframe(pd.DataFrame([{**_lead(r), **r} for r in _all]), hide_index=True, width="stretch", column_config={
+        import card_links as _CL                                # Nov 25: a row opens the player card
+        _CL.table(pd.DataFrame([{**_lead(r), **r} for r in _all]), key=f"ls_all_{SPORT}", items=_all,
+                  open_fn=_CL.open_player_named(SPORT), hide_index=True, width="stretch",
+                  caption="Tap a row to open the player's card — his alt lines are on it too.", column_config={
             "Price": st.column_config.NumberColumn(format="%+d"),
             "Honest chance": st.column_config.NumberColumn(format="percent"),
             "Book says": st.column_config.NumberColumn(format="percent"),

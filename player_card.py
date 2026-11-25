@@ -288,7 +288,7 @@ def from_row(r: Dict) -> Dict:
             "Warnings": r.get("warnings") or [], "Use": use.strip(), "Game": r.get("game"),
             "_mins": r.get("mins") or [], "_proj_min": r.get("proj_min"), "_factor": r.get("factor"),
             "_slot": r.get("slot"), "_inj": r.get("_inj"),
-            "_team_id": r.get("team_id"), "_opp_id": r.get("opp_id")}
+            "_team_id": r.get("team_id"), "_opp_id": r.get("opp_id"), "MarketKey": r.get("market_key")}
 
 
 def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> None:
@@ -400,6 +400,12 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             import player_context as PCX
             PCX.render(p, sport)
         except Exception:                                       # noqa: BLE001 -- the card never breaks on context
+            pass
+    if extras:                                                  # Nov 25 (owner): Long shots / Alt-line hit rates, merged in
+        try:
+            import alt_hits as AH
+            AH.card_section(p, sport)
+        except Exception:                                       # noqa: BLE001
             pass
     try:
         import game_previews as GP
