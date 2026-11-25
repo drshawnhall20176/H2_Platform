@@ -328,7 +328,7 @@ def no_prop_card(name: str, w: Dict) -> None:
                {"icon": "⬆️", "value": f"{max(win):g}", "label": "High"},
                {"icon": "⬇️", "value": f"{min(win):g}", "label": "Low"}])
     label = STAT_LABEL.get(stat, stat)
-    ch = PC.bar_chart(PC.bars(vals, None, "Over", n), None, avg, label)
+    ch = PC.bar_chart(PC.bars(vals, None, "Over", n), None, avg, label, proj_label="His average")
     if ch is not None:
         _st.altair_chart(ch, width="stretch", key=f"np_ch_{k}_{stat}_{n}")
     _st.caption(f"His {label.lower()} in his last {len(win)} games (box scores), oldest left. **Light-blue dotted** = "

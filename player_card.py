@@ -49,7 +49,8 @@ def hit_text(values: List[float], line: Optional[float], side: str, n: Optional[
     return f"{k}/{len(vals)} ({k / len(vals):.0%})"
 
 
-def bar_chart(rows: List[Dict], line: Optional[float], projection: Optional[float], label: str):
+def bar_chart(rows: List[Dict], line: Optional[float], projection: Optional[float], label: str,
+              proj_label: str = "Projection"):
     import altair as alt
     import pandas as pd
     df = pd.DataFrame(rows)
@@ -73,7 +74,8 @@ def bar_chart(rows: List[Dict], line: Optional[float], projection: Optional[floa
                                               fontSize=12).encode(y="y:Q", x=alt.datum(order[0], type="nominal"),
                                                                   text="t:N"))
     if projection is not None:
-        pj = pd.DataFrame({"y": [projection], "t": [f"Projection {projection:g}"]})
+        txt = f"Projection {projection:g}" if proj_label == "Projection" else f"{proj_label} {projection:.1f}"
+        pj = pd.DataFrame({"y": [projection], "t": [txt]})
         layers.append(alt.Chart(pj).mark_rule(color=HB.BLUE_SOFT, strokeDash=[2, 3], strokeWidth=1.5).encode(y="y:Q"))
         layers.append(alt.Chart(pj).mark_text(align="left", dx=-18, dy=-8, color=HB.BLUE_SOFT, fontSize=11.5).encode(
             y="y:Q", x=alt.datum(order[0], type="nominal"), text="t:N"))
