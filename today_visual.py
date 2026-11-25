@@ -245,17 +245,95 @@ def _game_dialog(w: Dict, props: List[Dict]):
         pass
 
 
+STAT_LABEL = {"pts": "Points", "reb": "Rebounds", "ast": "Assists", "pra": "Pts+Reb+Ast", "fg3m": "Threes",
+              "stl": "Steals", "blk": "Blocks", "tov": "Turnovers", "min": "Minutes",
+              "pass_yds": "Pass yards", "pass_td": "Pass TDs", "pass_cmp": "Completions", "pass_att": "Pass attempts",
+              "pass_int": "Interceptions", "rush_yds": "Rush yards", "rush_att": "Carries", "rush_td": "Rush TDs",
+              "rec": "Receptions", "rec_yds": "Receiving yards", "tgt": "Targets", "rec_td": "Receiving TDs",
+              "g": "Goals", "goals": "Goals", "a": "Assists", "assists": "Assists", "points": "Points",
+              "sog": "Shots on goal", "shots": "Shots on goal", "toi": "Time on ice", "saves": "Saves"}
+
+
+def his_games(pgames: Sequence[Dict], name: str) -> List[Dict]:
+    """His box-score lines, newest first (matched on the full name, else the last name + first initial)."""
+    want = _norm(name)
+    mine = [p for p in pgames or [] if _norm(p.get("name")) == want]
+    if not mine and want:
+        parts = want.split()
+        last, first = parts[-1], parts[0][:1]
+        mine = [p for p in pgames or [] if _norm(p.get("name")).split()[-1:] == [last]
+                and _norm(p.get("name"))[:1] == first]
+    return sorted(mine, key=lambda p: str(p.get("order") or ""), reverse=True)
+
+
+def stat_series(games: Sequence[Dict]) -> Dict[str, List[float]]:
+    """{stat: values newest first} for every stat he has numbers in (Pts+Reb+Ast added for basketball)."""
+    out: Dict[str, List[float]] = {}
+    for g in games:
+        st = dict(g.get("stats") or {})
+        if all(k in st for k in ("pts", "reb", "ast")):
+            try:
+                st["pra"] = float(st["pts"] or 0) + float(st["reb"] or 0) + float(st["ast"] or 0)
+            except (TypeError, ValueError):
+                pass
+        for k, v in st.items():
+            try:
+                out.setdefault(k, []).append(float(v))
+            except (TypeError, ValueError):
+                continue
+    order = [k for k in STAT_LABEL if k in out] + [k for k in out if k not in STAT_LABEL]
+    return {k: out[k] for k in order if any(out[k])}
+
+
 def no_prop_card(name: str, w: Dict) -> None:
-    """A player tapped in the game card who has no prop on tonight's board: his name, the injury report, and why
-    there's no card."""
+    """Nov 25 (owner: "the player card should be shown even if there is no prop"): a player with no line on tonight's
+    board still gets his card -- the injury report and his recent games from the box scores, stat by stat, with the
+    same L5 / L10 / L20 split. No line, so no chance and no pick: it says so."""
     import player_card as PC
-    _st.markdown(f"### {name}")
-    _st.caption(f"{w.get('game') or ''}")
-    note = PC.injury_note({"Player": name}, w.get("sport") or "")
+    sport = w.get("sport") or ""
+    full = w.get("_full") or {}
+    home, away = full.get("home") or w.get("home"), full.get("away") or w.get("away")
+    head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
+            f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;"><div style="color:{HB.INK};font-size:22px;'
+            f'font-weight:800;">{name}</div><div style="color:{HB.INK_SOFT};font-size:13.5px;margin-top:3px;">'
+            f'{sport} · {w.get("game") or ""}</div><div style="margin-top:8px;">{HB.chip("No prop tonight", HB.GRAY)}'
+            f'</div></div>')
+    _st.markdown(head, unsafe_allow_html=True)
+    note = PC.injury_note({"Player": name}, sport)
     if note:
         (_st.error if note.startswith("🚑") else _st.warning)(note)
-    _st.info("No prop on him on tonight's board yet, so there's no player card to show — the books may not have posted "
-             "his lines, or he's out. His minutes are in the game card's rotation.")
+    games = []
+    try:
+        import game_card as GC
+        _x, pg, _props = GC._rotation_data(sport, _today_et(), away or "", home or "")
+        games = his_games(pg, name)
+    except Exception:                                           # noqa: BLE001
+        games = []
+    series = stat_series(games)
+    if not series:
+        _st.info("No line on him on tonight's board, and no recent box scores on file for him yet.")
+        return
+    k = _norm(name).replace(" ", "_")
+    stat = _st.pills("Stat", list(series), default=next(iter(series)), key=f"np_stat_{k}",
+                     format_func=lambda s: STAT_LABEL.get(s, s.replace("_", " ").title())) or next(iter(series))
+    vals = series[stat]
+    opts = [o for o, n in SPLITS.items() if n <= 10 or len(vals) > 10]
+    split = _st.pills("Games shown", opts, default="L10", key=f"np_split_{k}") or "L10"
+    n = SPLITS.get(split, 10)
+    win = vals[:n]
+    avg = sum(win) / len(win) if win else None
+    import components as C
+    C.kpi_row([{"icon": "📊", "value": "—" if avg is None else f"{avg:.1f}", "label": f"Average · last {len(win)}"},
+               {"icon": "⏮️", "value": f"{vals[0]:g}", "label": "Last game"},
+               {"icon": "⬆️", "value": f"{max(win):g}", "label": "High"},
+               {"icon": "⬇️", "value": f"{min(win):g}", "label": "Low"}])
+    label = STAT_LABEL.get(stat, stat)
+    ch = PC.bar_chart(PC.bars(vals, None, "Over", n), None, avg, label)
+    if ch is not None:
+        _st.altair_chart(ch, width="stretch", key=f"np_ch_{k}_{stat}_{n}")
+    _st.caption(f"His {label.lower()} in his last {len(win)} games (box scores), oldest left. **Light-blue dotted** = "
+                f"his average over them. No book line on him tonight, so there's no chance or pick — his card fills in "
+                f"the moment the books post one.")
 
 
 def players_in_game(rows: Sequence[Dict], w: Dict) -> List[Dict]:
@@ -319,11 +397,14 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
                 n_props = sum(1 for x in rows if _norm(player_of(x)) == _norm(player_of(r)))
                 label = (f"{_bet_mark(r)}{player_of(r)} — {market_label(r)} · {_chance(r.get('chance'))}"
                          + (f" (+{n_props - 1} more)" if n_props > 1 else ""))
-                if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch"):
+                # Nov 25 (owner): a pick that passes the board's checks is highlighted, not a gate on who's listed
+                if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch",
+                              type="primary" if _bet_mark(r).startswith("🃏") else "secondary"):
                     _st.session_state[f"{k}_player"] = player_of(r)
                     _st.rerun(scope="fragment")
-    _st.caption("🃏 a bet · 🧪 tracking · no mark = the model's read only. Chance = the earned chance where it has one "
-                "(how picks like it have actually done). Tap a player for his card and every prop he has tonight.")
+    _st.caption("🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Chance = the earned chance where "
+                "it has one (how picks like it have actually done). Tap a player for his card and every prop he has "
+                "tonight; anyone without a prop opens from Who's out or the rotation above.")
 
 
 @_st.dialog("Pick", width="large")

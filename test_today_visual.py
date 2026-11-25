@@ -558,3 +558,33 @@ def test_rotation_bar_html():
     r = {"name": "Bam Adebayo", "avg_min": 33.0}
     assert "→ <b" in RP.bar_html(r, 36, {"bam adebayo": 34.0}) and "opacity" in RP.bar_html(r, 36, None, {"bam adebayo": "out"})
     assert RP.tag("Bam Adebayo", {"bam adebayo": "questionable"}) == "⚠️ " and RP.tag("X") == ""
+
+
+def test_a_player_without_a_prop_still_gets_his_games():
+    pg = [{"name": "Joel Embiid", "order": f"2026-11-{d:02d}", "stats": {"min": 30 + d % 3, "pts": 20 + d, "reb": 10,
+                                                                          "ast": 4, "fg3m": 1}} for d in range(1, 13)]
+    pg.append({"name": "Someone Else", "order": "2026-11-20", "stats": {"pts": 2}})
+    games = TV.his_games(pg, "Joel Embiid")
+    assert len(games) == 12 and games[0]["order"] == "2026-11-12"
+    s = TV.stat_series(games)
+    assert list(s)[:4] == ["pts", "reb", "ast", "pra"] and s["pra"][0] == 32 + 10 + 4
+    assert len(TV.his_games(pg, "J. Embiid")) == 12 and TV.his_games(pg, "Kevin Embiid") == []
+
+
+def test_no_prop_card_renders(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    def app():
+        import game_card as GC
+        import today_visual as TV
+        pg = [{"name": "Joel Embiid", "order": f"2026-11-{d:02d}", "stats": {"min": 31, "pts": 20 + d, "reb": 10,
+                                                                              "ast": 4}} for d in range(1, 13)]
+        GC._rotation_data = lambda *a, **k: ({}, pg, [])
+        TV.no_prop_card("Joel Embiid", {"sport": "NBA", "game": "Heat @ 76ers",
+                                        "_full": {"home": "Philadelphia 76ers", "away": "Miami Heat"}})
+    at = AppTest.from_function(app, default_timeout=60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    stat = [p for p in at.pills if p.label == "Stat"][0]
+    assert stat.value == "pts" and "Pts+Reb+Ast" in stat.options
+    assert [p for p in at.pills if p.label == "Games shown"][0].options == ["L5", "L10", "L20"]
