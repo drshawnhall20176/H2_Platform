@@ -222,7 +222,46 @@ def render_side(side, off_name, def_name, stat=None):
                 st.markdown(f"- {t}")
     with PM.using_metric(FAMILY, stat):
         df = pd.DataFrame(PM.display_rows_by_player(side["rows"]) if FAMILY == "basketball" else PM.display_rows(side["rows"]))
-    st.dataframe(df, hide_index=True, width="stretch")
+        _unit = PM.metric_short(FAMILY)
+    # Nov 24 (owner): tick a row to open that player's matchup card -- the same rows, in the table's own order
+    _pairs = []
+    for _r in side["rows"]:
+        if FAMILY == "basketball":
+            for _p in ([p for p in _r["players"] if PM._in_rotation(p)] or _r["players"][:1] or [{}]):
+                _pairs.append((_r, _p))
+        else:
+            _pairs.append((_r, (_r.get("players") or [{}])[0]))
+    _msel = st.dataframe(df, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                         key=f"pm_mc_{off_name}_{def_name}_{stat}")
+    try:
+        _mrows = list(getattr(getattr(_msel, "selection", None), "rows", None) or [])
+    except Exception:                                           # noqa: BLE001
+        _mrows = []
+    if _mrows and _mrows[0] < len(_pairs) and len(_pairs) == len(df):
+        _r, _p = _pairs[_mrows[0]]
+        try:
+            import matchup_card as MC
+            _role = PM.roles(side["rows"]).get(_p.get("name"), "Rotation") if FAMILY == "basketball" else None
+            _mf = PM.player_model_factor(_r, _p, {x.get("slot"): x.get("model_factor") for x in side["rows"]}) \
+                if FAMILY == "basketball" else _r.get("model_factor")
+            _vs = _r.get("vs_league_pct")
+            with st.container(border=True):
+                MC.render({"player": _p.get("name"), "status": _p.get("status"),
+                           "pos": PM._pos_text(_r["slot"], _p) if FAMILY == "basketball" else _r.get("slot"),
+                           "team": off_name, "defense": def_name, "role": _role,
+                           "minutes": None if _p.get("avg_min") is None else f"{float(_p['avg_min']):.0f}",
+                           "unit": _unit, "recent": ((_p.get("recent") or {}).get("vals") or []),
+                           "h2h": ((_p.get("h2h") or {}).get("vals") or []),
+                           "recent_avg": (_p.get("recent") or {}).get("avg"),
+                           "rank": None if not _r.get("rank") else f"{_r['rank']}/{_r['n_teams']}",
+                           "verdict": PM.TIER_BADGE.get(_r.get("tier"), "—"), "allowed": _r.get("allowed"),
+                           "league": _r.get("league_avg"), "vs_league": None if _vs is None else f"{_vs:+.0f}%",
+                           "model": None if _mf is None else f"{_mf - 1:+.0%}", "trend": _r.get("trend"),
+                           "allows": _r.get("line")}, SPORT_KEY, key=f"pm_mcc_{off_name}_{_mrows[0]}")
+        except Exception as _exc:                               # noqa: BLE001
+            st.caption(f"(Matchup card unavailable: {type(_exc).__name__})")
+    else:
+        st.caption("☑️ Tick the box at the left of a row to open that player's matchup card.")
     if FAMILY == "basketball" and any(p.get("pos") for r in side["rows"] for p in r.get("players") or []):
         st.caption("**Pos** is tonight's depth-chart spot with the group it's graded against: **SF (F)** = starting "
                    "at small forward, read against what this defense allows to forwards. Players not on the depth "
@@ -656,6 +695,38 @@ def render_game_context(market: str) -> dict:
             "book": PE.book_order(price_book)}
 
 
+def _card(r, team, opp, market):
+    """Nov 24 (owner): one props row as H2's player card -- his recent games against the line, the chances, the read."""
+    try:
+        import player_card as PCD
+        import slate_props as SPX
+        import game_previews as GPX
+        side = r.get("side") or r.get("lean")
+        side = side if side in ("Over", "Under") else "Over"
+        line = r.get("line")
+        pf = r.get("p_final")
+        ch = None if pf is None else (float(pf) if side == "Over" else 1 - float(pf))
+        price = r.get("over_price") if side == "Over" else r.get("under_price")
+        try:
+            why = SPX.why(r)
+        except Exception:                                       # noqa: BLE001
+            why = None
+        try:
+            warn = PE.leg_warnings(r, side, line) if line is not None else []
+        except Exception:                                       # noqa: BLE001
+            warn = []
+        play = {"Player": r.get("player"), "Team": team, "Opp": opp, "Time": None, "Game": game_label,
+                "Side": side, "Line": line, "Market": market, "RealPrice": price,
+                "Projection": None if r.get("projection") is None else round(float(r["projection"]), 1),
+                "ModelProb": ch, "_values": [float(v) for v in list(r.get("values") or []) if v is not None][:20],
+                "Why": why, "Warnings": warn, "Use": r.get("use") or ""}
+        with st.container(border=True):
+            PCD.render(play, SPORT_KEY, bet=GPX.prop_bet(SPORT_KEY, str(play.get("Use") or ""),
+                                                          dict(play, ModelProb=ch, side=side)))
+    except Exception as exc:                                    # noqa: BLE001
+        st.caption(f"(Player card unavailable: {type(exc).__name__})")
+
+
 def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
     is_home = team == bundle["home"]
     spread_team = None if g["spread_home"] is None else (g["spread_home"] if is_home else -g["spread_home"])
@@ -718,9 +789,24 @@ def render_props_team(team, opp, off_name, def_name, market, mode, tables, g):
         side_pick = st.session_state.get("pm_props_side", "All Sides")       # Nov 1: All Sides / Under / Over
         shown = rows if side_pick == "All Sides" else [r for r in rows if r.get("side") == side_pick]
         if shown:
-            st.dataframe(pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
-                                                         opp_label=opp_label, market=market)),
-                         hide_index=True, width="stretch")
+            # Nov 24 (owner): click a player's row (or name) to open his player card
+            _cdf = pd.DataFrame(PE.display_compact(shown, details=bool(st.session_state.get("pm_props_details")),
+                                                    opp_label=opp_label, market=market))
+            _sel = st.dataframe(_cdf,
+                                hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                                key=f"pm_card_sel_{team}_{market}")
+            try:
+                _rows = list(getattr(getattr(_sel, "selection", None), "rows", None) or [])
+            except Exception:                                   # noqa: BLE001
+                _rows = []
+            _hit = None
+            if _rows and _rows[0] < len(_cdf) and "Player" in _cdf.columns:
+                _nm = str(_cdf.iloc[_rows[0]]["Player"])          # the table's own order, matched back by name
+                _hit = next((r for r in shown if r.get("player") and _nm.startswith(str(r["player"]))), None)
+            if _hit is not None:
+                _card(_hit, off_name, def_name, market)
+            else:
+                st.caption("☑️ Tick the box at the left of a player's row to open his player card.")
         else:
             st.caption(f"No {side_pick} picks for this team in this market.")
         return rows
@@ -1173,7 +1259,38 @@ if tab_breakout is not None:
                        "model uses today; **Blended** pulls the position number toward it until the sample grows.")
             for side, off, de in (("away_off", away_name, home_name), ("home_off", home_name, away_name)):
                 st.markdown(f"**{off} offense vs {de} defense**")
-                st.dataframe(pd.DataFrame(NPOS.display(brk[side], bstat)), hide_index=True, width="stretch")
+                _bsel = st.dataframe(pd.DataFrame(NPOS.display(brk[side], bstat)), hide_index=True, width="stretch",
+                                     on_select="rerun", selection_mode="single-row", key=f"pm_bk_{side}_{bstat}")
+                try:
+                    _brows = list(getattr(getattr(_bsel, "selection", None), "rows", None) or [])
+                except Exception:                               # noqa: BLE001
+                    _brows = []
+                if _brows and _brows[0] < len(brk[side]):
+                    _b = brk[side][_brows[0]]
+                    _st = _b.get("starter") or {}
+                    _s = _b.get("stats") or {}
+                    try:
+                        import matchup_card as MC
+                        with st.container(border=True):
+                            MC.render({"player": _st.get("name"), "status": _st.get("status"), "pos": _b.get("pos"),
+                                       "team": off, "defense": de, "unit": bstat,
+                                       "recent": (_b.get("form") or {}).get("vals") or [],
+                                       "recent_avg": (_b.get("form") or {}).get("avg"),
+                                       "rank": f"{_b['rank']}/{_b['n_teams']}" if _b.get("rank") else None,
+                                       "verdict": PM.TIER_BADGE.get(_b.get("tier"), "—"), "allowed": _b.get("allowed"),
+                                       "league": _b.get("league"),
+                                       "vs_league": None if _b.get("pos_pct") is None else f"{_b['pos_pct']:+.0f}%",
+                                       "group": None if _b.get("grp_pct") is None else f"{_b['grp']} {_b['grp_pct']:+.0f}%",
+                                       "blended": None if _b.get("blend_pct") is None else f"{_b['blend_pct']:+.0f}%",
+                                       "trend": _b.get("trend"),
+                                       "allows": None if not _s else
+                                       f"{_s['pts']:.1f} pts · {_s['reb']:.1f} reb · {_s['ast']:.1f} ast · "
+                                       f"{_s['fg3m']:.1f} 3PM · {_s['stl']:.1f} stl · {_s['blk']:.1f} blk"},
+                                      "NBA", key=f"pm_bkc_{side}_{_brows[0]}")
+                    except Exception as _exc:                   # noqa: BLE001
+                        st.caption(f"(Matchup card unavailable: {type(_exc).__name__})")
+                else:
+                    st.caption("☑️ Tick the box at the left of a row to open that starter's matchup card.")
 
 with tab_h2h:
     h = bundle["h2h"]

@@ -107,10 +107,13 @@ def test_board_frame_puts_the_bets_left_and_results_only_on_past_days():
              "final": "Army 60 – Duke 75", "money_result": "win", "best_result": "loss", "winner_result": "win",
              "league": "NCAAMB"}]
     today = list(GLT.frame(rows, past=False).columns)
-    assert today[:7] == ["Time", "Game", "Bet?", "✓ Money", "Money pick", "Money score", "✓ Pick"]
+    assert today[:8] == ["League", "Time", "Game", "Bet?", "Model & market agree?", "Blowout risk", "Close gap (pts)", "✓ Pick"]
+    # Nov 24 (owner): the indicators up front, then the Line pick first
+    assert today.index("✓ Money") > today.index("Pick") and today.index("✓ Winner") > today.index("✓ Money")
     assert "Final" not in today and "Sport" not in today
     past = list(GLT.frame(rows, past=True, show_sport=True).columns)
-    assert past[:8] == ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result"]
+    assert past[:8] == ["League", "Time", "Game", "Bet?", "Model & market agree?", "Blowout risk",
+                         "Close gap (pts)", "Final"]
 
 
 def test_select_all_ticks_every_row():
@@ -192,3 +195,12 @@ def test_prior_season_baseline_projects_from_last_seasons_games_only():
     b = HG.baseline_projection("NBA", {"home": "Strong", "away": "Weak"}, prior)
     assert 15 < b["model_margin"] < 25 and b["model_p"] > 0.9 and 150 < b["model_total"] < 230
     assert HG.baseline_projection("NBA", {"home": "Strong", "away": "Nobody"}, prior) is None
+
+
+def test_started_games_are_recognised():
+    import game_lines_table as GLT
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 24, 20, 0, tzinfo=timezone.utc)
+    assert GLT.started({"_rec": {"kickoff": "2026-11-24T17:30:00Z"}}, now=now)
+    assert not GLT.started({"_rec": {"kickoff": "2026-11-25T00:00:00Z"}}, now=now)
+    assert GLT.started({"final": "A 70 – B 60"}, now=now)

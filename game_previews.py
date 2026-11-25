@@ -304,11 +304,12 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
         _ag = agreement(p, league)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
                     BET: game_bet(league, playable, False, _ag),
-                    blow_col(league): blowout(league, p), AGREE: _ag, **lead,     # Nov 23 (owner): left of Use
-                    **says_parts(p, playable, tagged=bool(use)),
-                    TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
+                    AGREE: _ag, blow_col(league): blowout(league, p),     # Nov 24 (owner): the indicators up front
                     "Gap (pts)": None if e is None else round(abs(e), 1),
                     **({"Spread move": move} if league in getattr(TB, "MOVE_GAME_LEAGUES", ()) else {}),
+                    **lead,     # Nov 23 (owner): left of Use
+                    **says_parts(p, playable, tagged=bool(use)),
+                    TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
                     LAST: _last(league, p),                     # Nov 24 (owner): context, right of the form
                     **(extras(p) if extras else {}),
@@ -324,6 +325,108 @@ BET_YES, BET_TRACK, BET_INFO = "🃏 Bet", "🧪 Tracking", "Info only"
 BET_NOTE = ("**Bet?** — 🃏 Bet = a tag from a rule that has made money in testing (💰 / 🔒 / 🎟️ / 🎯) · 🧪 Tracking = "
             "the ✅ close-gap rule being tested forward (not proven yet) · Info only = what the model thinks, with no "
             "tested edge — context, not a bet.")
+
+
+GAP = "Close gap (pts)"
+
+
+def gap_text(p: Dict, league: str = "") -> str:
+    """Nov 24 (owner: indicators up front): how far the model's margin is from the market's spread -- '✅ 1.2' inside
+    the close-gap rule's 2 points, else the number. Hockey's puck line says nothing here: '—'."""
+    try:
+        import game_sim as GS
+        if league and GS.family(league) == "hockey":
+            return "—"
+    except Exception:                                           # noqa: BLE001
+        pass
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    if hs is None or mm is None:
+        return "—"
+    g = abs(mm + hs)
+    return f"✅ {g:.1f}" if g < 2 else f"{g:.1f}"
+
+
+TESTED_ICONS = ("💰", "🔒", "🎟️", "🎯")
+
+
+def _f(x):
+    try:
+        return None if x is None else float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def prop_tracking(sport: str, p: Dict) -> bool:
+    """Nov 24 (owner: every league with the Bet? column and NCAAMB's Tracking): a prop the tracked prop rules would bet
+    (candidate_rules.PROP_RULES -- NFL / college football Unders). Reads a board play (Side, ModelProb, MarketProb, Line,
+    Pickem, PriceSource) or a saved row (side, chance, p_market, line)."""
+    try:
+        import candidate_rules as CR
+    except Exception:                                           # noqa: BLE001
+        return False
+    side = p.get("Side") or p.get("side")
+    if side != "Under" or p.get("Pickem") or (p.get("PriceSource") not in (None, "book")):
+        return False
+    ch = _f(p.get("ModelProb") if p.get("ModelProb") is not None else p.get("chance"))
+    mk = _f(p.get("MarketProb") if p.get("MarketProb") is not None else p.get("p_market"))
+    line = p.get("Line") if p.get("Line") is not None else p.get("line")
+    if ch is None or mk is None or line is None:
+        return False
+    row = {"book": p.get("PricedAt") or p.get("book") or "", "over_price": -110, "under_price": -110,
+           "p_model": 1 - ch, "p_market": 1 - mk, "line": line}
+    return any(cfg["sport"] == sport and CR.prop_qualifies(rule, row) for rule, cfg in CR.PROP_RULES.items())
+
+
+def break_even(price) -> Optional[float]:
+    """The win rate a price needs to break even (American odds; the vig left in)."""
+    a = _f(price)
+    if a is None or a == 0:
+        return None
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def earned_short(play: Optional[Dict]) -> Optional[Dict]:
+    """Nov 25 (owner: a 🃏 Bet next to a 50% earned chance reads as a contradiction): {"earned", "needed", "price"}
+    when the pick's EARNED chance (the model corrected to its record) is not above the break-even rate for its price;
+    else None. Reads a board play (_earned, RealPrice) or a saved row (earned, price)."""
+    if not play:
+        return None
+    e = _f(play.get("_earned") if play.get("_earned") is not None else play.get("earned"))
+    price = play.get("RealPrice") if play.get("RealPrice") is not None else play.get("price")
+    need = break_even(price)
+    if e is None or need is None or e > need:
+        return None
+    return {"earned": e, "needed": need, "price": _f(price)}
+
+
+def earned_rule_on() -> bool:
+    """Nov 25: on everywhere -- owner, public Discord and commercial builds (the owner approved it after previewing it
+    in the commercial layout). Kept as a function so it can be switched off in one place."""
+    return True
+
+
+def prop_bet(sport: str, use_text: str = "", play: Optional[Dict] = None, earned_rule: Optional[bool] = None) -> str:
+    """Bet? for a prop (or any tagged pick): a tested tag -> 🃏 Bet; a tracked prop rule -> 🧪 Tracking; else Info only.
+    Nov 25: with the earned rule on, a tested tag whose earned chance doesn't clear its price's break-even is 🧪
+    Tracking, not a bet (earned_short says why)."""
+    u = str(use_text or "")
+    if any(i in u for i in TESTED_ICONS):
+        if (earned_rule_on() if earned_rule is None else earned_rule) and earned_short(play):
+            return BET_TRACK
+        return BET_YES
+    if play is not None and prop_tracking(sport, play):
+        return BET_TRACK
+    return BET_INFO
+
+
+def bet_filter(key: str) -> set:
+    """Nov 24 (owner: "Tracking and Info only should be filter buttons"): which Bet? kinds a table shows."""
+    import streamlit as st
+    opts = [BET_YES, BET_TRACK, BET_INFO]
+    sel = st.pills("Show Bet?", opts, selection_mode="multi", default=opts, key=key,
+                   help="🃏 Bet = a tested tag · 🧪 Tracking = a rule being tested forward · Info only = no tested edge. "
+                        "Untick a kind to hide it.")
+    return set(sel or opts)
 
 
 def game_bet(league: str, playable: bool, money: bool, agree: str) -> str:

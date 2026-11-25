@@ -526,7 +526,18 @@ def render_sport_selector():
 
     active = get(current)
     with st.sidebar:
-        st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
+        if st.session_state.get("_office_mode_sport_picker"):
+            # Nov 25 (owner: "there is no way to change to a different sport within the bet log without having to
+            # exit out to the today screen"): inside the Owner Office the sidebar's sport is a real picker
+            st.session_state["_office_sport"] = current
+
+            def _pick():
+                st.session_state["sport"] = st.session_state["_office_sport"]
+            st.selectbox("Sport", keys, key="_office_sport", on_change=_pick,
+                         format_func=lambda k: f"{get(k).icon} {get(k).label}" if get(k) else k,
+                         help="The Office pages (Bet Log, My Coach, Track Record ...) show this sport.")
+        else:
+            st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
     return current
 
 

@@ -20,12 +20,18 @@ from typing import Dict, List, Optional, Sequence
 import pandas as pd
 import streamlit as st
 
-TICKS = ["✓ Money", "✓ Pick", "✓ Winner"]
+TICKS = ["✓ Pick", "✓ Money", "✓ Winner"]
 BLOW, AGREE = "Blowout risk", "Model & market agree?"
-ORDER = ["Time", "Sport", "Game", "Bet?", "Final", "Money result", "Pick result", "Winner result",
-         "✓ Money", "Money pick", "Money score", "✓ Pick", "Pick", "Use", "Chance", "Price", "Value", BLOW, AGREE,
+# Nov 24 (owner: "Line pick would be the first selectable item, not money pick"): the Line pick block first, with the
+# spread move beside it (the tested tiebreaker), then the Money pick, then the Winner
+# Nov 24 (owner): "Model & market agree to the right of Bet, followed by blowout risk, then close gap and spread move,
+# then line pick etc -- this will give me all the indicators up front"
+ORDER = ["League", "Time", "Sport", "Game", "Bet?", AGREE, BLOW, "Close gap (pts)", "Spread move",
+         "Final", "Pick result", "Money result", "Winner result",
+         "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
+         "✓ Money", "Money pick", "Money score",
          "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
-         "Spread move", "Weather", "League"]
+         "Weather"]
 # Nov 23 (owner: members couldn't "identify and correlate the items"): what the members see. The board keeps its short
 # internal names; display() renames for the screen and back() maps a ticked column back.
 DISPLAY = {
@@ -41,9 +47,10 @@ SHOW = {"💰 Money picks": "💰 Only games with a Money pick", "🔒 Locks onl
         "All games": "All games", "All playable": "All games"}
 LEGEND = "\n".join("- " + x for x in [
     "Each game can carry **three different bets**, each with its own tick box right before it:",
+    "&nbsp;&nbsp;**Line pick** — the side of the **spread or total** the model favors against the market. On a 🧪 "
+    "Tracking game it is the tracked rule's side — the box to tick.",
     "&nbsp;&nbsp;**💰 Money pick** — the bet whose **price** pays best for its chance (the Money score = expected return "
     "per $1). 💰 marks one that meets the tested rule.",
-    "&nbsp;&nbsp;**Line pick** — the side of the **spread or total** the model favors (where it disagrees with the market most).",
     "&nbsp;&nbsp;**Winner pick** — the team the model has **winning outright**, with its chance and moneyline.",
     "They can point at **different sides of the same game** (the Money pick often takes the other side of a big model "
     "lean, because those leans have lost in testing). **Pick one per game.**",
@@ -99,6 +106,21 @@ def money_pick_text(r: Dict) -> str:
     return txt
 
 
+TRACK_GRADE = "🧪 Tracking · close-gap rule — 60% looking back (101–66), being tested forward"
+
+
+def is_tracking(r: Dict) -> bool:
+    """Nov 24: the row's Line pick is the NCAAMB close-gap rule's pick (the spread, model and market within 2 points) --
+    the 🧪 Tracking bet the owner is testing live. Logged and coached as a test, not graded as a losing lean."""
+    import pick_records as PR
+    lg = r.get("league") or r.get("sport") or ""
+    p = r.get("_full") or {}
+    if lg != "NCAAMB" or r.get("bet_market") != "Spread" or r.get("best_tested"):
+        return False
+    hs, mm = PR._num(p.get("home_spread")), PR._num(p.get("model_margin"))
+    return hs is not None and mm is not None and 0 < abs(mm + hs) < 2
+
+
 def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
     """[(row, tick column)] from log_ui.tick_grid -> log items: the Pick, the Likely winner's moneyline, or the Money
     pick (any side, at its own line and price)."""
@@ -111,6 +133,9 @@ def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
         r = rows[i]
         full = r.get("_full") or {}
         if col == "✓ Pick" and r.get("bet_market") and r.get("best"):
+            if is_tracking(r):                                  # Nov 24 (owner): don't grade the test as a losing lean
+                out.append(dict(r, price=r.get("bet_price"), pick=r["best"], tracking=True, grade=TRACK_GRADE))
+                continue
             out.append(dict(r, price=r.get("bet_price"), pick=r["best"],
                             grade=("tracking only" if r.get("status") else PR.grade(r))))
         elif col == "✓ Winner" and full:
@@ -135,9 +160,12 @@ def extras(r: Dict) -> Dict:
     lg = r.get("league") or r.get("sport") or ""
     try:
         return {BLOW: GP.blowout(lg, p) if p else "—", AGREE: GP.agreement(p, lg) if p else "—",
+                GP.GAP: GP.gap_text(p, lg) if p else "—",
+                "Spread move": " ".join(x for x in (r.get("spread_move") or "",
+                                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
                 GP.LAST: GP._last(lg, p) if p else "—"}
     except Exception:                                           # noqa: BLE001
-        return {BLOW: "—", AGREE: "—", "Last meetings": "—"}
+        return {BLOW: "—", AGREE: "—", "Close gap (pts)": "—", "Spread move": "", "Last meetings": "—"}
 
 
 def bet(r: Dict) -> str:
@@ -152,11 +180,68 @@ def bet(r: Dict) -> str:
         parts.append("Line pick")
     if parts:
         return f"{GP.BET_YES}: " + " + ".join(parts)
+    import pick_records as PR
+    if r.get("lean_verdict") in PR.HIDE and not r.get("best_tested"):
+        try:                                                    # a 🧪 close-gap game is still Tracking
+            ag = GP.agreement(r.get("_full") or {}, lg) if r.get("_full") else ""
+        except Exception:                                       # noqa: BLE001
+            ag = ""
+        if GP.game_bet(lg, False, False, ag) == GP.BET_INFO:
+            return f"{GP.BET_INFO} · ⚠️ losing lean type"
     try:
         ag = GP.agreement(r.get("_full") or {}, lg) if r.get("_full") else ""
     except Exception:                                           # noqa: BLE001
         ag = ""
     return GP.game_bet(lg, False, False, ag)
+
+
+def started(r: Dict, now=None) -> bool:
+    """Nov 24 (owner: started or finished games in their own section / a box to filter them out): the game has
+    tipped (its kickoff is past) or has a final."""
+    if r.get("final"):
+        return True
+    import sports
+    from datetime import datetime, timezone
+    k = sports.game_dt((r.get("_rec") or {}).get("kickoff") or (r.get("_full") or {}).get("kickoff"))
+    if k is None:
+        return False
+    return k <= (now or datetime.now(timezone.utc))
+
+
+def started_section(rows: Sequence[Dict], key: str, past: bool = False):
+    """The 'Hide games that have started' switch (on by default today) -> (rows to list, rows set aside). The set-aside
+    games are listed read-only in their own fold-out by `show_started`."""
+    if past or not rows:
+        return list(rows or []), []
+    gone = [r for r in rows if started(r)]
+    if not gone:
+        return list(rows), []
+    hide = st.toggle(f"Hide games that have started ({len(gone)})", value=True, key=f"{key}_hide_started",
+                     help="Games in progress or final move to their own list below the board. Untick to keep them in "
+                          "the board.")
+    return ([r for r in rows if not started(r)], gone) if hide else (list(rows), [])
+
+
+def show_started(gone: Sequence[Dict], label: str = "") -> None:
+    """The started / finished games, read-only, under the board."""
+    if not gone:
+        return
+    with st.expander(f"⏱️ Started or finished ({len(gone)}){label}", expanded=False):
+        st.dataframe(pd.DataFrame([{"League": league_of(r), "Time": r.get("time") or "", "Game": r.get("game"),
+                                    "Bet?": bet(r), "Line pick": r.get("best") or "—",
+                                    "Score": r.get("final") or "in progress"} for r in gone]),
+                     hide_index=True, width="stretch")
+        st.caption("Their bets are closed. Results are graded on the board's past-days view and in the records.")
+
+
+def league_of(r: Dict) -> str:
+    """Nov 24 (owner: every table like NCAAMB's): the League column -- the sport's own key (NCAAMB, NBA, NHL...), or the
+    league's name where one sport holds many (international hoops: EuroLeague; soccer: Premier League). A college
+    tournament's name goes after the key ("NCAAMB · Maui Invitational") so the column never just repeats the sport."""
+    sp, lg = str(r.get("sport") or ""), str(r.get("league") or "")
+    if sp in ("INTL", "SOCCER", "TENNIS"):
+        return lg or sp
+    return sp if (not lg or lg == sp) else f"{sp} · {lg}"
 
 
 def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.DataFrame:
@@ -181,13 +266,12 @@ def frame(rows: Sequence[Dict], past: bool, show_sport: bool = False) -> pd.Data
         "Record (30d)": r.get("lean_record") or "—",
         "Backtest cover": r.get("backtest") if not r.get("best_tested") else None,
         "Spread": r.get("spread_txt") or "", "Total": r.get("total_txt") or "",
-        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": r.get("league")} for r in rows])
+        "Model": r.get("model_txt") or r.get("lean_detail") or "", "League": league_of(r)} for r in rows])
     if df.empty:
         return df
     drop = [] if past else ["Final", "Money result", "Pick result", "Winner result"]
-    if not show_sport:
-        drop.append("Sport")
-    for c in ("Chance", "Price", "Value", "Backtest cover", "Money score", "Spread", "Total", "Model"):
+    drop.append("Sport")                                        # Nov 24: League (first) names the sport
+    for c in ("Chance", "Price", "Value", "Backtest cover", "Money score", "Spread", "Total", "Model", "Spread move"):
         if c in df and not df[c].replace("", None).notna().any():
             drop.append(c)
     df = df.drop(columns=[c for c in drop if c in df.columns])
@@ -222,6 +306,10 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
         rows = [r for r in rows if r.get("money")]
     elif show.startswith("🔒"):
         rows = [r for r in rows if r.get("lock")]
+    rows, _gone = started_section(rows, key, past)              # Nov 24 (owner): started games set aside
+    import game_previews as _GPf
+    _bk = _GPf.bet_filter(f"{key}_bet")                         # Nov 24 (owner): 🃏 / 🧪 / Info only filter buttons
+    rows = [r for r in rows if any(bet(r).startswith(k) for k in _bk)]
     rows = sorted(rows, key=lambda r: (C._kick_dt(r.get("time")) is None, str(C._kick_dt(r.get("time")) or ""),
                                        not r.get("money")))
     if past and rows:
@@ -261,6 +349,7 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
                                                     "Money score": st.column_config.NumberColumn(format="percent",
                                                                                                  help=MONEY_HELP)})))
     LU.panel(line_items(rows, ticks), f"{key}_log", date_str, past=past)
+    show_started(_gone)
 
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)

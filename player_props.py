@@ -470,6 +470,8 @@ def player_rows(rotation_list: Sequence[Dict], defense, market: str, cur_table: 
             "p_model": read["p_model"], "p_market": read["p_market"], "p_final": read["p_final"], "gap": read.get("gap"), "gap_pct": read.get("gap_pct"),
             "p_over": read["p_final"], "side": read["side"], "ev": read["ev"], "lean": read["lean"],
             "flags": flags, "dist": dist, "values": list(values),
+            # Nov 25: the player card's minutes chart (same games as "values", newest first)
+            "mins": [_num((g.get("stats") or {}).get("min")) for g in b["games"]],
         })
     return PE.single_bar(carry_points_flags(rows, rotation_list, defense, market, cur_pgames, prior_pgames, mode,
                                             current_is_prior, ctx), ctx.get("sport") or "NBA")

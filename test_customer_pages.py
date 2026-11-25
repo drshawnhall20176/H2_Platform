@@ -8,6 +8,16 @@ import props_engine as PE
 VIEWS = Path(__file__).with_name("views")
 
 
+
+import pytest as _pytest_today
+
+
+@_pytest_today.fixture(autouse=True)
+def _no_schedule_calls(monkeypatch):
+    """Nov 25: Today asks each sport's schedule which sports have games -- never the network in tests."""
+    import customer_today as _CT
+    monkeypatch.setattr(_CT, "has_games", lambda key, day: False)
+
 def _p(sport, pick, chance, use=PE.USE_SINGLE, time="7:00 PM", lock=False, price=-110, kind="Prop"):
     return {"sport": sport, "kind": kind, "time": time, "pick": pick, "game": "A @ B", "price": price,
             "book": "DraftKings", "chance": chance, "use": use, "lock": lock}
@@ -196,3 +206,67 @@ def test_owner_brief_sits_at_the_top_of_today(monkeypatch):
     assert at.expander[0].label == "☀️ Morning brief"
     src = open("Today.py").read()
     assert src.index("the owner's brief (Nov 19") < src.index("C.kpi_row(") < src.index("for s in _order:")
+
+
+def test_today_has_one_sport_bar_all_sports_by_default_that_also_sets_the_sidebar(monkeypatch):
+    """Nov 25 (owner): the top bar and the bottom 'Explore a sport' were redundant -- one bar, All sports by default,
+    one sport at a time (sidebar follows), several at once only when switched on."""
+    from streamlit.testing.v1 import AppTest
+    import pick_records as PR
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [_p("NBA", "A Assists Over 5.5", 0.61),
+                                                                               _p("NHL", "B Shots Over 2.5", 0.6)],
+                                                                      "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: {"🎯 Single only": (30, 50)})
+    monkeypatch.setattr(PR, "lean_records", lambda lg, days=30, recs=None: {})
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60).run()
+    assert not at.exception and not at.warning
+    assert not [b for b in at.button if (b.key or "").startswith("today_sport_")]   # no bottom sport buttons
+    bar = at.button_group(key="today_one")
+    assert bar.value == "ALL"
+    assert len(at.dataframe[0].value) == 2                                           # all sports' picks
+    bar.set_value("NBA").run()
+    assert not at.exception and at.session_state["sport"] == "NBA"                   # the sidebar follows
+    assert len(at.dataframe[0].value) == 1
+    at.toggle(key="today_multi").set_value(True).run()
+    assert not at.exception and at.button_group(key="today_sports").value == ["NBA"]   # carried over
+    at.button_group(key="today_sports").set_value(["NBA", "NHL"]).run()
+    assert not at.exception and at.session_state["sport"] == "NHL" and len(at.dataframe[0].value) == 2
+    at.toggle(key="today_multi").set_value(False).run()
+    assert not at.exception and at.button_group(key="today_one").value == "ALL"
+
+
+def test_today_date_selector_and_sports_with_games_only(monkeypatch):
+    """Nov 25 (owner): a date selector (back and forward) and sport buttons only for sports with games that day."""
+    from streamlit.testing.v1 import AppTest
+    import customer_today as CTm
+    import pick_records as PR
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    seen = []
+
+    def collect(day, keys, past=False):
+        seen.append((day, past))
+        return {"rows": [_p("NBA", "A Assists Over 5.5", 0.61)], "props": {}}
+    monkeypatch.setattr(TB, "collect", collect)
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(PR, "tag_records", lambda sp: {"🎯 Single only": (30, 50)})
+    monkeypatch.setattr(PR, "lean_records", lambda lg, days=30, recs=None: {})
+    monkeypatch.setattr(CTm, "has_games", lambda key, day: key == "NHL")       # NHL has games; NBA has a pick
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60).run()
+    assert not at.exception
+    opts = at.button_group(key="today_one").options
+    keys = [o.content if hasattr(o, "content") else str(o) for o in opts]
+    joined = " ".join(keys)
+    assert "NBA" in joined and "NHL" in joined and "NFL" not in joined and "MLB" not in joined
+    assert seen[-1][1] is False
+    at.button(key="today_prev").click().run()                                  # yesterday: graded, past=True
+    assert not at.exception and seen[-1][1] is True
+    assert any("Yesterday" in m.value for m in at.markdown)
+    at.button(key="today_back").click().run()                                  # back to today (cached: no reload)
+    import datetime as _d
+    assert not at.exception and at.session_state["today_day"] > _d.date.today() - _d.timedelta(days=1)

@@ -53,10 +53,13 @@ def _tag(league, p):
 
 
 def _commercial() -> bool:
-    """Nov 16: the customer view (a commercial deployment, or the owner previewing it) -- nav_layout.py."""
+    """Nov 16: the customer view (a commercial deployment). Nov 25 (owner: "What happened to ... the ability to log bets
+    from the Game lab"): the owner previewing the commercial layout keeps his own Game Lab -- tick boxes, log panel and
+    Use column -- so he never has to leave the preview to log a bet."""
     try:
         import nav_layout as NL
-        return NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(NL.PREVIEW_KEY))
+        aud = str(st.secrets.get("AUDIENCE", "owner") or "owner").lower()
+        return aud != "owner" and NL.is_commercial(aud, st.session_state.get(NL.PREVIEW_KEY))
     except Exception:                                           # noqa: BLE001 -- no secrets: a local / owner run
         return False
 
@@ -368,7 +371,7 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
         st.dataframe(df, hide_index=True, width="stretch")
     else:
         shown = [ordered[r["_i"]] for r in rows]                # the games in the order the table lists them
-        df = with_book_ticks(df, shown, after="Gap (pts)")
+        df = with_book_ticks(df, shown, after=GP.TOTAL)          # Nov 24: Gap moved up front with the indicators
         st.caption("☑️ Tick any side to log it — the model's side or the other one, spread, total or moneyline. "
                    "Change the line or price in the log box to match your slip (alternate spreads too).")
         ticks = LU.tick_grid(df, list(TICK_COLS), key=f"hg_ticks_{league}", hide_index=True, width="stretch",

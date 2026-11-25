@@ -2726,7 +2726,7 @@ runpy.run_path({page!r})
     assert not at.exception, at.exception
     text = " ".join(m.value for m in at.markdown)
     assert "Sport by sport" in text
-    df = at.dataframe[0].value.set_index("Sport")
+    df = at.dataframe[0].value.set_index("League")          # Nov 24: Sport reads as League, first
     nba = [i for i in df.index if "NBA" in i][0]
     nhl = [i for i in df.index if "NHL" in i][0]
     assert df.loc[nba, "Games today"] == 2 and df.loc[nba, "Picks"] == 2 and df.loc[nba, "🔒"] == 1

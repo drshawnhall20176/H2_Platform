@@ -238,12 +238,63 @@ if _active.key == "NBA":
                            "(Oct 30 – Nov 17). A favorite's price only has value if it beats his chance here.")
             _kdf = pd.DataFrame(_k[:25])
             _kdf["Blowout chance"] = _kdf["Blowout chance"].apply(lambda v: "—" if v is None or v != v else f"{v:.0%}")
-            st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source", "Ceiling (90th)",
-                               "Best recent", "Minutes", "Blowout chance", "Min at risk", "Spread", "Game"]],
-                         hide_index=True, width="stretch",
-                         column_config={"King chance": st.column_config.ProgressColumn(
-                             "King chance", format="percent", min_value=0.0, max_value=max(0.25, float(_kdf["King chance"].max()))),
-                             "Min at risk": st.column_config.NumberColumn(format="%.1f")})
+            # Nov 24 (owner): click a player's row to open his player card
+            st.caption("👆 Click a player's row to open his player card.")
+            _ksel = st.dataframe(_kdf[["Player", "Team", "Opp", "King chance", "Adj PRA", "Proj PRA", "Source",
+                                       "Ceiling (90th)", "Best recent", "Minutes", "Blowout chance", "Min at risk",
+                                       "Spread", "Game"]],
+                                 hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                                 key="kotc_table",
+                                 column_config={"King chance": st.column_config.ProgressColumn(
+                                     "King chance", format="percent", min_value=0.0,
+                                     max_value=max(0.25, float(_kdf["King chance"].max()))),
+                                     "Min at risk": st.column_config.NumberColumn(format="%.1f")})
+            try:
+                _krows = list(getattr(getattr(_ksel, "selection", None), "rows", None) or [])
+            except Exception:                                   # noqa: BLE001
+                _krows = []
+            if _krows:
+                import player_card as _PCK
+                _kr = _k[:25][_krows[0]]
+                _info = player_info.get((_kr["Player"], _kr.get("Team"))) or {}
+                # Nov 24 (owner: fill the KOTC card): his PRA line, price and the model's chance from the day's saved
+                # props reads (the Hot Hand board has no PRA market), and the King of the Court numbers as the KPIs
+                _rd = (MV.cached_reads(_active.key, date_str) or {}).get((MV.norm_name(_kr["Player"]), "PRA")) or {}
+                _over = None
+                try:
+                    _ch = float(_rd.get("chance")) if _rd.get("chance") is not None else None
+                    _over = None if _ch is None else (_ch if _rd.get("side") == "Over" else 1 - _ch)
+                except (TypeError, ValueError):
+                    _over = None
+                _pra = {"Line": _rd.get("line"), "RealPrice": _rd.get("over_price"), "ModelProb": _over,
+                        "Time": None}
+                _vals = list(_info.get("pra") or [])
+                _ln = _pra["Line"]
+
+                def _fmt(v, f="{:g}"):
+                    try:
+                        return f.format(float(v))
+                    except (TypeError, ValueError):
+                        return "—"
+                _kk = [{"icon": "👑", "value": f"{_kr['King chance']:.0%}", "label": "King chance"},
+                       {"icon": "📐", "value": _fmt(_kr.get("Adj PRA"), "{:.1f}"), "label": "Adj PRA (projection)"},
+                       {"icon": "🚀", "value": _fmt(_kr.get("Ceiling (90th)"), "{:.1f}"), "label": "Ceiling (90th)"},
+                       {"icon": "🏆", "value": _fmt(_kr.get("Best recent")), "label": "Best recent PRA"},
+                       {"icon": "⏱️", "value": _fmt(_kr.get("Minutes"), "{:.1f}"), "label": "Minutes (last 5)"}]
+                if _ln is not None:
+                    _kk.append({"icon": "📏", "value": _PCK.hit_text(_vals, float(_ln), "Over", 10),
+                                "label": f"Last 10 over PRA {float(_ln):g}"})
+                with st.container(border=True):
+                    _PCK.render({"Player": _kr["Player"], "Team": _kr.get("Team"), "Opp": _kr.get("Opp"),
+                                 "Time": (_pra or {}).get("Time"), "Game": _kr.get("Game"),
+                                 "Market": "Pts+Reb+Ast", "Side": "Over",
+                                 "Line": (_pra or {}).get("Line"), "RealPrice": (_pra or {}).get("RealPrice"),
+                                 "Projection": _kr.get("Adj PRA") or _kr.get("Proj PRA"),
+                                 "ModelProb": (_pra or {}).get("ModelProb"),
+                                 "_values": list(_info.get("pra") or []),
+                                 "Why": f"👑 King chance {_kr['King chance']:.0%} · ceiling (90th) "
+                                        f"{_kr.get('Ceiling (90th)')} · best recent {_kr.get('Best recent')}",
+                                 "Warnings": []}, "NBA", bet="Info only", kpis=_kk)
             st.caption(
                 "**King chance** = how often he posts the slate's top PRA across 20,000 simulated nights. Every "
                 "rotation player is in the simulation, and each player's night is drawn from how players at his "

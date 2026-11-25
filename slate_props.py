@@ -459,6 +459,12 @@ def play_from_row(row: Dict, slate_row: Optional[Dict] = None, sport: Optional[s
         "MarketProb": round(p_mkt, 4) if p_mkt else None,              # Nov 20: the books' no-vig chance of the side
         "ModelRaw": round(sp["p_model"], 4) if sp.get("p_model") is not None else None,   # the model's own, unblended
         **recent_hits(row, "Over" if yes_only else side),
+        "_values": [float(v) for v in list(row.get("values") or [])[:20] if v is not None],   # Nov 24: player card bars
+        # Nov 25: the player card's minutes chart and matchup chip (basketball rows; absent elsewhere)
+        "_mins": [round(float(v), 1) for v in list(row.get("mins") or [])[:20] if v is not None],
+        "_proj_min": round(float(row["opp"]), 1) if isinstance(row.get("opp"), (int, float)) and row.get("mins") else None,
+        "_factor": row.get("factor") if isinstance(row.get("factor"), (int, float)) else None,
+        "_slot": row.get("slot") if isinstance(row.get("slot"), str) else None,
         "Lean": lean, "EV": td_value if td_value is not None else row.get("ev"), "Gap": row.get("gap"), "GapPct": row.get("gap_pct"),
         "Cushion": PE.cushion(row.get("projection"), row["line"], side),
         "Warnings": [w for w in PE.leg_warnings(row, side, row["line"]) if not w.startswith("thin cushion")],

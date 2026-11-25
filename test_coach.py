@@ -168,3 +168,30 @@ def test_ticket_check_flags_pass_games_and_spreads_moving_away():
                 bet_side="home", pick="Murray St -11.5")
     chk2 = CO.ticket_check([good], "Singles", 4, 0, None, [], "2026-11-17", lim=lim)
     assert any("moving this way" in m for _, m in chk2["flags"])
+
+
+def test_lessons_count_test_bets_as_the_models_calls_not_unsupported():
+    """Nov 25 (owner): 'why does my coach say 10 out of 10 picks yesterday had no model support' -- the close-gap test
+    bets carry no tested chance by design; they are the model's calls, as the Bet Log's split already says."""
+    day = "2026-11-24"
+    t1 = dict(_b(1, "loss", None, stake=1, day=day), notes="close-gap-test", category="H2")
+    t2 = dict(_b(2, "win", None, stake=1, day=day), notes="close-gap-test", category="H2")
+    ln = dict(_b(3, "loss", None, stake=1, day=day), notes="lean")
+    own1 = dict(_b(4, "loss", None, stake=1, day=day), category="Own")
+    own2 = dict(_b(5, "loss", 0.45, stake=1, day=day), category="Own")
+    les = " ".join(CO.lessons([t1, t2, ln, own1, own2], day))
+    assert "2 of your 5 picks were the model's tracked calls" in les and "1–1" in les
+    assert "1 were Info-only leans" in les
+    assert "2 of your 5 picks had no model support" in les
+    import betlog as B
+    assert [B.model_group(b) for b in (t1, ln, own1)] == ["with", "lean", "own"]
+
+
+def test_a_long_shot_the_model_prices_above_break_even_is_model_backed():
+    """Nov 25: a long shot whose model chance clears its price's break-even is the model's bet."""
+    import betlog as B
+    ls = {"model_prob": 0.30, "entry_odds": 300}             # break-even 25%
+    under = {"model_prob": 0.20, "entry_odds": 300}
+    even = {"model_prob": 0.49, "entry_odds": -110}
+    assert B.model_group(ls) == "with" and B.model_group(under) == "own" and B.model_group(even) == "own"
+    assert B.model_group({"model_prob": 0.55, "entry_odds": -110}) == "with"

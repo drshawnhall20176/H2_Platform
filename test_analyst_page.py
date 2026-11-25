@@ -312,8 +312,9 @@ def _desk_with(monkeypatch, tmp_path, offers, plays_meta=None):
 def test_the_page_has_a_sportsbook_selector_listing_the_books_that_posted_lines(monkeypatch, tmp_path):
     plays, meta = _board()
     at = _desk_with(monkeypatch, tmp_path, _offers(plays))
-    book = [s for s in at.selectbox if s.label == "📖 Sportsbook"][0]
-    assert set(book.options) == {"DraftKings", "FanDuel"} and book.value == "DraftKings"
+    # Nov 25: the book comes from the sidebar's 📖 My sportsbook -- the page says which one it priced at
+    assert not [s for s in at.selectbox if s.label == "📖 Sportsbook"]
+    assert any("Priced at **DraftKings**" in c.value for c in at.caption)
 
 
 def test_a_play_the_selected_book_does_not_post_is_not_suggested_or_locked(monkeypatch, tmp_path):
@@ -350,8 +351,8 @@ def test_the_price_shown_is_the_selected_books_not_the_best_price(monkeypatch, t
     at = _desk_with(monkeypatch, tmp_path, offers)
     assert at.dataframe[0].value["Book price"].iloc[0] == -130
     assert AL.fetch_calls(db_path=str(tmp_path / "ledger.db"))[0]["price"] == -130
-    book = [s for s in at.selectbox if s.label == "📖 Sportsbook"][0]
-    book.set_value("FanDuel").run()
+    at.session_state["my_book"] = "fanduel"                     # Nov 25: changed in the sidebar
+    at.run()
     assert not at.exception
     assert at.dataframe[0].value["Book price"].iloc[0] == 105
 
@@ -575,7 +576,8 @@ def test_ask_the_analyst_answers_from_the_days_facts_and_explains_failures(desk,
     [b for b in at.button if b.label == "Ask"][0].click().run()
     shown = [m.value for m in at.markdown if m.value in ("Second answer.", "The gem is Gem Guy.")]
     assert shown == ["Second answer.", "The gem is Gem Guy."]                                        # newest first
-    [s for s in at.selectbox if s.label == "📖 Sportsbook"][0].set_value("FanDuel").run()
+    at.session_state["my_book"] = "fanduel"                     # Nov 25: the sidebar's book
+    at.run()
     assert "Second answer." not in " ".join(texts(at))                                               # a different book is a different conversation
 
 

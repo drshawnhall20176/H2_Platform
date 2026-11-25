@@ -171,7 +171,8 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
 # result, and -- for parlays whose legs carry their own prices -- how the LEGS did against what those prices implied, and
 # what the same legs would have made as $1 singles. That answers the question a parlay result alone can't: is there an
 # edge in the picks, or did the parlay just get lucky?
-AUTO_TAGS = ("use:", "leg_price=", "market-gap", "star-out", "tracking", "honest-chances")
+AUTO_TAGS = ("use:", "leg_price=", "market-gap", "star-out", "tracking", "honest-chances",
+             "lean", "close-gap-test", "money-pick")          # Nov 24: the kind-of-call notes on board bets
 
 
 def strategy_of(b: Dict) -> str:

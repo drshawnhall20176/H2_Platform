@@ -291,6 +291,9 @@ if _gl_pick:                                                    # Nov 24: the ga
     except Exception:                                           # noqa: BLE001
         _glr = []
     st.markdown("##### 📏 Game lines")
+    import game_previews as _GPgl
+    _glk = _GPgl.bet_filter("bb_gl_bet") if _glr else set()
+    _glr = [r for r in _glr if r["Bet?"] in _glk]
     if _glr:
         _CLB.show_table(_glr)
         st.caption(_CLB.ICON_KEY + " Tick and log game lines on the game board (Home, or the sport's Game Lab).")
@@ -337,6 +340,29 @@ view = grading.filter_min_probability(view, min_prob_pct / 100.0)
 view.sort(key=lambda p: p["ModelProb"], reverse=True)
 view = C.by_kickoff(view, lambda p: p.get("GameTime") or p.get("Time"))   # Nov 11: game time first, then chance
 
+# Nov 24 (owner: "the ability to click into a player ... to see things"; "point me to a player card"): one prop on
+# one screen, in H2's look -- any player on tonight's board (every prop in the chosen markets, not only the playable
+# ones the table lists), so it's there even when the filters leave the table empty
+if _props_model:
+    _pool = C.by_kickoff([p for p in slot_plays if p["Market"] in mkt_pick],
+                         lambda p: p.get("GameTime") or p.get("Time"))
+    if _pool:
+        _pc = st.selectbox(f"🔎 Open a player card ({len(_pool)} props on tonight's board)", [None] + list(range(len(_pool))),
+                           key=f"bb_pc_{_active.key}",
+                           format_func=lambda i: "Pick a player…" if i is None else
+                           f"{_pool[i].get('Player')} — {_pool[i].get('Side')} "
+                           f"{_pool[i].get('Line') if _pool[i].get('Line') is not None else ''} {_pool[i].get('Market')}"
+                           f" ({_pool[i].get('Time') or ''})",
+                           help="His recent games against tonight's line, the projection, the chances and the read.")
+        if _pc is not None:
+            try:
+                import player_card as _PCD
+                import game_previews as _GPpc
+                _pp = _pool[_pc]
+                with st.container(border=True):
+                    _PCD.render(_pp, _active.key, bet=_GPpc.prop_bet(_active.key, str(_pp.get("Use") or ""), _pp))
+            except Exception as _exc:                           # noqa: BLE001
+                st.caption(f"(Player card unavailable: {type(_exc).__name__})")
 if not view:
     if _active.key in ("NCAAMB", "NCAAF"):
         st.info("No player props pass the filters — normal for college: the sportsbooks price props on only a few "
@@ -472,12 +498,21 @@ try:
         _rename["_agree"] = _GPB.AGREE
 except Exception:                                               # noqa: BLE001
     pass
-for p in view:                                                  # Nov 24 (owner): a Bet? column
-    _u = str(p.get("_use") or p.get("Use") or "")
-    p["_bet"] = "🃏 Bet" if any(i in _u for i in ("💰", "🔒", "🎟️", "🎯")) else "Info only"
+import game_previews as _GPbb
+for p in view:                                                  # Nov 24 (owner): a Bet? column, 🧪 for tracked rules
+    p["_bet"] = _GPbb.prop_bet(_active.key, str(p.get("_use") or p.get("Use") or ""), p)
+_bbk = _GPbb.bet_filter("bb_bet")                                # and the 🃏 / 🧪 / Info only filter buttons
+view = [p for p in view if p["_bet"] in _bbk]
+if not view:
+    st.info("No props of the Bet? kinds picked — tick another kind above.")
+    st.stop()
 _cols.append("_bet")
 _rename["_bet"] = "Bet?"
-_FIRST = ["Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
+for p in view:
+    p["_league"] = _active.key
+_cols.append("_league")
+_rename["_league"] = "League"
+_FIRST = ["_league", "Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
           "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
 df = pd.DataFrame(view)[_cols]

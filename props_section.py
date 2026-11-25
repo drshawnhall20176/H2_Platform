@@ -95,12 +95,17 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
         return
     import coach as CO
     import game_previews as GP
+    _pk = GP.bet_filter(f"ps_bet_{sport}")                     # Nov 24 (owner): 🃏 / 🧪 / Info only filter buttons
+    show = [j for j in show if GP.prop_bet(sport, j.get("use"), j) in _pk]
+    if not show:
+        st.caption("No props of the Bet? kinds picked.")
+        return
     try:                                                        # Nov 24: the game-lab columns on props too
         _blow = GP.game_blowouts(sport, [j.get("game") for j in show])
     except Exception:                                           # noqa: BLE001
         _blow = {}
-    df = pd.DataFrame([{"Time": j.get("time") or "", "Game": j.get("game") or "",
-                        GP.BET: GP.BET_YES if _prop_tagged(j.get("use")) else GP.BET_INFO, "Pick": j.get("pick"),
+    df = pd.DataFrame([{"League": sport, "Time": j.get("time") or "", "Game": j.get("game") or "",
+                        GP.BET: GP.prop_bet(sport, j.get("use"), j), "Pick": j.get("pick"),
                         "Use": j.get("use") or "", "Model": j.get("chance"), "Price": j.get("price"),
                         "Blowout risk": _blow.get(j.get("game"), "—"),
                         GP.AGREE: GP.prop_agreement(j.get("chance"), j.get("price")),
@@ -115,4 +120,9 @@ def render(sport: str, day: str, title: str = "🎯 Player props") -> None:
         "Coach = My Coach's verdict at that price — 🟢 Good bet, 🟡 Maybe, 🔴 Skip. Blowout risk = the game's chance of "
         "a lopsided finish (starters may sit late). Model & market agree? = does the price lean the same way as the "
         "model (✅ yes · ⚠️ the price says the other side · ➖ about even). Tick rows to log them."))
+    try:                                                        # Nov 24 (owner): a player card for any prop here
+        import player_card as PCD
+        PCD.picker(show, lambda r: sport, f"ps_card_{sport}")
+    except Exception:                                           # noqa: BLE001
+        pass
     LU.panel(LU.picked(show, sel), f"ps_log_{sport}", day, tag=f"{sport.lower()}-props")

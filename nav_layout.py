@@ -31,7 +31,8 @@ SECTION_ORDER = (TODAY, RESEARCH, RECORD, BETA)
 # section -> (page title in the app, the name the customer sees), in the order they are listed.
 # Nov 16 (second pass): Today replaces Home, the player tools are one Players page (players_hub.py), plain names.
 LAYOUT: Dict[str, tuple] = {
-    TODAY: (("Today", "Today"), ("Best Bets", "All picks"), ("Live Games", "Live"), ("Long Shots", "Long shots"),
+    TODAY: (("Today", "Today"), ("Best Bets", "All picks"), ("Pick'em Board", "Pick'em"), ("Live Games", "Live"),
+            ("Long Shots", "Long shots"),
             ("UFC Fight Card", "Fight card"), ("Highlights", "My filters")),
     RESEARCH: (("Game Lab", "Games"), ("Players", "Players"), ("League Schedules", "Schedule"),
                ("Analyst Desk", "Daily write-up"), ("Game Watch", "Game watch"), ("Bullpen Watch", "Bullpens")),

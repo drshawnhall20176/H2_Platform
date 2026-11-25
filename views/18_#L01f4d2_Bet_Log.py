@@ -171,7 +171,12 @@ with st.expander("➕ Log a bet", expanded=False):
             # Default to whichever book was last selected on Best Bets / Graded Picks.
             # Session state keys follow the pattern set by render_book_selector:
             # "best_bets_book_selector", "graded_picks_book_selector", etc.
-            _ss_book = (st.session_state.get("best_bets_book_selector")
+            try:                                                # Nov 25: the site-wide 📖 My sportsbook first
+                import my_books as _MBl
+                _mine_label = _MBl.book_label()
+            except Exception:                                   # noqa: BLE001
+                _mine_label = None
+            _ss_book = (_mine_label or st.session_state.get("best_bets_book_selector")
                         or st.session_state.get("graded_picks_book_selector")
                         or st.session_state.get("speculative_basket_book_selector")
                         or st.session_state.get("suggested_parlays_book_selector")
@@ -425,11 +430,22 @@ try:                                                            # Nov 24: with t
             return "no settled bets"
         return (f"{d['wins']}-{d['losses']}, ${d['profit']:+,.2f}"
                 + (f" ({d['roi']:+.1f}% ROI)" if d["roi"] is not None else ""))
-    st.caption(f"🧭 **With the model** (its chance 50%+ on your side, or ticked from a model board): {_ln(_ms['with'])} · "
+    st.caption(f"🧭 **With the model** (🃏 Bet and 🧪 Tracking picks): {_ln(_ms['with'])} · "
+               f"**Info-only leans** (ticked from a board without a tested tag): {_ln(_ms['lean'])} · "
                f"**Your own calls** (no model chance, or the model leaned the other way): {_ln(_ms['own'])}. "
                "Sticking with the model means the first group, not every lean — only 💰 / 🎯 tags have passed testing.")
 except Exception:                                               # noqa: BLE001
     pass
+
+# Nov 24 (owner): "metrics that show me how these specific picks are performing ... a dashed line that shows what a
+# profitable baseline looks like" -- the 🃏 / 🧪 groups, the model's and his own, against a +5% pace
+with st.expander("📈 How the 🃏 Bet and 🧪 Tracking picks are doing — against a profitable pace", expanded=True):
+    try:
+        import picks_performance as _PP
+        import props_engine as _PEpp
+        _PP.render(_PEpp._et_today(), bets=B.list_bets())
+    except Exception as _exc:                                   # noqa: BLE001
+        st.caption(f"(Pick performance unavailable: {type(_exc).__name__})")
 if rp["n_total"] and rp["n_real_price"] < rp["n_total"]:
     st.caption(f"ℹ️ {rp['n_total'] - rp['n_real_price']} bet(s) here weren't logged at a real book "
                "price (model fair price, or logged before price-source tracking), so they're "

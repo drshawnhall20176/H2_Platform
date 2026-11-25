@@ -10,7 +10,7 @@ logs for every combination anyone opened.
 Two guards, installed by streamlit_app.py before anything else is imported:
   1. install(): every st.cache_data without its own max_entries keeps at most DEFAULT_MAX_ENTRIES results (oldest
      dropped first) -- the same answer for the next visitor, a ceiling on the pile.
-  2. watchdog(): before each page run, if the process is using more than the limit (H2_MEM_LIMIT_MB, default 1800 MB),
+  2. watchdog(): before each page run, if the process is using more than the limit (H2_MEM_LIMIT_MB, default 1300 MB),
      clear the data caches and collect garbage -- the next visitor waits for a rebuild instead of everyone getting the
      "Oh no" page. At most once a minute; each clear is printed to the app log with the memory before and after.
 """
@@ -20,7 +20,7 @@ import gc
 import os
 import time
 
-DEFAULT_MAX_ENTRIES = 300          # per-player / per-team caches hold hundreds of small results a slate
+DEFAULT_MAX_ENTRIES = 150          # Nov 25: 300 -> 150 after the Nov 24 out-of-memory restart (30+ in-place reloads)
 _STATE = {"last": 0.0, "clears": 0}
 
 
@@ -55,9 +55,9 @@ def rss_mb() -> float | None:
 
 def limit_mb() -> float:
     try:
-        return float(os.environ.get("H2_MEM_LIMIT_MB") or 1800)
+        return float(os.environ.get("H2_MEM_LIMIT_MB") or 1300)
     except ValueError:
-        return 1800.0
+        return 1300.0
 
 
 def clear_module_caches() -> int:

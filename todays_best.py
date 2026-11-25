@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Sequence
 import props_engine as PE
 
 KEY = "todays_best:{sport}:{date}"
+KEY_ALL = "todays_best_all:{sport}:{date}"     # Nov 25: every playable pick on the board (Today's player search)
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
@@ -87,7 +88,13 @@ def props_rows(sport: str, plays, cap: bool = True) -> List[Dict]:
                     "line": line, "market_key": p.get("MarketKey"),
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
                     "pickem_only": bool(p.get("Pickem")),
-                    "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5")})
+                    "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5"),
+                    # Nov 24: the player card's game-by-game bars (newest first) and its projection
+                    "values": list(p.get("_values") or [])[:20], "projection": p.get("Projection"),
+                    # Nov 25: minutes chart + matchup chip on the player card
+                    "mins": list(p.get("_mins") or [])[:20], "proj_min": p.get("_proj_min"),
+                    "factor": p.get("_factor"), "slot": p.get("_slot"),
+                    "why": p.get("Why"), "warnings": p.get("Warnings") or []})
     out.sort(key=_order)
     if not cap:                                                 # Nov 21: every pick, for the shown-picks ledger
         return out
@@ -120,6 +127,16 @@ def save_props(sport: str, date_str: str, plays, meta=None) -> None:
                          "rows": keep_started(props_rows(sport, timed), (load_props(sport, date_str) or {}).get("rows"),
                                               on_board={p.get("Game") for p in timed if p.get("Game")})})
     except Exception:                                           # noqa: BLE001 -- a bonus, never a failure
+        pass
+    # Nov 25 (owner: Today's search should find any player on tonight's boards, not just the top picks): every playable
+    # pick, kept slim (10 games of bars / minutes) -- the search box reads this, never the boards themselves
+    try:
+        import model_store as MS
+        slim = [dict(r, values=list(r.get("values") or [])[:10], mins=list(r.get("mins") or [])[:10])
+                for r in props_rows(sport, timed, cap=False)]
+        MS.save_setting(KEY_ALL.format(sport=sport, date=date_str),
+                        {"at": datetime.now(timezone.utc).isoformat(), "rows": slim})
+    except Exception:                                           # noqa: BLE001
         pass
     # Nov 21 (owner: "your 14-1 record is overstated"): the picks as SHOWN -- every 💰 prop the board shows and the
     # Command Center's strongest-15 -- kept the first time they appear (pick_ledger.py)
@@ -179,6 +196,15 @@ def load_props(sport: str, date_str: str) -> Optional[Dict]:
         return MS.get_setting(KEY.format(sport=sport, date=date_str), None)
     except Exception:                                           # noqa: BLE001
         return None
+
+
+def load_all_props(sport: str, date_str: str) -> List[Dict]:
+    """Nov 25: every playable pick saved for the day (Today's player search); [] before the board's next build."""
+    try:
+        import model_store as MS
+        return list((MS.get_setting(KEY_ALL.format(sport=sport, date=date_str), None) or {}).get("rows") or [])
+    except Exception:                                           # noqa: BLE001
+        return []
 
 
 # --------------------------------------------------------------------------- game lines, international, tennis
@@ -626,6 +652,13 @@ def soccer_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
                    "best": SP.projected(p), "lean_detail": "market: " + SP.market(p), "status": "tracking only",
                    "bet_market": "Moneyline", "bet_side": side, "bet_line": None, "bet_price": price,
                    "best_chance": None, "best_price": None, "best_value": None, "best_tested": False,
+                   # Nov 25: the soccer game card (Today) -- the three results, model vs market, and expected goals
+                   "_probs": probs, "_prices": {"home": p.get("best_home"), "draw": p.get("best_draw"),
+                                                "away": p.get("best_away")},
+                   "_market": ({"home": p.get("mkt_home"), "draw": p.get("mkt_draw"), "away": p.get("mkt_away")}
+                               if p.get("mkt_home") is not None else None),
+                   "_xg": (None if p.get("xg_home") is None else {"home": p["xg_home"], "away": p["xg_away"]}),
+                   "_sharp": bool(p.get("sharp")),
                    "_rec": {"sport": lg, "home": p.get("home"), "away": p.get("away"), "game_id": p.get("game_id"),
                             "kickoff": p.get("kickoff")}}
             if past:
@@ -734,7 +767,12 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
                 bf = IP.bet_fields
             f = bf(it["_rec"], it["bet_market"], it["bet_side"], it.get("bet_line"), float(price), stake, real,
                               it.get("best_chance") if it.get("best_tested") else None)
-            f["notes"] = ",".join(x for x in (tag, f.get("notes")) if x)
+            # Nov 24 (owner: "how are we handling Info only picks should those be selected?"): what kind of call it was,
+            # so the Bet Log can split tested / tracked picks from the model's info-only leans
+            kind = ("close-gap-test" if it.get("tracking") else
+                    "money-pick" if str(it.get("note") or "").startswith("💰") else
+                    None if it.get("best_tested") else "lean")
+            f["notes"] = ",".join(x for x in (tag, kind, f.get("notes")) if x)
             out.append(f)
             continue
         if it.get("sport") == "UFC" and it.get("market") in ("Moneyline", "Fight Duration") and it.get("side"):

@@ -129,9 +129,51 @@ def top_cards(rows: List[Dict], records_for: Optional[Callable] = None, n: int =
             continue
         seen.add(who)
         out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"),
-                    "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None else ""),
+                    "price": _price(r.get("price")) + (f" · {_book_name(r['book'])}" if r.get("book") and r.get("price") is not None else ""),
                     "game": r.get("game") or "", "time": r.get("time") or "", "record": r.get("record") or "",
                     "lock": bool(r.get("lock")), "money": bool(r.get("money")), "move": r.get("move") or ""})
         if len(out) >= n:
             break
     return out
+
+
+def has_games(key: str, day: str):
+    """Nov 25 (owner: on Today, sport buttons only for sports with games that day): True / False from the sport's own
+    schedule; None when it couldn't be read (the sport then stays on the bar rather than vanish on a feed hiccup)."""
+    import sports
+    from datetime import datetime as _dt
+    try:
+        if key in sports.LAB_SPORTS:
+            import lab_schedule as LS
+            return bool(LS.rows(key, LS.load(key), _dt.strptime(day, "%Y-%m-%d").date()))
+        if key == "UFC":                                        # Nov 25: fight days only (the free events list)
+            import ufc_engine as UE
+            k = odds_key()
+            return None if not k else day in UE.card_dates(k)
+        if key == "NFL":                                        # Nov 25: its schedule is the whole season
+            import nfl_engine as NE
+            d = _dt.strptime(day, "%Y-%m-%d").date()
+            season = d.year if d.month >= 3 else d.year - 1
+            return any(str(g.get("game_date") or "")[:10] == day for g in NE.get_schedule(season) or [])
+        return bool(sports.get(key).engine.get_schedule(day))
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+def odds_key():
+    import os
+    try:
+        import streamlit as st
+        k = st.secrets.get("ODDS_API_KEY")
+    except Exception:                                           # noqa: BLE001
+        k = None
+    return k or os.environ.get("ODDS_API_KEY")
+
+
+def _book_name(k) -> str:
+    """Nov 25: "draftkings" -> "DraftKings" on the cards."""
+    try:
+        import odds_api as O
+        return O.book_label(k)
+    except Exception:                                           # noqa: BLE001
+        return str(k)

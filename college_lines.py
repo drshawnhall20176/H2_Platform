@@ -90,6 +90,12 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
         except Exception:                                       # noqa: BLE001
             last = "—"
         cg = cand.get(r.get("game"))
+        try:
+            gap = GP.gap_text(full, league) if full else "—"
+        except Exception:                                       # noqa: BLE001
+            gap = "—"
+        move = " ".join(x for x in (r.get("spread_move") or "",
+                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x)
         seen = set()
 
         def add(market, pick, price, chance, icons, kind):
@@ -99,12 +105,13 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
             seen.add(key)
             ic = list(dict.fromkeys(i for i in icons if i))
             tested = any(i in ic for i in ("💰", "🔒", "🎟️", "🎯"))
-            out.append({"Time": r.get("time") or "", "Game": r.get("game"),
+            out.append({"League": r.get("league") or league, "Time": r.get("time") or "", "Game": r.get("game"),
                         "Bet?": GP.BET_YES if tested else GP.BET_TRACK if kind == CLOSE or (
                             league == "NCAAMB" and "✅" in ic and kind != WINNER) else GP.BET_INFO,
+                        GP.AGREE: agree, "Blowout risk": blow, GP.GAP: gap, "Spread move": move,
                         "Use": " ".join(ic), "Pick type": kind,
                         "Market": market, "Pick": pick, "Price": price, "Chance": chance,
-                        "Blowout risk": blow, GP.AGREE: agree, "Last meetings": last,
+                        "Last meetings": last,
                         "_kick": (r.get("_rec") or {}).get("kickoff")})
 
         money_same = r.get("money_pick") and r.get("best") and r.get("money_pick") == r.get("best")
@@ -207,7 +214,12 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
         rows = []
     C.section_header("📏", "Game-line plays — where the college edge is")
     st.caption(prop_supply(board_plays, len(rows)))
-    pl = plays(league, date_str, rows)
+    _up, _gone = GLT.started_section(rows, f"cl_{league}", date_str < today)   # Nov 24 (owner): started set aside
+    pl = plays(league, date_str, _up)
+    if pl:
+        import game_previews as _GPc
+        _ck = _GPc.bet_filter(f"cl_bet_{league}")               # Nov 24 (owner): filter buttons
+        pl = [r for r in pl if r["Bet?"] in _ck]
     if pl:
         show_table(pl)
         cand = ""
@@ -220,6 +232,7 @@ def render(league: str, date_str: str, board_plays: Sequence[Dict]) -> None:
         st.caption(ICON_KEY + ("  \n" + cand if cand else ""))
     else:
         st.caption("No 💰 or ✅ game lines for this date yet — the full board below has every game.")
+    GLT.show_started(_gone)
     with st.expander(f"🧾 Full game board ({len(rows)} games) — tick any line to log it", expanded=False):
         GLT.render(rows, f"bb_glt_{league}", date_str, past=date_str < today)
     st.divider()
@@ -247,15 +260,16 @@ def _soccer(day: str, rows=None, flags=None) -> List[Dict]:
             flags = []
     out = []
     for f in flags:
-        out.append({"Time": f.get("time") or "", "Game": f.get("game"), "Bet?": GP.BET_TRACK,
+        out.append({"League": f.get("league"), "Time": f.get("time") or "", "Game": f.get("game"), "Bet?": GP.BET_TRACK,
                     "Use": "📈", "Pick type": "Price above the sharp line", "Market": f.get("market") or "",
                     "Pick": f.get("pick"), "Price": f.get("price"), "Chance": f.get("chance"),
-                    "League": f.get("league"), "_ev": f.get("ev"), "_kick": (f.get("_rec") or {}).get("kickoff")})
+                    "_ev": f.get("ev"), "_kick": (f.get("_rec") or {}).get("kickoff")})
     for r in rows:
-        out.append({"Time": r.get("time") or "", "Game": r.get("game"), "Bet?": GP.BET_INFO, "Use": "",
+        out.append({"League": r.get("league"), "Time": r.get("time") or "", "Game": r.get("game"), "Bet?": GP.BET_INFO,
+                    "Use": "",
                     "Pick type": "Model's most likely result", "Market": "Moneyline (3-way)",
                     "Pick": r.get("winner"), "Price": r.get("price"), "Chance": r.get("chance"),
-                    "League": r.get("league"), "_ev": None, "_kick": (r.get("_rec") or {}).get("kickoff")})
+                    "_ev": None, "_kick": (r.get("_rec") or {}).get("kickoff")})
     import components as C
     return C.by_kickoff(out, lambda x: x.get("_kick") or x.get("Time"))
 

@@ -561,7 +561,7 @@ with tab_live:
         } for r in status_rows]), width="stretch", hide_index=True,
             column_config={"Locked price": st.column_config.NumberColumn(format="%+d")})
         st.caption("Prices are the selected book's. A call locked at another book isn't listed here — switch the "
-                   "Sportsbook selector to that book to see it.")
+                   "sidebar's 📖 My sportsbook to that book to see it.")
 
     if not is_owner:
         st.markdown("#### 🧾 The permanent record")
