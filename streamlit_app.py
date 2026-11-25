@@ -505,9 +505,11 @@ def run():
     lab = active_sport in sports.LAB_SPORTS
     # Nov 18 (owner): the Office pages leave every sport's sidebar; owner build only, behind their own password
     import office as OF
-    office_on = audience == "owner" and not commercial
+    # Nov 25 (owner): the Owner Office stays reachable while he previews the commercial layout (owner build only;
+    # a real commercial deployment never has it)
+    office_on = audience == "owner"
     office: dict = {}
-    if office_on:
+    if office_on and not commercial:
         sections["🏠 START HERE"].append(st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐",
                                                 url_path="owner_office"))
     if not commercial:                                          # Nov 21: the restart button (its own password)
@@ -528,7 +530,7 @@ def run():
 
     for f in view_files:
         key = lead(f.name)
-        if OF.is_office_page(key) and not commercial:
+        if OF.is_office_page(key) and (office_on or not commercial):
             if office_on and OF.unlocked(st.session_state):
                 title, icon, slug = meta.get(key, (f.stem, "📄", f"page_{key}"))
                 office.setdefault(OF.PAGES[key], []).append(st.Page(str(f), title=title, icon=icon, url_path=slug))
@@ -571,7 +573,11 @@ def run():
     # screenshot, pixel-sampled) to be inert against this Streamlit version's actual DOM -- see
     # the "CSS risk" section of the project handoff. Removed rather than left as dead code.
     # UPPERCASE section names remain the confirmed, real, working lever for visual separation.
-    if commercial:
+    if commercial and not (office_on and OF.active(st.session_state)):
+        if office_on:                                           # Nov 25: the owner's own tools, last in the preview
+            sections["🔐 OWNER (only you see this)"] = [
+                st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐", url_path="owner_office"),
+                st.Page(str(here / "Maintenance.py"), title="Restart the site", icon="🛠️", url_path="maintenance")]
         sections = NL.arrange(sections)      # customer order; Today replaces Home
         sports.render_sport_selector()
         st.navigation(sections).run()
