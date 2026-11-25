@@ -88,3 +88,14 @@ def test_model_record_page_renders_without_a_database():
     at = AppTest.from_file("views/56_Model_Record.py", default_timeout=60).run()
     assert not at.exception
     assert any("Model Record" in str(m.value) for m in at.markdown) or at.info
+
+
+def test_sidebar_controls_in_the_owners_order():
+    # Nov 25 (owner): Sport, My sportsbook, My pick'em app, Layout, then the public-build note
+    i = [SRC.index(x) for x in ("sports.render_sport_selector(picker=True)", "MB.sidebar()", '"📱 Layout"',
+                                "🌐 Public build")]
+    assert i == sorted(i)
+    import my_books as MB
+    import inspect
+    src = inspect.getsource(MB.sidebar)
+    assert src.index("sportsbook") < src.index("pick'em")
