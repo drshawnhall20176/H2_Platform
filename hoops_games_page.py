@@ -513,6 +513,49 @@ def context_cols(previews):
     return extra
 
 
+def game_cards(league, day, keep=None, last=None) -> None:
+    """Nov 25 (members, through the owner: "keep the card theme throughout as the default"): the games as cards, each
+    opening its game card -- the score, the lines, who's out, then the players and their props, each opening his card."""
+    import game_lines_table as GLT
+    import today_visual as TV
+    from datetime import timedelta
+    C.section_header("🃏", "Games")
+    today = _today_et()
+    span = [day + timedelta(days=i) for i in range(max(0, ((last or day) - day).days) + 1)]
+    try:
+        rows = [dict(r) for d in span for r in GLT._rows(league, d.strftime("%Y-%m-%d"), d < today)]
+    except Exception as exc:                                    # noqa: BLE001
+        st.caption(f"The games are unavailable right now ({type(exc).__name__}).")
+        return
+    if keep is not None:
+        rows = [r for r in rows if keep(r)]
+    rows.sort(key=lambda r: (GLT._when(r) is None, str(GLT._when(r) or "")))
+    live = [r for r in rows if not GLT.started(r)]
+    gone = [r for r in rows if GLT.started(r)]
+    if not rows:
+        st.caption("No games with a model read for this date.")
+        return
+    st.caption("Tap **Game card** for the model vs the market, who's out, the rotations and every player with a prop — "
+               "then tap a player for his card.")
+
+    def grid(lst, tag):
+        for start in range(0, len(lst), 4):
+            cols = st.columns(4)
+            for j, w in enumerate(lst[start:start + 4]):
+                with cols[j].container(border=True):
+                    if len(span) > 1:
+                        k = GLT._when(w)
+                        if k is not None and hasattr(k, "strftime"):
+                            st.caption(k.strftime("%a %b %-d"))
+                    st.markdown(TV.game_tile_html(w), unsafe_allow_html=True)
+                    if st.button("Game card →", key=f"hgc_{league}_{tag}_{start + j}", width="stretch"):
+                        TV._game_dialog(w, TV.players_in_game(TV.all_props(league), w))
+    grid(live, "up")
+    if gone:
+        with st.expander(f"⏱️ Started or finished ({len(gone)})", expanded=not live):
+            grid(gone, "gone")
+
+
 def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, cust, last=None):
     import game_lines_table as GLT
     import game_previews as GP
@@ -535,13 +578,17 @@ def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, 
             why = "a tested pick" if r.get("_playable") else f"the spread is moving its way ({r.get('Line move', '')})"
             st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): {why}; the model is "
                         f"{r['Gap (pts)']:.1f} points from the market.")
-    GLT.lab_section(league, key=f"hg_board_{league}", day=day,
-                    keep=board_keep({_label(p) for p in shown}, all_labels), extra_cols=context_cols(previews),
-                    title="Games: 💰 Money pick · Line pick · Winner pick", last=last)
-    st.caption("On the right: **Form (30 days)** — how the model's favored side did on games with a gap this size "
-               "lately (🔥 55%+ of 20+ · ➖ about even · ❄️ losing · 🆕 too few) · **Total points** and **Win chance** "
-               "— the model's number / the market's." + ("" if cust else " **Long backtest**, **Tracking pick** and "
-               "**Why** are yours only."))
+    keep = board_keep({_label(p) for p in shown}, all_labels)
+    import view_mode as VM
+    if VM.choose(f"games_{league}") == VM.CARDS:              # Nov 25 (members): cards by default, tap to open
+        game_cards(league, day, keep, last)
+    else:
+        GLT.lab_section(league, key=f"hg_board_{league}", day=day, keep=keep, extra_cols=context_cols(previews),
+                        title="Games: 💰 Money pick · Line pick · Winner pick", last=last)
+        st.caption("On the right: **Form (30 days)** — how the model's favored side did on games with a gap this size "
+                   "lately (🔥 55%+ of 20+ · ➖ about even · ❄️ losing · 🆕 too few) · **Total points** and **Win chance** "
+                   "— the model's number / the market's." + ("" if cust else " **Long backtest**, **Tracking pick** and "
+                   "**Why** are yours only."))
     if upcoming and not cust:
         games = C.by_kickoff(upcoming)
         with st.expander("☑️ Log any side — either team's spread, Over / Under, either moneyline", expanded=False):

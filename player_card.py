@@ -28,9 +28,9 @@ def cleared(v: float, line: float, side: str) -> bool:
     return bool(PE.clears(v, line))
 
 
-def bars(values: List[float], line: Optional[float], side: str) -> List[Dict]:
+def bars(values: List[float], line: Optional[float], side: str, n: int = 10) -> List[Dict]:
     """Chronological (oldest left) bars: {"Game", "Value", "Cleared"}; the newest is "Last"."""
-    vals = list(values or [])[:10][::-1]
+    vals = list(values or [])[:n][::-1]
     n = len(vals)
     out = []
     for i, v in enumerate(vals):
@@ -106,7 +106,7 @@ def matchup_chip(factor, slot=None) -> Optional[Dict]:
 
 
 def minutes_rows(mins: List[float]) -> List[Dict]:
-    vals = [v for v in list(mins or [])[:10] if v is not None][::-1]
+    vals = [v for v in list(mins or [])[:20] if v is not None][::-1]
     n = len(vals)
     return [{"Game": "Last" if n - i == 1 else f"{n - i} ago", "Order": i, "Minutes": float(v)}
             for i, v in enumerate(vals)]
@@ -310,7 +310,7 @@ def picker(rows, sport_of, key: str, label: str = "🔎 Open a player card") -> 
 
 
 def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None,
-           extras: Optional[bool] = None) -> None:
+           extras: Optional[bool] = None, window: int = 10) -> None:
     """One board play (Best Bets' row) as a card. `extras` (default: the commercial layout only) adds the matchup
     chip and the minutes chart."""
     import streamlit as st
@@ -346,7 +346,7 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
         {"icon": "5️⃣", "value": hit_text(vals, line, side, 5), "label": "Last 5 vs this line"},
         {"icon": "🔟", "value": hit_text(vals, line, side, 10), "label": "Last 10 vs this line"},
     ])
-    rows = bars(vals, line, side)
+    rows = bars(vals, line, side, window)                     # Nov 25: the card's L5 / L10 / L20 filter
     ch = bar_chart(rows, line, p.get("Projection"), p.get("Market") or "Value")
     if ch is not None:
         st.altair_chart(ch, width="stretch", key=f"pc_{p.get('PlayerId')}_{p.get('Market')}")
@@ -362,7 +362,7 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
                    "is built).")
     if extras:
         try:
-            mrows = minutes_rows(p.get("_mins") or [])
+            mrows = minutes_rows(list(p.get("_mins") or [])[:window])
             mch = minutes_chart(mrows, p.get("_proj_min")) if mrows else None
             if mch is not None:
                 st.altair_chart(mch, width="stretch", key=f"pcm_{p.get('PlayerId')}_{p.get('Market')}")

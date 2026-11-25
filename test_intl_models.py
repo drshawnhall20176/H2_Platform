@@ -186,6 +186,7 @@ def test_pages_render(monkeypatch):
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [up] if sport == "TENNIS" else [hoop])
     for page, needle in (("43_Tennis_Lab.py", "A B ML"), ("44_Intl_Hoops.py", "Real Madrid -2.5")):
         at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
+        at.session_state["h2_view_pref"] = "Table"          # Nov 25: cards are the default
         at.run()
         if page.startswith("44"):
             at.date_input(key="hg_date_EUROLEAGUE").set_value(DAY).run()
@@ -261,6 +262,7 @@ def test_ncaamb_game_lab_and_intl_page_render(monkeypatch):
          "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.session_state["h2_view_pref"] = "Table"          # Nov 25: cards are the default
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
@@ -327,6 +329,7 @@ def test_game_lab_log_panel_logs_the_tracking_pick(monkeypatch):
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
     monkeypatch.setattr(B, "add_bet", lambda *a, **k: got.append(k) or 77)
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.session_state["h2_view_pref"] = "Table"          # Nov 25: cards are the default
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     at.button(key="hg_log_go_NCAAMB").click().run()
@@ -343,6 +346,7 @@ def test_game_lab_shows_model_side_gap_and_tags(monkeypatch):
          "line_total": 140.0, "model_p": 0.6, "fair_home": 0.95, "pick": "away", "result": None}
     monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [g])
     at = AppTest.from_file(str(Path(__file__).parent / "views" / "45_NCAAMB_Game_Lab.py"), default_timeout=30)
+    at.session_state["h2_view_pref"] = "Table"          # Nov 25: cards are the default
     at.run()
     at.date_input(key="hg_date_NCAAMB").set_value(DAY).run()
     assert not at.exception, [e.value for e in at.exception]
@@ -379,6 +383,7 @@ def test_espn_pro_league_parser_and_nba_nhl_pages(monkeypatch):
                 "model_p": 0.62, "fair_home": 0.6, "pick": None, "result": None, "use": "⚪ No edge"}
         monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None, _g=game: [_g])
         at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=30)
+        at.session_state["h2_view_pref"] = "Table"          # Nov 25: cards are the default
         at.run()
         at.date_input(key=f"hg_date_{lg}").set_value(DAY).run()
         assert not at.exception, [e.value for e in at.exception]

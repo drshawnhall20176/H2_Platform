@@ -111,7 +111,7 @@ def test_today_page_shows_cards_only_in_the_commercial_preview(monkeypatch):
     at.button(key="tv_game_NBA_0").click().run()                         # opens the game card pop-up
     assert not at.exception
     # Table in the preview: the tables come back
-    at.segmented_control(key="today_view").set_value("Table").run()
+    at.segmented_control(key="view_today").set_value("Table").run()
     assert not at.exception and len(at.dataframe) == 2
 
 
@@ -489,3 +489,24 @@ def test_pick_card_says_questionable_and_top_cards_carry_the_flag():
     assert "Questionable tonight" in html
     assert "Questionable" not in TV.pick_card_html({"pick": "x", "chance": 0.6})
     assert CT._q({"pick": "p", "_inj": "questionable"}) == "p ⚠️ questionable" and CT._q({"pick": "p"}) == "p"
+
+
+def test_player_view_has_prop_chips_and_game_splits():
+    from streamlit.testing.v1 import AppTest
+
+    def app():
+        import today_visual as TV
+        sib = [{"player": "Jalen Brunson", "team": "NYK", "market": "Points", "side": "Over", "line": 27.5,
+                "chance": 0.58, "game": "Knicks @ Celtics", "values": [30, 25, 28, 31, 22, 29, 27, 33, 26, 24, 30, 28]},
+               {"player": "Jalen Brunson", "team": "NYK", "market": "Assists", "side": "Over", "line": 6.5,
+                "chance": 0.61, "game": "Knicks @ Celtics", "values": [7, 8, 5, 9, 6, 7, 8]}]
+        TV.player_view(sib[0], "NBA", sib, key="t")
+    at = AppTest.from_function(app, default_timeout=60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    chips = [p for p in at.pills if p.label == "His props tonight"][0]
+    assert chips.options == ["Points · Over 27.5", "Assists · Over 6.5"] and chips.value == "Points · Over 27.5"
+    split = [p for p in at.pills if p.label == "Games shown"][0]
+    assert split.options == ["L5", "L10", "L20"] and split.value == "L10"
+    chips.set_value("Assists · Over 6.5").run()
+    assert not at.exception
