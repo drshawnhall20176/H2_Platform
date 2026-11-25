@@ -94,8 +94,8 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
             gap = GP.gap_text(full, league) if full else "—"
         except Exception:                                       # noqa: BLE001
             gap = "—"
-        move = " ".join(x for x in (r.get("spread_move") or "",
-                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x)
+        import todays_best as TB
+        move = TB.move_cell(r)                                  # Nov 25 (owner): a short arrow, the detail further right
         seen = set()
 
         def add(market, pick, price, chance, icons, kind):
@@ -111,7 +111,7 @@ def board_rows(league: str, day: str, rows: Sequence[Dict], recs: Optional[List[
                         GP.AGREE: agree, "Blowout risk": blow, GP.GAP: gap, "Spread move": move,
                         "Use": " ".join(ic), "Pick type": kind,
                         "Market": market, "Pick": pick, "Price": price, "Chance": chance,
-                        "Last meetings": last,
+                        "Last meetings": last, "Line move": TB.move_detail(r),
                         "_kick": (r.get("_rec") or {}).get("kickoff")})
 
         money_same = r.get("money_pick") and r.get("best") and r.get("money_pick") == r.get("best")

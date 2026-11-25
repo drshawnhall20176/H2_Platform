@@ -12,6 +12,8 @@ locks first, then by tag, then by chance.
 """
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence
 
@@ -1069,3 +1071,22 @@ def spread_move(p: Dict, lg: str) -> Dict:
         out["spread_move"] = "📈 our way" if move > 0 else "📉 against"
         out["spread_move_why"] = f"{team} {sp_o:+g} → {sp_l:+g}"
     return out
+
+
+def move_cell(r: Dict) -> str:
+    """Nov 25 (owner: the Spread move text didn't fit its column): a short indicator -- 🟢 ▲ = the spread moved toward
+    the side the model favors (the line pick's side), 🔴 ▼ = away from it -- with the points moved. The team and the
+    numbers go in "Line move" (move_detail), further right."""
+    mv = r.get("spread_move") or ""
+    if not mv:
+        return ""
+    up = mv.startswith("📈")
+    pts = None
+    nums = re.findall(r"([+-]?\d+(?:\.\d+)?)\s*→\s*([+-]?\d+(?:\.\d+)?)", r.get("spread_move_why") or "")
+    if nums:
+        pts = abs(float(nums[0][1]) - float(nums[0][0]))
+    return ("🟢 ▲" if up else "🔴 ▼") + (f" {pts:g} pt{'s' if pts != 1 else ''}" if pts is not None else "")
+
+
+def move_detail(r: Dict) -> str:
+    return r.get("spread_move_why") or ""

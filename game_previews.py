@@ -299,8 +299,7 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
             mv = TB.spread_move(p, league)
         except Exception:                                       # noqa: BLE001
             mv = {}
-        move = " ".join(x for x in (mv.get("spread_move") or "", f"({mv['spread_move_why']})"
-                                    if mv.get("spread_move_why") else "") if x)
+        move = TB.move_cell(mv) if mv else ""                   # Nov 25 (owner): a short arrow, the detail further right
         _ag = agreement(p, league)
         out.append({"Tip (ET)": tip(p), "Game": f"{p.get('away')} @ {p.get('home')}",
                     BET: game_bet(league, playable, False, _ag),
@@ -312,6 +311,8 @@ def preview_rows(league: str, picks: List[Dict], recs: Optional[Dict], tip: Call
                     TOTAL: f"{p.get('model_total')} / {p.get('line_total') or '—'}",
                     "Form (30 days)": form_text(w, n) if b is not None else "—",
                     LAST: _last(league, p),                     # Nov 24 (owner): context, right of the form
+                    **({"Line move": mv.get("spread_move_why") or ""} if league in getattr(TB, "MOVE_GAME_LEAGUES", ())
+                       else {}),
                     **(extras(p) if extras else {}),
                     "_lean": _lean(p), "_playable": playable, "_move": mv.get("spread_move") or "",
                     "_form": form_of(w, n) if b is not None else NEW, "_i": len(out)})
