@@ -79,8 +79,9 @@ def test_nfl_game_lab_uses_the_shared_layout_once_games_are_saved_and_the_old_pa
     at.run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     import game_previews as GP
-    slate = [d.value for d in at.dataframe if GP.SIDE in d.value.columns][0]
-    assert [x.split("· ")[-1] for x in slate[GP.SIDE]] == ["Baltimore Ravens -3.5"] and list(slate["Gap (pts)"]) == [2.0]
+    # Nov 25: one games table (the board) -- the whole week for a weekly league
+    slate = [d.value for d in at.dataframe if "Line pick (model favors)" in d.value.columns][0]
+    assert list(slate["Game"]) == ["Los Angeles Chargers @ Baltimore Ravens"] and "Form (30 days)" in slate.columns
     m = {x.label: x.value for x in at.metric}
     assert m["Baltimore Ravens ML"] == "66.0%" and m["Projected spread"] == "Baltimore Ravens -5.5"
     assert "Decided by 3 or fewer" in m and "Decided by 14+ points" in m
