@@ -198,9 +198,24 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
                 res = [b - my - slope * (a - mx) for a, b in pairs]
                 se = (sum(e * e for e in res) / (len(pairs) - 2) / sxx) ** 0.5
             if slope is not None and se and abs(slope - 1) >= SLOPE_OFF and abs(slope - 1) / se >= 2.5:
+                # Nov 25 (owner asked what 1.46x meant for his close-gap bets): say whether the market shares it. The
+                # NCAAMB study that day: market 0.99x, and the close-gap picks were 119-78 over 28 days -- the warning
+                # was about blowout games the market already prices, not about the picks.
+                mk = [(-float(r["home_spread"]), float(r["final_home"]) - float(r["final_away"])) for r in recs or []
+                      if str(r.get("kickoff") or "")[:10] >= since and r.get("final_home") is not None
+                      and r.get("home_spread") is not None and r.get("model_margin") is not None]
+                msl = None
+                if len(mk) >= 60:
+                    ax = sum(a for a, _ in mk) / len(mk); ay = sum(b for _, b in mk) / len(mk)
+                    axx = sum((a - ax) ** 2 for a, _ in mk)
+                    msl = sum((a - ax) * (b - ay) for a, b in mk) / axx if axx else None
+                ctx = ("" if msl is None else
+                       f"; the market's spreads run {msl:.2f}x" + (" — right-sized, so lean on the market for margin "
+                       "size; picks built on the market's number (close-gap) aren't affected" if abs(msl - 1) < SLOPE_OFF
+                       else " — the market misses it too"))
                 out.append(_issue("model bias", "warn", f"{lg} game model's margins are too "
                                   f"{'extreme' if slope < 1 else 'timid'}: actual margins run {slope:.2f}x "
-                                  f"the model's (last {BIAS_DAYS} days, {len(pairs)} games; 1.00 = the right size)"))
+                                  f"the model's (last {BIAS_DAYS} days, {len(pairs)} games; 1.00 = the right size){ctx}"))
         if len(errs) >= BIAS_MIN_N:
             m = sum(errs) / len(errs)
             sd = (sum((e - m) ** 2 for e in errs) / (len(errs) - 1)) ** 0.5
@@ -241,7 +256,17 @@ def check_bias(today: str, load: Optional[Callable] = None, now: Optional[dateti
                 continue
             if k.tzinfo is None:
                 k = k.replace(tzinfo=timezone.utc)
-            if now < k <= now + timedelta(hours=36) and r.get("home_spread") is not None and r.get("model_margin") is not None:
+            if not now < k <= now + timedelta(hours=36):
+                continue
+            if lg == "NHL":
+                # Nov 25: hockey's spread is the ±1.5 puck line, so a 0.3-goal home edge "leans road" against it on
+                # almost every game -- the Nov 25 "11 of 13 road" warning. Judge the lean on the win chance instead.
+                if r.get("model_p") is not None and r.get("fair_home") is not None:
+                    e = float(r["model_p"]) - float(r["fair_home"])
+                    if abs(e) >= 0.005:
+                        upcoming.append(e > 0)
+                continue
+            if r.get("home_spread") is not None and r.get("model_margin") is not None:
                 e = float(r["model_margin"]) + float(r["home_spread"])
                 if e:
                     upcoming.append(e > 0)

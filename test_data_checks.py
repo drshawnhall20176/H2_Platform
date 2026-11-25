@@ -95,3 +95,31 @@ def test_a_short_home_streak_the_longer_window_doesnt_confirm_is_a_note():
     assert "likely a streak" in " ".join(i["detail"] for i in streak)
     real = DC.check_bias("2026-11-23", load=lambda lg: recs_for(-0.6) if lg == "NHL" else [], now=now)
     assert [i["level"] for i in real if "close games" in i["detail"]] == ["warn"]
+
+
+def test_margin_warning_says_whether_the_market_shares_it():
+    """Nov 25: 'margins are too timid, 1.46x' -- the market was right-sized, so the close-gap picks weren't affected."""
+    import data_checks as DC
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 22, 15, 0, tzinfo=timezone.utc)
+    recs = []
+    for i in range(70):
+        m = (i % 14) - 7.0
+        recs.append({"kickoff": f"2026-11-{15 + i % 7:02d}T23:00:00Z", "model_margin": m, "home_spread": -2 * m,
+                     "final_home": 70 + 2 * m + (1 if i % 2 else -1), "final_away": 70.0})
+    text = " ".join(i["detail"] for i in DC.check_bias("2026-11-22", load=lambda lg: recs if lg == "NBA" else [], now=now))
+    assert "margins are too timid" in text and "the market's spreads run 1.0" in text and "right-sized" in text
+
+
+def test_nhl_lean_is_judged_on_win_chance_not_the_puck_line():
+    """Nov 25: against the ±1.5 puck line every small home edge read as a road lean ('11 of 13')."""
+    import data_checks as DC
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 25, 15, 0, tzinfo=timezone.utc)
+    up = [{"kickoff": "2026-11-26T00:00:00Z", "model_margin": 0.3, "home_spread": -1.5,
+           "model_p": 0.55 + (0.02 if i % 2 else -0.02), "fair_home": 0.55} for i in range(14)]
+    text = " ".join(i["detail"] for i in DC.check_bias("2026-11-25", load=lambda lg: up if lg == "NHL" else [], now=now))
+    assert "NHL game model leans" not in text
+    road = [dict(r, model_p=0.45) for r in up]
+    text = " ".join(i["detail"] for i in DC.check_bias("2026-11-25", load=lambda lg: road if lg == "NHL" else [], now=now))
+    assert "NHL game model leans road on 14 of 14" in text
