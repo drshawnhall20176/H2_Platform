@@ -160,6 +160,9 @@ def test_get_schedule_empty_on_fetch_failure(monkeypatch):
     def raise_err(seasons):
         raise ConnectionError("simulated failure")
     monkeypatch.setattr(E.nfl, "load_schedules", raise_err)
+    import pandas as pd                                     # Nov 25: the CSV fallback fails too
+    monkeypatch.setattr(pd, "read_csv", lambda *a, **k: (_ for _ in ()).throw(OSError("no network")))
+    E._CSV_CACHE.clear()
     assert E.get_schedule(2026) == []
 
 
