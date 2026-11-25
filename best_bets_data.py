@@ -170,42 +170,31 @@ def render_book_selector(key_prefix: str = "book",
     if O.DEFAULT_BOOK not in books_to_show:
         books_to_show = [O.DEFAULT_BOOK] + books_to_show
 
-    book_labels = [O.book_label(k) for k in books_to_show]
-    default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
-    # Nov 25 (owner: the sportsbook selector should be site-wide): start at the viewer's book (my_books.py), and a
-    # change here changes it everywhere. A pick'em app chosen here stays this page's choice.
-    wkey = f"{key_prefix}_book_selector"
+    # Nov 25 (owner: "does the placement make sense, am I introducing redundancy?" -> one place): the book comes
+    # from the sidebar's 📖 My sportsbook (my_books.py). The page offers only the one real choice the sidebar can't
+    # make for it -- price at your sportsbook, or at your pick'em app when this slate has its lines.
     try:
         import my_books as MB
-        mine = MB.book()
-        if mine in books_to_show and st.session_state.get(f"_{wkey}_synced") != mine:
-            st.session_state[wkey] = O.book_label(mine)
-            st.session_state[f"_{wkey}_synced"] = mine
+        mine, app = MB.book(), MB.app()
     except Exception:                                           # noqa: BLE001
-        MB = None
-
-    def _changed():
-        try:
-            k = books_to_show[book_labels.index(st.session_state[wkey])]
-            if MB is not None and not O.is_pickem_book(k):
-                MB.set_book(k)
-                st.session_state[f"_{wkey}_synced"] = k
-        except Exception:                                       # noqa: BLE001
-            pass
-
-    if st.session_state.get(wkey) not in book_labels:
-        st.session_state[wkey] = book_labels[default_idx]
-    selected_label = st.selectbox(
-        "📖 Sportsbook",
-        book_labels,
-        key=wkey, on_change=_changed,
-        help=f"Lines and model probabilities use this book's line where it posts the player. "
-            f"{len(books_to_show)} book(s) active on tonight's slate. When it doesn't, NBA plays try "
-            "DraftKings, then FanDuel (the book that priced it is shown beside the price). DK Pick6 / PrizePicks "
-            "show the app's line with no odds — only 🎟️ parlay-tagged picks qualify, measured against the "
-            "entry's payout."
-    )
-    return books_to_show[book_labels.index(selected_label)]
+        MB, mine, app = None, O.DEFAULT_BOOK, None
+    book = mine if mine in books_to_show else (O.DEFAULT_BOOK if O.DEFAULT_BOOK in books_to_show else books_to_show[0])
+    wkey = f"{key_prefix}_book_selector"
+    if app and app in books_to_show and O.is_pickem_book(app):
+        opts = [book, app]
+        pick = st.segmented_control(
+            "📖 Priced at", opts, key=f"{wkey}_mode", default=book, format_func=O.book_label,
+            help="Your sportsbook and pick'em app come from the sidebar (📖 My sportsbook · 🎟️ My pick'em app). A "
+                 "pick'em app shows its line with no odds — only 🎟️ parlay-tagged picks qualify, measured against "
+                 "the entry's payout.") or book
+    else:
+        pick = book
+        st.caption(f"📖 Priced at **{O.book_label(book)}**" + ("" if book == mine else
+                   f" ({O.book_label(mine)} has no lines on this slate)")
+                   + " — change your sportsbook in the sidebar. When it doesn't post a player, plays try DraftKings, "
+                     "then FanDuel (the book is shown beside the price).")
+    st.session_state[wkey] = O.book_label(pick)                 # other pages (the Bet Log) read the label here
+    return pick
 
 
 def render_split_selector(key_prefix: str = "split") -> tuple:

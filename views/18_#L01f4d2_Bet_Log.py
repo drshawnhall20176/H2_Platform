@@ -171,7 +171,12 @@ with st.expander("➕ Log a bet", expanded=False):
             # Default to whichever book was last selected on Best Bets / Graded Picks.
             # Session state keys follow the pattern set by render_book_selector:
             # "best_bets_book_selector", "graded_picks_book_selector", etc.
-            _ss_book = (st.session_state.get("best_bets_book_selector")
+            try:                                                # Nov 25: the site-wide 📖 My sportsbook first
+                import my_books as _MBl
+                _mine_label = _MBl.book_label()
+            except Exception:                                   # noqa: BLE001
+                _mine_label = None
+            _ss_book = (_mine_label or st.session_state.get("best_bets_book_selector")
                         or st.session_state.get("graded_picks_book_selector")
                         or st.session_state.get("speculative_basket_book_selector")
                         or st.session_state.get("suggested_parlays_book_selector")
