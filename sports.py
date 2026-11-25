@@ -508,7 +508,7 @@ def require_live_engine(feature_name: str = "This page") -> bool:
     return True
 
 
-def render_sport_selector():
+def render_sport_selector(picker: bool = False):
     """Sidebar sport indicator -- shows the active sport as a compact read-only label.
     The real interactive selector lives on the Home page where it's always visible and
     unobstructed. This label keeps sidebar users oriented without taking up space or
@@ -526,7 +526,7 @@ def render_sport_selector():
 
     active = get(current)
     with st.sidebar:
-        if st.session_state.get("_office_mode_sport_picker"):
+        if picker or st.session_state.get("_office_mode_sport_picker"):
             # Nov 25 (owner: "there is no way to change to a different sport within the bet log without having to
             # exit out to the today screen"): inside the Owner Office the sidebar's sport is a real picker
             st.session_state["_office_sport"] = current
@@ -535,7 +535,7 @@ def render_sport_selector():
                 st.session_state["sport"] = st.session_state["_office_sport"]
             st.selectbox("Sport", keys, key="_office_sport", on_change=_pick,
                          format_func=lambda k: f"{get(k).icon} {get(k).label}" if get(k) else k,
-                         help="The Office pages (Bet Log, My Coach, Track Record ...) show this sport.")
+                         help="Every page in the menu shows this sport (Today's own bar sets it too).")
         else:
             st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
     return current

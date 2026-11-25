@@ -589,7 +589,9 @@ def run():
                 st.Page(str(here / "Owner_Office.py"), title="Owner Office", icon="🔐", url_path="owner_office"),
                 st.Page(str(here / "Maintenance.py"), title="Restart the site", icon="🛠️", url_path="maintenance")]
         sections = NL.arrange(sections)      # customer order; Today replaces Home
-        sports.render_sport_selector()
+        # Nov 25 (owner, the day it went live: "there is no way to return to a sports selector"): a real sport picker
+        # in the customer sidebar -- Today's bar was the only way to change sport
+        sports.render_sport_selector(picker=True)
         st.navigation(sections).run()
         return
     # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
