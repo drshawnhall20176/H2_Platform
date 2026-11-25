@@ -46,7 +46,7 @@ def test_spotlight_lists_only_games_with_a_tested_reason():
     rows = GP.preview_rows("NCAAMB", [_g(1, 1.1), moving, _g(3, 9.7), _g(4, -19.1)], RECS, lambda p: "",
                            tag=lambda p: {"use": PE.USE_SINGLE} if p["home"] == "H3" else {})
     assert [r["Game"] for r in GP.spotlight(rows)] == ["A3 @ H3", "A2 @ H2"]   # playable first, then moving our way
-    assert rows[1]["Spread move"].startswith("📈 our way") and rows[2]["Model has"].startswith("H3")
+    assert rows[1]["Spread move"].startswith("🟢 ▲") and rows[2]["Model has"].startswith("H3")
     assert GP.spotlight([]) == []
 
 

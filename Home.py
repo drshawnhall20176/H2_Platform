@@ -573,13 +573,13 @@ if True:
                                    by={"Line pick result": "pick", "Winner pick result": "winner",
                                        "Money pick result": "money"})
         import game_lines_table as _GLT0
+        import todays_best as _TBM
         _wdf = _pd.DataFrame([{"Sport": r["sport"], "Time": r["time"], "Game": r["game"], "Bet?": _GLT0.bet(r), **_GLT0.extras(r),
                                "Weather": _wx(r["sport"], r["game"]),
                                "Spread": r.get("spread_txt") or "",
                                "Total": r.get("total_txt") or "",
                                "Model": r.get("model_txt") or r.get("lean_detail") or "",
-                               "Spread move": " ".join(x for x in (r.get("spread_move") or "",
-                                                                    f"({r['spread_move_why']})" if r.get("spread_move_why") else "") if x),
+                               "Spread move": _TBM.move_cell(r), "Line move": _TBM.move_detail(r),
                                "✓ Pick": False,
                                "Pick": r.get("best") or "—",
                                "Use": _PR.lean_use(r),
@@ -610,7 +610,7 @@ if True:
         if not _past and not _wdf.empty:
             _wdf = _wdf.drop(columns=["Final", "Pick result", "Winner result", "Money result"])
         if not _wdf.empty and not _wdf["Spread move"].any():
-            _wdf = _wdf.drop(columns=["Spread move"])
+            _wdf = _wdf.drop(columns=["Spread move", "Line move"])
         if not _wdf.empty and "League" in _wdf:                 # Nov 24: League (first) names the sport
             _wdf = _wdf.drop(columns=["Sport"])
         if not _wdf.empty and not _wdf["Weather"].replace("", None).notna().any():
@@ -625,7 +625,7 @@ if True:
                   "Spread move", "Final", "Pick result", "Money result", "Winner result",
                   "✓ Pick", "Pick", "Use", "Chance", "Price", "Value",
                   "✓ Money", "Money pick", "Money score",
-                  "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Spread", "Total", "Model",
+                  "✓ Winner", "Likely winner", "Record (30d)", "Backtest cover", "Last meetings", "Line move", "Spread", "Total", "Model",
                   "Weather"]
         if not _wdf.empty:
             _wdf = _wdf[[c for c in _ORDER if c in _wdf.columns] + [c for c in _wdf.columns if c not in _ORDER]]

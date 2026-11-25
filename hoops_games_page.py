@@ -339,7 +339,7 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
     if top:
         st.markdown("**Worth a look first**")
         for r in top:
-            why = "a tested pick" if r.get("_playable") else f"the spread is moving its way {r.get('Spread move', '')}"
+            why = "a tested pick" if r.get("_playable") else f"the spread is moving its way ({r.get('Line move', '')})"
             st.markdown(f"- **{r['_lean']}** ({r['Game']}, {r['Tip (ET)']}): {why}; the model is "
                         f"{r['Gap (pts)']:.1f} points from the market.")
     if by_gap:
@@ -364,8 +364,8 @@ def _previews(league, upcoming, lean_recs, no_rule, day, cust, rules=None):
             "**Long backtest** — how often the model's side covered in the long-run test.",
             "**Use** — 🔒 Most probable = 60%+ with a tested edge · 🎟️ Parlay + Single = 60%+ · 🎯 Single only = 55-60%, "
             "or a tracked rule · ⚪ No edge = no tested edge for this league or gap size.",
-            "**Spread move** — 📈 our way = the market's line has moved toward what the model favors since it opened; "
-            "📉 against = away from it."]
+            "**Spread move** — 🟢 ▲ = the market's spread has moved toward the side the model favors (the line pick's "
+            "side) since it opened; 🔴 ▼ = away from it; with how many points. **Line move** shows the team and numbers."]
         st.markdown(GP.legend_md(extra, rules="" if cust else _rules_text(rules or {})))
     if cust:
         st.dataframe(df, hide_index=True, width="stretch")
