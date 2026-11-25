@@ -172,12 +172,33 @@ def render_book_selector(key_prefix: str = "book",
 
     book_labels = [O.book_label(k) for k in books_to_show]
     default_idx = books_to_show.index(O.DEFAULT_BOOK) if O.DEFAULT_BOOK in books_to_show else 0
+    # Nov 25 (owner: the sportsbook selector should be site-wide): start at the viewer's book (my_books.py), and a
+    # change here changes it everywhere. A pick'em app chosen here stays this page's choice.
+    wkey = f"{key_prefix}_book_selector"
+    try:
+        import my_books as MB
+        mine = MB.book()
+        if mine in books_to_show and st.session_state.get(f"_{wkey}_synced") != mine:
+            st.session_state[wkey] = O.book_label(mine)
+            st.session_state[f"_{wkey}_synced"] = mine
+    except Exception:                                           # noqa: BLE001
+        MB = None
 
+    def _changed():
+        try:
+            k = books_to_show[book_labels.index(st.session_state[wkey])]
+            if MB is not None and not O.is_pickem_book(k):
+                MB.set_book(k)
+                st.session_state[f"_{wkey}_synced"] = k
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    if st.session_state.get(wkey) not in book_labels:
+        st.session_state[wkey] = book_labels[default_idx]
     selected_label = st.selectbox(
         "📖 Sportsbook",
         book_labels,
-        index=default_idx,
-        key=f"{key_prefix}_book_selector",
+        key=wkey, on_change=_changed,
         help=f"Lines and model probabilities use this book's line where it posts the player. "
             f"{len(books_to_show)} book(s) active on tonight's slate. When it doesn't, NBA plays try "
             "DraftKings, then FanDuel (the book that priced it is shown beside the price). DK Pick6 / PrizePicks "

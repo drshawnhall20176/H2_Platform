@@ -59,8 +59,14 @@ date_str = target.strftime("%Y-%m-%d")
 # ── Book selector ─────────────────────────────────────────────────────────
 book_keys = list(US_BOOKS.keys())
 book_labels = [US_BOOKS[k] for k in book_keys]
+try:                                                            # Nov 25: the site-wide "My sportsbook"
+    import my_books as _MB
+    _mine = _MB.book()
+except Exception:                                               # noqa: BLE001
+    _mine = "draftkings"
 preferred_label = st.selectbox("📖 Sportsbook", book_labels,
-                               index=book_keys.index("draftkings") if "draftkings" in book_keys else 0)
+                               index=book_keys.index(_mine) if _mine in book_keys else
+                               (book_keys.index("draftkings") if "draftkings" in book_keys else 0))
 preferred_book = book_keys[book_labels.index(preferred_label)]
 
 # ── Load fight card ───────────────────────────────────────────────────────

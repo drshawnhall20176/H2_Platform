@@ -106,7 +106,11 @@ C.season_notice(_active.key, date_str)   # NBA preseason / early-season data war
 
 label_to_key = {label: key for key, label in O.ALL_BOOKS.items()}
 with c_book:
-    default_label = O.ALL_BOOKS.get(O.DEFAULT_BOOK, "DraftKings")
+    try:                                                        # Nov 25: the site-wide "My sportsbook"
+        import my_books as _MB
+        default_label = O.ALL_BOOKS.get(_MB.book(), O.ALL_BOOKS.get(O.DEFAULT_BOOK, "DraftKings"))
+    except Exception:                                           # noqa: BLE001
+        default_label = O.ALL_BOOKS.get(O.DEFAULT_BOOK, "DraftKings")
     labels = list(label_to_key)
     book_label = st.selectbox(
         "📖 Book", labels, index=labels.index(default_label) if default_label in labels else 0,

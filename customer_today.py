@@ -129,7 +129,7 @@ def top_cards(rows: List[Dict], records_for: Optional[Callable] = None, n: int =
             continue
         seen.add(who)
         out.append({"sport": r.get("sport"), "pick": r.get("pick"), "chance": r.get("chance"),
-                    "price": _price(r.get("price")) + (f" · {r['book']}" if r.get("book") and r.get("price") is not None else ""),
+                    "price": _price(r.get("price")) + (f" · {_book_name(r['book'])}" if r.get("book") and r.get("price") is not None else ""),
                     "game": r.get("game") or "", "time": r.get("time") or "", "record": r.get("record") or "",
                     "lock": bool(r.get("lock")), "money": bool(r.get("money")), "move": r.get("move") or ""})
         if len(out) >= n:
@@ -168,3 +168,12 @@ def odds_key():
     except Exception:                                           # noqa: BLE001
         k = None
     return k or os.environ.get("ODDS_API_KEY")
+
+
+def _book_name(k) -> str:
+    """Nov 25: "draftkings" -> "DraftKings" on the cards."""
+    try:
+        import odds_api as O
+        return O.book_label(k)
+    except Exception:                                           # noqa: BLE001
+        return str(k)
