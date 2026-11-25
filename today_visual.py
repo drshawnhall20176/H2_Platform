@@ -156,6 +156,9 @@ def _game_dialog(w: Dict, props: List[Dict]):
     if w.get("sport") == "SOCCER":                              # Nov 25: soccer's own card (three results)
         GC.render_soccer(GC.build_soccer(w, props))
         return
+    if w.get("sport") == "UFC":                                 # Nov 25: a fight card (market only)
+        GC.render_fight(GC.build_fight(w))
+        return
     if w.get("sport") == "TENNIS":                              # Nov 25: a match card, not a basketball box
         GC.render_tennis(GC.build_tennis(w))
         return
@@ -194,6 +197,27 @@ def soccer_games(day: str, loader: Optional[Callable] = None) -> List[Dict]:
     except Exception:                                           # noqa: BLE001
         rows = []
     return sorted(rows, key=kickoff_key)
+
+
+@_st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+def _ufc_card_cached(day: str) -> List[Dict]:
+    import customer_today as CT
+    import ufc_engine as UE
+    k = CT.odds_key()
+    return UE.main_card_only(UE.get_card(k, day)) if k else []
+
+
+def ufc_bouts(day: str, loader: Optional[Callable] = None) -> List[Dict]:
+    """Nov 25 (owner: "how do we handle UFC that one seems like an outlier"): the day's main-card bouts (one odds
+    request, cached 10 minutes), each as a game-strip row."""
+    try:
+        card = loader(day) if loader is not None else _ufc_card_cached(day)
+    except Exception:                                           # noqa: BLE001
+        card = []
+    out = []
+    for b in card or []:
+        out.append(dict(b, sport="UFC", game=f"{b.get('a')} vs {b.get('b')}", _rec={"kickoff": b.get("commence")}))
+    return sorted(out, key=kickoff_key)
 
 
 def soccer_flags(day: str) -> List[Dict]:
@@ -237,7 +261,27 @@ def _win_txt(w: Dict) -> str:
         return "—"
 
 
+def fight_tile_html(w: Dict) -> str:
+    import game_card as GC
+    g = GC.build_fight(w)
+    a, b = g["fighters"]
+
+    def px(x):
+        v = GC._num(x.get("price"))
+        return "—" if v is None else f"{v:+.0f}"
+    fav = max(g["fighters"], key=lambda x: x.get("market") or 0)
+    return (f'<div style="min-height:108px;"><div style="color:{HB.INK_SOFT};font-size:11.5px;letter-spacing:.05em;">'
+            f'{g.get("time") or ""}</div><div style="color:{HB.INK};font-weight:800;font-size:14px;margin-top:3px;'
+            f'line-height:1.25;">{g["game"]}</div><div style="color:{HB.GOLD};font-size:12.5px;margin-top:4px;">'
+            f'{(a["name"] or "").split()[-1]} {px(a)} · {(b["name"] or "").split()[-1]} {px(b)}</div>'
+            f'<div style="color:{HB.INK_SOFT};font-size:12px;">Market: {fav["name"]} '
+            + ("—" if fav.get("market") is None else f'{fav["market"]:.0%}') + '</div>'
+            f'<div style="margin-top:6px;">{HB.bet_chip("Info only")}</div></div>')
+
+
 def game_tile_html(w: Dict) -> str:
+    if w.get("sport") == "UFC":
+        return fight_tile_html(w)
     import game_lines_table as GLT
     try:
         bet = GLT.bet(w)
@@ -274,7 +318,8 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
             cards = sport_cards(s.key, rows, winners, day, records_for, line_rows)
         except Exception:                                       # noqa: BLE001 -- one sport never blanks the page
             cards = []
-        games = soccer_games(day) if s.key == "SOCCER" else games_for(winners, s.key)
+        games = (soccer_games(day) if s.key == "SOCCER" else ufc_bouts(day) if s.key == "UFC"
+                 else games_for(winners, s.key))
         if cards or games:
             sections.append((s, cards, games))
     if not sections:
@@ -287,7 +332,7 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
         pass
     for s, cards, games in sections:
         with st.container(border=True):
-            st.markdown(f"#### {s.icon} {s.key}  \n<span style='opacity:.7'>{len(games)} game"
+            st.markdown(f"#### {s.icon} {s.key}  \n<span style='opacity:.7'>{len(games)} {'fight' if s.key == 'UFC' else 'game'}"
                         f"{'s' if len(games) != 1 else ''} today</span>", unsafe_allow_html=True)
             if cards:
                 for i, (col, c) in enumerate(zip(st.columns(CARDS_PER_SPORT), cards)):
@@ -312,10 +357,12 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                                 else:                           # Nov 25: never a dead end -- the pick's own facts
                                     _basic_dialog(dict(c, sport=s.key))
             else:
-                st.caption("No pick clears the bar here yet. Open a game below for the model's read.")
+                st.caption("H2 has no UFC model yet — tonight's card at market odds. Open a fight for the odds."
+                           if s.key == "UFC" else "No pick clears the bar here yet. Open a game below for the model's "
+                           "read.")
             if games:
                 st.markdown(f"<div style='color:{HB.INK_SOFT};font-size:12.5px;margin:6px 0 2px;letter-spacing:.05em;'>"
-                            "GAMES · EARLIEST FIRST</div>", unsafe_allow_html=True)
+                            f"{'FIGHTS' if s.key == 'UFC' else 'GAMES'} · EARLIEST FIRST</div>", unsafe_allow_html=True)
                 shown = games[:STRIP_MAX]
                 for start in range(0, len(shown), 4):
                     cols = st.columns(4)

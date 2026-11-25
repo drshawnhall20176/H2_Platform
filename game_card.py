@@ -329,3 +329,55 @@ def render_tennis(g: Dict) -> None:
         st.caption("No sportsbook has posted this match yet — the model's read only. Prices fill in when books post.")
     st.caption("Blue: the model's chance each player wins. Gold: the market's chance (no-vig) and the best price. "
                "Tennis is tracking only (beta): its record is not proven yet.")
+
+
+
+# --------------------------------------------------------------------------- UFC (Nov 25)
+def build_fight(b: Dict) -> Dict:
+    """One bout (ufc_engine.card_from_odds) -> the fight card: market only -- H2 has no UFC model."""
+    pa = _num(b.get("p_a"))
+    try:
+        import ufc_engine as UE
+        lines = UE.book_lines(b)
+    except Exception:                                           # noqa: BLE001
+        lines = {}
+    from datetime import datetime as _dt
+    import pytz
+    try:
+        t = _dt.fromisoformat(str(b.get("commence")).replace("Z", "+00:00")).astimezone(pytz.timezone("US/Eastern"))
+        when = t.strftime("%-I:%M %p")
+    except (TypeError, ValueError):
+        when = ""
+    return {"league": "UFC", "label": "UFC", "time": when, "game": f"{b.get('a')} vs {b.get('b')}",
+            "fighters": [{"name": b.get("a"), "market": pa, "price": b.get("best_a")},
+                         {"name": b.get("b"), "market": None if pa is None else 1 - pa, "price": b.get("best_b")}],
+            "books": b.get("books") or 0, "total": lines.get("total") or "", "spread": lines.get("spread") or ""}
+
+
+def fight_html(g: Dict) -> str:
+    a, b = g["fighters"]
+    head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
+            f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
+            f'<div style="color:{HB.INK_SOFT};font-size:12.5px;letter-spacing:.06em;">UFC · {g.get("time") or ""}</div>'
+            f'<div style="color:{HB.INK};font-size:22px;font-weight:800;line-height:1.2;margin-top:3px;">'
+            f'{a["name"] or ""} <span style="color:{HB.GRAY};">vs</span> {b["name"] or ""}</div>'
+            f'<div style="margin-top:9px;">{HB.bet_chip("Info only")}</div></div>')
+    bars = ""
+    for x in g["fighters"]:
+        k, pr = x.get("market"), _num(x.get("price"))
+        bars += meter(x["name"] or "—", k, "", "", HB.GOLD, "—" if k is None else f"market {k:.0%}")
+        bars += (f'<div style="font-size:11.5px;color:{HB.GOLD};margin:-8px 0 10px;">'
+                 + (f"best price {pr:+.0f}" if pr is not None else "no price yet") + '</div>')
+    return head + bars
+
+
+def render_fight(g: Dict) -> None:
+    import streamlit as st
+    st.markdown(fight_html(g), unsafe_allow_html=True)
+    bits = [f"Priced by {g['books']} book{'s' if g['books'] != 1 else ''}"]
+    if g.get("total"):
+        bits.append(f"Rounds {g['total']}")
+    st.markdown(" · ".join(bits))
+    st.caption("H2 has no UFC model yet: these are the market's no-vig chances (the median across books) and the best "
+               "price, so a pick is grounded in the odds — not a pick from us. The full card and logging are on the "
+               "Fight card page.")
