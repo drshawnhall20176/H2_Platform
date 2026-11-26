@@ -1243,6 +1243,16 @@ def play_is_money(sport: str, p: Dict) -> bool:
     return ok
 
 
+def play_in_money_band(sport: str, p: Dict) -> bool:
+    """Nov 26 (owner: keep testing every rule, paused ones too): the 💰 rule on a board play whether or not 💰 is on
+    for the sport (money_sports) or switched off for its market (shutoff) -- the paper side of the test."""
+    ceil = maybe(p.get("_ceiling"))
+    pm = maybe(p.get("MarketProb")) if p.get("MarketProb") is not None else ((1.0 / ceil) if ceil else None)
+    return p.get("RealPrice") is not None and in_money_band(
+        sport, p.get("EV"), p.get("PricedAt"), bool(p.get("Pickem")), p.get("Market"), chance=p.get("ModelProb"),
+        mev=market_edge(pm, p.get("RealPrice")))
+
+
 def snapshot_is_money(sport: str, s: Dict) -> bool:
     """is_money for a saved prop read (model_store snapshot / graded row): its side's chance, the books' no-vig chance
     from p_market (P over), and the price it carried."""

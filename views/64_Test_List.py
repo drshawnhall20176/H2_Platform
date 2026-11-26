@@ -27,11 +27,12 @@ C.page_header("🎯", "Test list",
 _now = datetime.now(ET)
 c1, c2, c3 = st.columns([1, 2, 1])
 day = c1.date_input("Date", _now.date(), key="tl_day", format="MM/DD/YYYY").strftime("%Y-%m-%d")
-kinds = c2.pills("Show", list(FL.KINDS), selection_mode="multi", default=list(FL.DEFAULT_KINDS), key="tl_kinds",
-                 help="🃏 Bet: a tested tag whose earned chance clears its price's break-even · 💰 Money pick: the live "
-                      "money test · 🧪 Close gap: college basketball games where the model and the market are within "
-                      "2 points — paper-track only until the rule earns a tag · 🧪 Other tracking: the prop rules being "
-                      "tested forward (off by default).")
+kinds = c2.pills("Show", list(FL.KINDS), selection_mode="multi", default=list(FL.DEFAULT_KINDS), key="tl_kinds2",
+                 help="Bets: 💰 Money pick (the 💰 rule where it's on) · 🃏 Bet (a tested tag whose earned chance clears "
+                      "its price). Paper (tracked, never sized): 🧪 Close gap (college basketball, model and market within "
+                      "2 points) · 🧪 Prop rule (the NFL / college football Unders) · ⏸ Paused / off rule (the 💰 rule "
+                      "in sports or markets where it's off, the paused college basketball 💰 game lines, switched-off "
+                      "🔒 markets) · 📉 Tag held back (a playable tag whose earned chance doesn't clear its price).")
 if c3.button("🔄 Refresh now", help="Re-read the boards (they also refresh on their own every 5 minutes)."):
     st.cache_data.clear()
 
@@ -41,6 +42,10 @@ def _boards(d):
     import customer_today as CT
     past = d < datetime.now(ET).strftime("%Y-%m-%d")
     props = (TB.collect(d, list(CT.PROPS_SPORTS), past=past).get("rows") or [])
+    reads = []                                                  # Nov 26: every prop read, for the paper rules
+    for sp in CT.PROPS_SPORTS:
+        reads += [dict(r, sport=r.get("sport") or sp) for r in TB.load_reads(sp, d)]
+    props = FL.merge_props(reads, props)
     try:
         winners = TB.winner_rows(d, past=past)
     except Exception:                                           # noqa: BLE001
@@ -137,10 +142,13 @@ for r in rows:
 
 n = FL.counts(rows)
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("💰 Money picks", n[FL.MONEY])
-m2.metric("🃏 Bets", n[FL.BET])
-m3.metric("🧪 Close gap (paper)", n[FL.GAP])
+m1.metric("💰 Money picks · 🃏 Bets", f"{n[FL.MONEY]} · {n[FL.BET]}", help="The real bets: tested and live.")
+m2.metric("🧪 Close gap · prop rules", f"{n[FL.GAP]} · {n[FL.TRACK]}", help="Rules being tested forward: paper.")
+m3.metric("⏸ Paused / off · 📉 Held back", f"{n[FL.PAUSED]} · {n[FL.HELD]}", help="Paper: what those rules would bet.")
 m4.metric("Boards read at", read_at)
+st.caption("**Bet** rows are the tested picks. **Paper** rows are every rule still being tested, paused or held back — "
+           "track them (or log them at a small test stake) so each one builds the record that decides whether it goes "
+           "live. Rules that need the hourly board rebuild show up after the next one (:49 past the hour).")
 
 try:                                                            # the close-gap rule's forward record, right here
     import candidate_rules as CR
