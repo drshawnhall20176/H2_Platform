@@ -81,7 +81,8 @@ def _has_games(key, day):
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=32)
 def _games_map(keys, day):
     """Nov 26 (owner: speed): every sport's schedule checked at once, not one after another (~7.5 s cold)."""
-    return CT.has_games_many(keys, day)
+    many = getattr(CT, "has_games_many", None)                  # an older loaded module (before a restart)
+    return many(keys, day) if many else {k: CT.has_games(k, day) for k in keys}
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=4)
