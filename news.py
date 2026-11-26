@@ -187,18 +187,127 @@ def markdown(news: List[Dict], notes: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def render_game(sport: str, away: str, home: str) -> None:
-    """The game card's 📰 News: both teams' injury notes, then their headlines from the last three days."""
+# --------------------------------------------------------------------------- this game's own story (Nov 26)
+# Owner: "I would expect the news to be tagged to the specific game." ESPN writes one story per game -- the preview
+# before it starts, the recap once it's final -- on the game's summary (.../summary?event=<id>, key "article").
+SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard"
+SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/{path}/summary"
+_board: Dict[str, tuple] = {}
+_story: Dict[str, tuple] = {}
+
+
+def _get_url(url: str, params: Dict) -> Dict:
+    import requests
+    return requests.get(url, params=params, timeout=8).json() or {}
+
+
+def _names(team: Dict) -> set:
+    return {_norm(team.get(k)) for k in ("displayName", "shortDisplayName", "location", "abbreviation", "name")
+            if team.get(k)}
+
+
+def _same_team(ours: str, theirs: Dict) -> bool:
+    o = _norm(ours)
+    if not o:
+        return False
+    names = _names(theirs)
+    full = _norm(theirs.get("displayName"))
+    return o in names or (full and (full.startswith(o + " ") or o.startswith(full + " ")))
+
+
+def find_event_id(board: Dict, away: str, home: str) -> Optional[str]:
+    """The ESPN event id of away @ home on a scoreboard (either order: neutral sites list them either way)."""
+    for e in (board or {}).get("events") or []:
+        teams = [c.get("team") or {} for c in ((e.get("competitions") or [{}])[0].get("competitors") or [])]
+        if len(teams) != 2:
+            continue
+        a, b = teams
+        if (_same_team(away, a) and _same_team(home, b)) or (_same_team(away, b) and _same_team(home, a)):
+            return str(e.get("id"))
+    return None
+
+
+def parse_story(summary: Dict) -> Optional[Dict]:
+    a = (summary or {}).get("article") or {}
+    head = str(a.get("headline") or "").strip()
+    if not head:
+        return None
+    try:
+        pub = datetime.fromisoformat(str(a.get("published") or "").replace("Z", "+00:00"))
+    except ValueError:
+        pub = None
+    summ = str(a.get("description") or "").strip().lstrip("—").strip()
+    if len(summ) > SUMMARY_MAX:
+        summ = summ[:SUMMARY_MAX].rsplit(" ", 1)[0] + "…"
+    kind = str(a.get("type") or "").strip() or "Story"
+    return {"headline": head, "summary": summ, "published": pub, "kind": kind,
+            "url": (((a.get("links") or {}).get("web") or {}).get("href")) or ""}
+
+
+def game_story(sport: str, away: str, home: str, day: Optional[str] = None, get=None,
+               now: Optional[float] = None) -> Optional[Dict]:
+    """ESPN's preview (or recap) of this one game; None when there isn't one or ESPN can't be reached."""
+    path = _paths().get(sport)
+    if not path or not away or not home:
+        return None
+    get = get or _get_url
+    now = time.time() if now is None else now
+    params = {"dates": str(day).replace("-", "")[:8]} if day else {}
+    if sport == "NCAAMB":
+        params["groups"] = "50"                                 # every D-I game, not just the featured ones
+    if sport == "NCAAF":
+        params["groups"] = "80"
+    bkey = f"{sport}:{params.get('dates', '')}"
+    try:
+        hit = _board.get(bkey)
+        if hit and now - hit[0] < TTL:
+            board = hit[1]
+        else:
+            board = get(SCOREBOARD.format(path=path), dict(params, limit=500))
+            _board[bkey] = (now, board)
+        eid = find_event_id(board, away, home)
+        if not eid:
+            return None
+        hit = _story.get(eid)
+        if hit and now - hit[0] < TTL:
+            return hit[1]
+        story = parse_story(get(SUMMARY.format(path=path), {"event": eid}))
+        _story[eid] = (now, story)
+        return story
+    except Exception:                                           # noqa: BLE001 -- news is a bonus
+        return None
+
+
+def story_markdown(s: Dict) -> str:
+    icon = "📝" if s["kind"].lower() == "recap" else "🔎"
+    link = f" · [ESPN {s['kind'].lower()}]({s['url']})" if s.get("url") else ""
+    when = f" · {_ago(s['published'])}" if s.get("published") else ""
+    return (f"{icon} **This game — {s['headline']}**{when}{link}"
+            + (f"  \n{s['summary']}" if s.get("summary") else ""))
+
+
+def render_game(sport: str, away: str, home: str, day: Optional[str] = None) -> None:
+    """The game card's 📰 News: ESPN's own preview / recap of this game, then both teams' injury notes and their
+    headlines from the last three days."""
     import streamlit as st
+    story = game_story(sport, away, home, day)
     news = for_game(items(sport), away, home, sport=sport)
+    if story:
+        news = [it for it in news if _norm(it["headline"]) != _norm(story["headline"])]
     notes = injury_notes(sport, (away, home))[:6]
     st.markdown("**📰 News**")
-    if not news and not notes:
-        st.caption("No team news or injury notes in the last three days.")
+    if not story and not news and not notes:
+        st.caption("No game preview, team news or injury notes in the last three days.")
         return
-    st.markdown(markdown(news, notes))
-    st.caption("ESPN's injury notes and headlines that name these teams, newest first. Context, not a pick — open the "
-               "link for the full story.")
+    if story:
+        st.markdown(story_markdown(story))
+    if news or notes:
+        if story:
+            st.markdown("*Team news and injury notes*")
+        st.markdown(markdown(news, notes))
+    st.caption("ESPN's write-up of this game (the preview before it starts, the recap once it's final), then the "
+               "injury notes and headlines that name these teams, newest first. Context, not a pick — open the link "
+               "for the full story.")
 
 
 def render_player(sport: str, name: str, team: Optional[str] = None) -> None:

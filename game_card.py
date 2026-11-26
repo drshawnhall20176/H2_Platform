@@ -473,7 +473,7 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         pass
     try:                                                        # Nov 26 (owner): the day's news on the game card
         import news as NW
-        NW.render_game(w.get("sport") or lg, g.get("away") or "", g.get("home") or "")
+        NW.render_game(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day)
     except Exception:                                           # noqa: BLE001 -- news never breaks the card
         pass
     if (w.get("sport") or lg) == "NHL":

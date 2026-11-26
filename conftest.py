@@ -71,6 +71,9 @@ def _no_live_injury_report(monkeypatch):
     try:                                                        # Nov 26: nor for the cards' news feed
         import news as NW
         monkeypatch.setattr(NW, "_get_json", lambda sport, limit=100: {})
+        monkeypatch.setattr(NW, "_get_url", lambda url, params: {})
         NW._cache.clear()
+        NW._board.clear()
+        NW._story.clear()
     except Exception:                                           # noqa: BLE001
         pass

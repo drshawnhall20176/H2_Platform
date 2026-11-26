@@ -75,3 +75,58 @@ def test_league_wide_roundups_are_left_out_unless_the_headline_names_the_team():
                        _art("How Jeffery Simmons changed the Bears' defense", 4, teams=["Chicago Bears"])]}
     got = [it["headline"] for it in NW.for_game(NW.parse(js), "Chicago Bears", "Detroit Lions", sport="NFL", now=NOW)]
     assert got == ["Can Caleb Williams steer Bears past Lions?", "How Jeffery Simmons changed the Bears' defense"]
+
+
+def _board(*games):
+    ev = []
+    for i, (a, h) in enumerate(games):
+        ev.append({"id": str(100 + i), "competitions": [{"competitors": [
+            {"homeAway": "home", "team": h}, {"homeAway": "away", "team": a}]}]})
+    return {"events": ev}
+
+
+BEARS = {"displayName": "Chicago Bears", "shortDisplayName": "Bears", "location": "Chicago", "abbreviation": "CHI",
+         "name": "Bears"}
+LIONS = {"displayName": "Detroit Lions", "shortDisplayName": "Lions", "location": "Detroit", "abbreviation": "DET",
+         "name": "Lions"}
+DUKE = {"displayName": "Duke Blue Devils", "shortDisplayName": "Duke", "location": "Duke", "abbreviation": "DUKE",
+        "name": "Blue Devils"}
+UCONN = {"displayName": "UConn Huskies", "shortDisplayName": "UConn", "location": "UConn", "abbreviation": "CONN",
+         "name": "Huskies"}
+
+
+def test_find_event_id_matches_full_names_short_names_and_either_order():
+    b = _board((BEARS, LIONS), (DUKE, UCONN))
+    assert NW.find_event_id(b, "Chicago Bears", "Detroit Lions") == "100"
+    assert NW.find_event_id(b, "UConn", "Duke") == "101"              # neutral site, listed the other way
+    assert NW.find_event_id(b, "Chicago Bears", "Green Bay Packers") is None
+
+
+def test_game_story_is_the_games_own_preview_and_is_cached():
+    calls = []
+
+    def get(url, params):
+        calls.append(url)
+        if url.endswith("/scoreboard"):
+            assert params["dates"] == "20261126"
+            return _board((BEARS, LIONS))
+        assert params == {"event": "100"}
+        return {"article": {"headline": "Lions and Bears kick off the Thanksgiving tripleheader", "type": "Preview",
+                            "description": "— NFL fans used to dread it.", "published": "2026-11-25T22:57:32Z",
+                            "links": {"web": {"href": "http://www.espn.com/nfl/preview?gameId=100"}}}}
+    s = NW.game_story("NFL", "Chicago Bears", "Detroit Lions", "2026-11-26", get=get, now=1000.0)
+    assert s["kind"] == "Preview" and s["summary"] == "NFL fans used to dread it." and "preview" in s["url"]
+    assert NW.game_story("NFL", "Chicago Bears", "Detroit Lions", "2026-11-26", get=get, now=1100.0) == s
+    assert len(calls) == 2
+    md = NW.story_markdown(s)
+    assert md.startswith("🔎 **This game — Lions and Bears") and "[ESPN preview]" in md
+
+
+def test_game_story_missing_or_unreachable_is_none():
+    assert NW.game_story("NFL", "Chicago Bears", "Detroit Lions", "2026-11-26",
+                         get=lambda u, p: {"events": []}) is None
+
+    def boom(u, p):
+        raise OSError("down")
+    assert NW.game_story("NHL", "Toronto Maple Leafs", "Boston Bruins", "2026-11-26", get=boom) is None
+    assert NW.game_story("EPL", "Chelsea", "Nottingham Forest", "2026-11-26", get=boom) is None   # no ESPN path
