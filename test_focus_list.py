@@ -74,5 +74,5 @@ def test_blanks_are_blank_and_assumed_prices_are_marked():
     import math
     rows = FL.build([], WINNERS[:1])
     t = FL.table(rows)[0]
-    assert math.isnan(t["Chance"]) and math.isnan(t["Edge"])
+    assert t["Chance"] == "—" and t["Edge"] == "—"
     assert t["Price"] == "-110*"
