@@ -88,11 +88,29 @@ def _recent(it: Dict, hours: float, now: datetime) -> bool:
 COLLEGE = ("NCAAMB", "NCAAF")                                   # nicknames repeat across schools: tags only
 
 
+BROAD = 4                                                       # tagged with more teams = a league-wide roundup
+
+
+def _named_in_headline(it: Dict, team: str) -> bool:
+    head = " " + _norm(it["headline"]) + " "
+    words = _norm(team).split(" ")
+    if not words or not words[0]:
+        return False
+    if f" {' '.join(words)} " in head:
+        return True
+    nick = words[-1]
+    return len(nick) > 3 and f" {nick} " in head
+
+
 def _team_hit(it: Dict, team: str, sport: str = "") -> bool:
     import injury_check as IC
     want = IC._team_keys(team)
     if not want:
         return False
+    if len(it["teams"]) > BROAD:                                # odds for every game, draft order, power rankings
+        if sport in COLLEGE:
+            return f" {_norm(team)} " in " " + _norm(it["headline"]) + " "
+        return _named_in_headline(it, team)
     for t in it["teams"]:
         if want & IC._team_keys(t) or _norm(t) == _norm(team):
             return True
