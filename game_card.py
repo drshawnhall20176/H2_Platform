@@ -213,6 +213,24 @@ def build_soccer(r: Dict, flags: Optional[List[Dict]] = None) -> Dict:
             "flags": [f for f in flags or [] if str(f.get("game")) == str(r.get("game"))]}
 
 
+def soccer_goals(xg: Optional[Dict]) -> Optional[Dict]:
+    """Nov 26 (PropSeason pass 3): from the model's expected goals (independent Poisson per side): the expected total,
+    the chance of over 2.5 / 1.5 / 3.5 goals and of both teams scoring."""
+    import math
+    try:
+        h, a = float(xg["home"]), float(xg["away"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    if h < 0 or a < 0:
+        return None
+    lam = h + a
+
+    def at_least(k):
+        return 1 - sum(math.exp(-lam) * lam ** i / math.factorial(i) for i in range(k))
+    return {"total": lam, "o15": at_least(2), "o25": at_least(3), "o35": at_least(4),
+            "btts": (1 - math.exp(-h)) * (1 - math.exp(-a))}
+
+
 def soccer_html(g: Dict) -> str:
     status = f'Final: {g["final"]}' if g.get("final") else g.get("time") or ""
     xg = g.get("xg")
@@ -221,6 +239,12 @@ def soccer_html(g: Dict) -> str:
              f'EXPECTED GOALS</div><div style="color:{HB.INK};font-size:16px;">{g.get("away")} '
              f'<b style="color:{HB.BLUE};font-size:20px;">{xg["away"]:.1f}</b> · {g.get("home")} '
              f'<b style="color:{HB.BLUE};font-size:20px;">{xg["home"]:.1f}</b></div>')
+    gl = soccer_goals(xg) if xg else None
+    if gl:
+        score += (f'<div style="color:{HB.INK_SOFT};font-size:12.5px;margin-top:4px;">{gl["total"]:.1f} goals expected'
+                  f' · Over 2.5: <b style="color:{HB.INK};">{gl["o25"]:.0%}</b> · Over 1.5: {gl["o15"]:.0%}'
+                  f' · Over 3.5: {gl["o35"]:.0%} · Both teams score: <b style="color:{HB.INK};">{gl["btts"]:.0%}</b>'
+                  f'</div>')
     head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
             f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
             f'<div style="color:{HB.INK_SOFT};font-size:12.5px;letter-spacing:.06em;">{g["label"]} · {status}</div>'
@@ -250,7 +274,8 @@ def render_soccer(g: Dict) -> None:
         st.markdown(f"📈 **{f.get('pick')}**" + (f" at {pr:+.0f}" if pr is not None else "")
                     + (f" ({f.get('book')})" if f.get("book") else "")
                     + " — a US price above the sharp line by 2% or more. 🧪 Tracking, not tested.")
-    st.caption("Blue bars: the goals model's chance of each result. Gold: the market's chance ("
+    st.caption("Goals line: the same model's chance of each total and of both sides scoring. "
+               "Blue bars: the goals model's chance of each result. Gold: the market's chance ("
                + ("Pinnacle's no-vig line" if g.get("sharp") else "the US books' average") + "). "
                "Soccer is tracking only: the backtest lost to the closing line, so these are reads, not bets.")
 
@@ -545,6 +570,12 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         st.caption("Offense / defense: each team's rank in the ratings model the projection uses (adjusted for "
                    "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
                    "Context only — the projection already counts all of it.")
+    if lg in ("NFL", "NCAAF"):
+        try:                                                    # Nov 26: weather on football cards
+            import football_weather as FW
+            FW.render_card(lg, day, g.get("away") or "", g.get("home") or "")
+        except Exception:                                       # noqa: BLE001
+            pass
     try:
         _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day, key)
     except Exception:                                           # noqa: BLE001
@@ -563,12 +594,55 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         _simulation(w)
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 26: defense vs position, in the card
+        _soft_spots(w.get("sport") or lg, day, g.get("away") or "", g.get("home") or "")
+    except Exception:                                           # noqa: BLE001
+        pass
     if (w.get("sport") or lg) == "NBA":
         try:
             _rotations(g.get("away") or "", g.get("home") or "", day, key=key)
         except Exception:                                       # noqa: BLE001
             pass
     _log_boxes(g, w, day, key)
+
+
+def _soft_league(sport: str, day: str):
+    import soft_spots as SS
+    return SS.cached_league(sport, day)
+
+
+def soft_spot_lines(sport: str, data: dict, away: str, home: str) -> dict:
+    """{defense label: [lines]} for the card -- each defense's softest spots tonight and who lines up there."""
+    import soft_spots as SS
+    x = SS.match_game(sport, data.get("games") or [], away, home)
+    if not x or not data.get("summary"):
+        return {}
+    names = dict(data.get("names") or {})
+    names.update({x["home_id"]: home, x["away_id"]: away})
+    spots = SS.spots_any(sport, data["summary"], SS.tonight_pairs([x]), SS.depth_fn(sport, data), names)
+    return SS.card_lines(spots)
+
+
+def _soft_spots(sport: str, day: str, away: str, home: str) -> None:
+    """Nov 26 (owner, PropSeason pass 3): the defenses' softest spots in this game and who lines up there."""
+    import soft_spots as SS
+    if sport not in SS.SPORTS:
+        return
+    import streamlit as st
+    got = soft_spot_lines(sport, _soft_league(sport, day), away, home)
+    if not got:
+        return
+    st.markdown("**Soft spots in this game**")
+    for col, team in zip(st.columns(2), (home, away)):
+        with col:
+            st.markdown(f'<div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;">'
+                        f'{str(team).upper()} DEFENSE ALLOWS THE</div>', unsafe_allow_html=True)
+            lines = got.get(team) or []
+            st.markdown("\n".join(f"- {ln}" for ln in lines) if lines else "_No soft spot — average or better at "
+                        "every position._")
+    st.caption("Ranked against every defense this season (1st = gives up the most); the letter is that rank as a "
+               "grade (A+ = among the softest). A tendency, not a pick — the projections already count it. "
+               "Full list: Soft Spots.")
 
 
 def _future(day) -> bool:

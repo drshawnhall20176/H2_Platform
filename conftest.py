@@ -77,3 +77,18 @@ def _no_live_injury_report(monkeypatch):
         NW._story.clear()
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 26: nor for the football cards' weather
+        import football_weather as FW
+        monkeypatch.setattr(FW, "_card_slate", lambda sport, day: [])
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:                                                        # Nov 26: nor for the cards' league defense tables
+        import soft_spots as SS
+        monkeypatch.setattr(SS, "load_league", lambda sport, day: {"games": []})
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:                                                        # Nov 26: nor for NFL play-by-play (zones)
+        import nfl_zones as NZ
+        monkeypatch.setattr(NZ, "_load", lambda season: [])
+    except Exception:                                           # noqa: BLE001
+        pass

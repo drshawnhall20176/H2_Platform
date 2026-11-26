@@ -143,10 +143,18 @@ def at_book(quotes: Dict, line: Optional[float], book: str, side: str) -> Dict:
     return {"price": price, "line": pt, "same": False, "better": better_line(side, line, pt)}
 
 
+def off_books(quotes: Dict, line: Optional[float]) -> Dict[str, float]:
+    """Nov 26: books whose price at the pick's line looks off against the other books (prop_moves.looks_off)."""
+    import prop_moves as PMV
+    return PMV.looks_off((quotes.get(line) or {}).get("books", {}))
+
+
 def best_at_line(quotes: Dict, line: Optional[float], books: Iterable[str]) -> Optional[Tuple[str, float]]:
-    """The best price any of `books` posts at the pick's exact line."""
+    """The best price any of `books` posts at the pick's exact line -- leaving out a quote that looks off (Nov 26: a
+    stale or mis-posted price is not a better deal)."""
     q = (quotes.get(line) or {}).get("books", {})
-    have = [(b, p) for b, p in q.items() if b in set(books) and _f(p) is not None]
+    off = off_books(quotes, line)
+    have = [(b, p) for b, p in q.items() if b in set(books) and _f(p) is not None and b not in off]
     if not have:
         return None
     return max(have, key=lambda bp: (100 / (-bp[1]) if bp[1] < 0 else bp[1] / 100))
@@ -167,6 +175,8 @@ def judge(row: Dict, quotes: Dict, book: str, books: Iterable[str]) -> Dict:
     else:
         v, edge = verdict(row.get("chance"), q["price"], paper)
     best = best_at_line(quotes, line, books)
+    if q["same"] and book in off_books(quotes, line) and not str(v).startswith(NONE):
+        v = f"⚠ Looks off — {v}"                                 # this book's price doesn't match the others
     return {"book_price": q["price"], "book_line": q["line"], "book_need": implied(q["price"]) if q["same"] else None,
             "book_edge": edge, "book_verdict": v, "best_book": best[0] if best else None,
             "best_price": best[1] if best else None}
