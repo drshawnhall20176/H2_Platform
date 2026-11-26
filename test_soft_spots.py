@@ -124,12 +124,15 @@ def test_page_other_sport(monkeypatch):
         "summary": _football(), "allowed": {"T5": [{"offense": "CHI", "order": 11, "who": {"QB": ["Caleb Williams"]}}]},
         "names": {"T0": "Detroit Lions", "CHI": "Chicago Bears"}, "pgames": []})
     monkeypatch.setattr(TB, "load_all_props", lambda sp, d: [])
+    monkeypatch.setattr(TB, "load_reads", lambda sp, d: [{"player": "Caleb Williams", "market": "Pass Yards",
+                                                          "pick": "Caleb Williams Pass Yards Over 230.5", "chance": 0.56}])
     at = AppTest.from_file("views/62_Soft_Spots.py", default_timeout=60)
     at.session_state["ss_sport"] = "NFL"
     at.run()
     assert not at.exception
     md = " ".join(m.value for m in at.markdown)
     assert "Detroit Lions allows the most passing TDs to QBs" in md and "Caleb Williams" in md
+    assert "Pass Yards Over 230.5" in md and "earned 56%" in md
 
 
 def test_out_players_leave_and_the_next_man_moves_up():

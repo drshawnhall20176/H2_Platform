@@ -68,11 +68,12 @@ def pick_for(name: str, rows: Sequence[Dict], stat: Optional[str] = None) -> Opt
     """The player's H2 pick on tonight's board: the one in this stat when there is one, else his strongest."""
     import re
     key = re.sub(r"[^a-z]", "", str(name or "").lower())
-    mine = [r for r in rows or [] if r.get("kind") == "Prop"
+    mine = [r for r in rows or [] if r.get("kind") in (None, "Prop")
             and re.sub(r"[^a-z]", "", str(r.get("player") or "").lower()) == key]
     if not mine:
         return None
-    word = {"pts": "point", "reb": "rebound", "ast": "assist", "fg3m": "three"}.get(stat or "", "")
+    word = {"pts": "point", "reb": "rebound", "ast": "assist", "fg3m": "three", "pass_yds": "pass", "pass_td": "pass",
+            "rush_yds": "rush", "rush_td": "rush", "rec": "reception", "rec_yds": "receiving"}.get(stat or "", "")
     same = [r for r in mine if word and word in str(r.get("market") or "").lower()]
     return max(same or mine, key=lambda r: r.get("chance") or 0)
 

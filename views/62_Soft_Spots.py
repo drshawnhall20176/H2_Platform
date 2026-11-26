@@ -59,8 +59,8 @@ def _other_sport(sport: str, day: str) -> None:
                f"they allow at a position, and {SS.SOFT_PCT:.0%}+ above the average defense. Most-allowed first.")
     if not rows:
         st.info("No soft spots for this filter.")
-    try:
-        picks = TB.load_all_props(sport, day)
+    try:                                                        # every player the model read, not just saved plays
+        picks = TB.load_reads(sport, day) or TB.load_all_props(sport, day)
     except Exception:                                           # noqa: BLE001
         picks = []
     for s in rows[:40]:
@@ -68,8 +68,9 @@ def _other_sport(sport: str, day: str) -> None:
             st.markdown(f'<span style="color:{HB.BLUE};font-weight:800;font-size:12px;letter-spacing:.06em;">'
                         f'{s["grade"]} · {s["slot"]} · {stats_[s["stat"]].upper()}</span>'
                         f'<div style="color:{HB.INK};font-weight:700;margin-top:2px;">{SS.headline_any(s)}</div>'
-                        f'<div style="color:{HB.INK_SOFT};font-size:12px;">{s["offense"]} · {s["game"]}'
-                        f'{" · " + s["time"] if s.get("time") else ""}</div>', unsafe_allow_html=True)
+                        f'<div style="color:{HB.INK_SOFT};font-size:12px;">{s["offense"]} offense · {s["game"]}'
+                        f'{" · " + s["time"] if s.get("time") and s["time"] != s["game"] else ""}</div>',
+                        unsafe_allow_html=True)
             names_ = [p.get("name") for p in s["players"] if p.get("name")]
             if not names_:
                 st.caption("No regular at this position for them lately.")
