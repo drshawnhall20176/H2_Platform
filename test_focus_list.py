@@ -68,3 +68,11 @@ def test_page_renders_the_list(monkeypatch):
     at = AppTest.from_file("views/64_Test_List.py", default_timeout=60).run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     assert any("Knicks -4.5" in str(df.value.to_dict()) for df in at.dataframe)
+
+
+def test_blanks_are_blank_and_assumed_prices_are_marked():
+    import math
+    rows = FL.build([], WINNERS[:1])
+    t = FL.table(rows)[0]
+    assert math.isnan(t["Chance"]) and math.isnan(t["Edge"])
+    assert t["Price"] == "-110*"
