@@ -51,6 +51,11 @@ with st.container(horizontal=True, vertical_alignment="center"):     # Nov 25: o
     st.button("▶", key="today_next", on_click=_shift, args=(1,), disabled=_sel >= _hi, help="Next day")
     st.button("Today", key="today_back", on_click=_to_today, disabled=_sel == _today)
 
+try:                                                            # Nov 26 (owner: "where do I find the morning report?"); before the slow board load
+    import brief_panel as _BPT
+    _BPT.render()
+except Exception:                                               # noqa: BLE001
+    pass
 live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]
 props_sports = [s.key for s in live if s.key in CT.PROPS_SPORTS]
 
@@ -196,11 +201,6 @@ try:
     _commercial = _NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(_NL.PREVIEW_KEY))
 except Exception:                                               # noqa: BLE001
     _commercial = False
-try:                                                            # Nov 26 (owner: "where do I find the morning report?")
-    import brief_panel as _BPT
-    _BPT.render()
-except Exception:                                               # noqa: BLE001
-    pass
 _view = "Table"
 if _commercial:
     try:                                                        # Nov 25 (PropSeason scrub item 7): first-visit tour
