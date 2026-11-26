@@ -173,3 +173,30 @@ def table(rows: Iterable[Dict]) -> List[Dict]:
                     "Chance": pct(r["chance"]), "Needs": pct(r["need"]), "Edge": pct(r["edge"], True),
                     "Line move": r["move"] or "", "Why it's here": r["what"], "Game": r["game"]})
     return out
+
+
+# --------------------------------------------------------------------------- logging (Nov 26)
+def log_item(r: Dict, book: str) -> Optional[Dict]:
+    """One Test-list row as a todays_best.log_selection item, at the chosen book's current price when it posts the
+    pick's line (else the boards' price and book). Each carries what kind of call it was, so the Bet Log and My Coach
+    file it right: 💰 -> "money-pick", 🧪 close gap -> "close-gap-test", 🃏 -> a tested pick at its earned chance."""
+    use_book = r.get("book_price") is not None and r.get("book_line") == r.get("line")
+    price = r.get("book_price") if use_book else r.get("price")
+    if price is None:
+        return None
+    src = r.get("src") or {}
+    if r.get("open_as") == "game":
+        rec = src.get("_rec")
+        if not rec or not r.get("market") or not r.get("side"):
+            return None
+        return {"_rec": rec, "bet_market": r["market"], "bet_side": r["side"], "bet_line": r.get("line"),
+                "price": float(price), "best_chance": r.get("chance"), "best_tested": r["kind"] in (BET, MONEY),
+                "tracking": r["kind"] == GAP, "note": "💰" if r["kind"] == MONEY else "",
+                "book": book if use_book else (r.get("book") or "draftkings")}
+    if not src.get("player") or r.get("line") is None:
+        return None
+    return {"sport": r["sport"], "game": src.get("game"), "player": src.get("player"), "pid": src.get("pid"),
+            "market": src.get("market"), "side": src.get("side") or r.get("side"), "line": r.get("line"),
+            "price": float(price), "chance": r.get("chance"),
+            "book": book if use_book else (src.get("book") or "draftkings"),
+            "notes_extra": "money-pick" if r["kind"] == MONEY else ("tracked-rule" if r["kind"] == TRACK else None)}

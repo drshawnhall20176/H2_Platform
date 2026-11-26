@@ -799,6 +799,8 @@ def bet_rows(items: Sequence[Dict], stake: float, real: bool, tag: str, date_str
                     "money-pick" if str(it.get("note") or "").startswith("💰") else
                     None if it.get("best_tested") else "lean")
             f["notes"] = ",".join(x for x in (tag, kind, f.get("notes")) if x)
+            if it.get("book") and not f.get("book"):            # Nov 26: the book it was placed at (Test list)
+                f["book"] = it["book"]
             out.append(f)
             continue
         if it.get("sport") == "UFC" and it.get("market") in ("Moneyline", "Fight Duration") and it.get("side"):
@@ -833,7 +835,7 @@ def parlay_odds(prices: Sequence[float]) -> Optional[int]:
 
 
 def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: float, parlay_price: Optional[int],
-                  real: bool, tag: str, date_str: str, ticket: str = "") -> Dict:
+                  real: bool, tag: str, date_str: str, ticket: str = "", book: str = "draftkings") -> Dict:
     """Write picked items to the Bet Log: mode "Singles", "Parlay" or "Both". Skips singles already logged today
     (same player, market, side, line). Returns {"singles": [ids], "ticket": header id or None, "skipped": n}."""
     import betlog as B
@@ -856,7 +858,7 @@ def log_selection(items: Sequence[Dict], mode: str, stake: float, parlay_stake: 
         sports = {r["sport"] for r in rows}
         name = ticket or f"{'/'.join(sorted(sports))} {len(rows)}-leg {date_str}"
         res = B.log_parlay_ticket(name, legs, int(parlay_price), float(parlay_stake), date_str,
-                                  sport=next(iter(sports)) if len(sports) == 1 else "MULTI", book="draftkings",
+                                  sport=next(iter(sports)) if len(sports) == 1 else "MULTI", book=book,
                                   notes=tag or None)
         done["ticket"] = res.get("header_id")
     return done

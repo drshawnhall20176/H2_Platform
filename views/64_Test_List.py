@@ -187,3 +187,36 @@ st.caption("**Chance** is the earned chance (how picks like it have actually don
            "to break even; a price with * is the standard −110, shown where the boards saved no quote for that side. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
            "track them on paper. Prices are the best the boards saw at their last read; check your book before you "
            "bet. Started games drop off the list.")
+
+# ---------- Nov 26 (owner: "Do I have log capability from the site?"): log straight from the list ----------
+with st.expander("📝 Log bets from this list", expanded=False):
+    _labels = [f"{r['time']} · {r['kind']} · {r['pick']}" for r in rows]
+    _pick = st.multiselect("Picks to log", list(range(len(rows))), format_func=lambda i: _labels[i], key="tl_log_pick",
+                           placeholder="Choose the picks you placed")
+    l1, l2, l3, l4 = st.columns(4)
+    _mode = l1.radio("As", ["Singles", "Parlay", "Both"], key="tl_log_mode")
+    _stake = l2.number_input("Stake per single ($)", min_value=0.5, value=2.70, step=0.5, key="tl_log_stake")
+    _items = [it for it in (FL.log_item(rows[i], book) for i in _pick) if it]
+    _auto = TB.parlay_odds([it["price"] for it in _items]) if len(_items) >= 2 else None
+    _pstake = l3.number_input("Parlay stake ($)", min_value=0.5, value=2.70, step=0.5, key="tl_log_pstake")
+    _pprice = l4.number_input("Parlay price (your slip's)", value=int(_auto or 100), step=5, key=f"tl_log_pprice_{_auto}",
+                              help="Starts at the legs' prices multiplied together; a same-game parlay usually "
+                                   "pays less -- type the price on your slip.")
+    st.caption(f"Singles log at **{_bl}**'s current price when it posts the pick's line (else the boards' price and "
+               "book) -- check it against your slip, and fix any difference in the Bet Log. Each bet is tagged by "
+               "type (💰 money pick, 🧪 close-gap test, 🃏 tested pick), so the Bet Log and My Coach grade it as "
+               "the model's call. The nightly review settles them.")
+    if _pick and len(_items) < len(_pick):
+        st.warning(f"{len(_pick) - len(_items)} of the chosen picks have no price or line to log; log those in the "
+                   "Bet Log by hand.")
+    if st.button("Log them", type="primary", disabled=not _items, key="tl_log_go"):
+        try:
+            _res = TB.log_selection(_items, _mode, float(_stake), float(_pstake), int(_pprice), True, "test-list", day,
+                                    book=book)
+            st.success(f"Logged {len(_res.get('singles') or [])} single(s)"
+                       + (" and the parlay" if _res.get("ticket") else "")
+                       + (f"; {_res['skipped']} already in the Bet Log were skipped." if _res.get("skipped") else "."))
+        except Exception as exc:                                # noqa: BLE001
+            st.error(f"Couldn't log them ({type(exc).__name__}: {str(exc)[:160]}). Nothing partial was hidden -- "
+                     "check the Bet Log.")
+
