@@ -88,7 +88,8 @@ def close_gap(p: Dict) -> Optional[Dict]:
         price = IP.spread_price_for(p, side)
     except Exception:                                           # noqa: BLE001
         price = None
-    return {"pick": f"{p.get(side)} {line:+g}", "price": price if price is not None else -110, "gap": abs(d)}
+    return {"pick": f"{p.get(side)} {line:+g}", "price": price if price is not None else -110, "gap": abs(d),
+            "assumed": price is None}
 
 
 def game_rows(winners: Iterable[Dict]) -> List[Dict]:
@@ -109,9 +110,10 @@ def game_rows(winners: Iterable[Dict]) -> List[Dict]:
         if sp == "NCAAMB":
             cg = close_gap(w.get("_full") or {})
             if cg:
-                out.append(_row(GAP, sp, w, cg["pick"], cg["price"], None,
-                                what=f"Model and market {cg['gap']:.1f} pts apart — paper-track", move=move,
-                                open_as="game"))
+                row = _row(GAP, sp, w, cg["pick"], cg["price"], None,
+                           what=f"Model and market {cg['gap']:.1f} pts apart — paper-track", move=move, open_as="game")
+                row["assumed"] = cg["assumed"]
+                out.append(row)
     return out
 
 
@@ -143,12 +145,17 @@ def counts(rows: Iterable[Dict]) -> Dict[str, int]:
     return out
 
 
+def _num(v) -> float:
+    return float("nan") if v is None else float(v)              # a blank cell, not the word "None"
+
+
 def table(rows: Iterable[Dict]) -> List[Dict]:
-    """Display rows."""
+    """Display rows. A price marked * is the standard -110, used when the boards saved no quote for that side."""
     out = []
     for r in rows:
+        price = "—" if r["price"] is None else f"{r['price']:+.0f}" + ("*" if r.get("assumed") else "")
         out.append({"Time": r["time"], "Sport": r["sport"], "Type": r["kind"], "Pick": r["pick"],
-                    "Price": "—" if r["price"] is None else f"{r['price']:+.0f}",
-                    "Chance": r["chance"], "Needs": r["need"], "Edge": r["edge"],
+                    "Price": price,
+                    "Chance": _num(r["chance"]), "Needs": _num(r["need"]), "Edge": _num(r["edge"]),
                     "Line move": r["move"] or "", "Why it's here": r["what"], "Game": r["game"]})
     return out

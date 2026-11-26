@@ -101,6 +101,6 @@ CL.table(pd.DataFrame(FL.table(rows)), key=f"tl_table_{day}", items=rows, open_f
                         "Needs": st.column_config.NumberColumn(format="percent", help="Break-even for the price"),
                         "Edge": st.column_config.NumberColumn(format="percent", help="Chance minus break-even")})
 st.caption("**Chance** is the earned chance (how picks like it have actually done). **Needs** is what the price needs "
-           "to break even. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
+           "to break even; a price with * is the standard −110, shown where the boards saved no quote for that side. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
            "track them on paper. Prices are the best the boards saw at their last read; check your book before you "
            "bet. Started games drop off the list.")
