@@ -253,9 +253,10 @@ def game_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     import model_store as MS
     leagues = list(leagues) if leagues is not None else list(GAME_LEAGUES) + [k for k in H.LEAGUES if k not in GAME_LEAGUES]
     out = []
+    _all = MS.game_picks_by_sport(leagues, ungraded=not past)    # Nov 26: one query for every league
     for lg in leagues:
         try:
-            recs = MS.load_game_picks(lg, ungraded=not past)
+            recs = MS.picks_of(_all, lg)
         except Exception as exc:                                # noqa: BLE001 -- one league failing never empties the list
             LOAD_ERRORS.append(f"{lg}: {type(exc).__name__}: {str(exc)[:120]}")     # Nov 7: said, not swallowed
             print(f"[todays_best] {lg} game picks failed to load ({type(exc).__name__}: {exc})")
@@ -563,9 +564,10 @@ def winner_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     import model_store as MS
     leagues = list(leagues) if leagues is not None else list(WINNER_LEAGUES) + [k for k in H.LEAGUES if k not in WINNER_LEAGUES]
     out = []
+    _all = MS.game_picks_by_sport(leagues, ungraded=not past)    # Nov 26: one query for every league
     for lg in leagues:
         try:
-            recs = MS.load_game_picks(lg, ungraded=not past)
+            recs = MS.picks_of(_all, lg)
         except Exception:                                       # noqa: BLE001
             continue
         for p in recs:
@@ -666,9 +668,10 @@ def soccer_rows(date_str: str, leagues=None, past: bool = False) -> List[Dict]:
     if leagues is None:
         leagues = SP.slate_leagues() or list(D.LEAGUES)
     out = []
+    _all = MS.game_picks_by_sport(leagues, ungraded=not past)    # Nov 26: one query for every league
     for lg in leagues:
         try:
-            recs = SP.dedupe(MS.load_game_picks(lg, ungraded=not past))
+            recs = SP.dedupe(MS.picks_of(_all, lg))
         except Exception:                                       # noqa: BLE001
             continue
         for p in recs:
@@ -713,9 +716,10 @@ def soccer_flags(date_str: str, leagues=None) -> List[Dict]:
     if leagues is None:
         leagues = SP.slate_leagues() or list(D.LEAGUES)
     out = []
+    _all = MS.game_picks_by_sport(leagues, ungraded=True)        # Nov 26: one query for every league
     for lg in leagues:
         try:
-            recs = SP.dedupe(MS.load_game_picks(lg, ungraded=True))
+            recs = SP.dedupe(MS.picks_of(_all, lg))
         except Exception:                                       # noqa: BLE001
             continue
         for p in recs:
@@ -750,9 +754,10 @@ def winner_record(leagues=None) -> Dict[str, Dict]:
     leagues = list(leagues) if leagues is not None else list(WINNER_LEAGUES) + [k for k in H.LEAGUES if k not in WINNER_LEAGUES]
     acc: Dict[str, Dict] = {}
     bands = ((0.5, 0.6), (0.6, 0.7), (0.7, 0.8), (0.8, 1.01))
+    _all = MS.game_picks_by_sport(leagues)                       # Nov 26: one query for every league
     for lg in leagues:
         try:
-            recs = MS.load_game_picks(lg)
+            recs = MS.picks_of(_all, lg)
         except Exception:                                       # noqa: BLE001
             continue
         sport = lg if lg in WINNER_LEAGUES else "INTL"
