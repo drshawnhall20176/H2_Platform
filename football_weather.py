@@ -281,3 +281,43 @@ def for_game(wx_slate: list, home: str, away: str, home_name: Optional[str] = No
         if (hs & g["home"]) and (as_ & g["away"]):
             return g
     return None
+
+
+# --------------------------------------------------------------------------- the game card's weather line (Nov 26)
+def _card_slate(sport: str, day: str) -> list:
+    return slate(sport, day)
+
+
+CARD_MARKETS = ("Pass Yards", "Receiving Yards", "Receptions", "Rush Yards")
+
+
+def impact_text(wx: Optional[Dict], sport: str = "NFL") -> str:
+    """What the weather does to the props, in one sentence -- '' when it moves nothing (dome, calm, mild, unknown)."""
+    if not wx or wx.get("indoor"):
+        return ""
+    bits = []
+    for m in CARD_MARKETS:
+        x = multiplier(m, wx)
+        if abs(x - 1.0) >= 0.004:
+            bits.append(f"{m.lower()} {x - 1:+.0%}")
+    if not bits:
+        return ""
+    tail = " (measured on NFL games)" if sport != "NFL" else ""
+    return "Weather effect on props: " + ", ".join(bits) + f"{tail} — already in the projections."
+
+
+def render_card(sport: str, day: str, away: str, home: str) -> None:
+    """The game card's weather line: sky, temperature, wind, rain chance, and what it does to the props."""
+    if sport not in PATHS:
+        return
+    import streamlit as st
+    try:
+        wx = for_game(_card_slate(sport, str(day)[:10]), home, away)
+    except Exception:                                           # noqa: BLE001 -- weather never breaks a card
+        return
+    if not wx:
+        return
+    st.markdown(f"**Weather at kickoff:** {label(wx)}")
+    eff = impact_text(wx, sport)
+    if eff:
+        st.caption(eff)

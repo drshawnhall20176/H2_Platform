@@ -19,11 +19,74 @@ import soft_spots as SS
 import todays_best as TB
 
 C.base_css()
-C.page_header("🎯", "Soft Spots · NBA",
+C.page_header("🎯", "Soft Spots",
               "Tonight's defenses that give up the most to a position, and who lines up there. Context, not a call: "
               "each player shows his H2 pick (if any) with its earned chance and Bet? verdict.")
 eastern = pytz.timezone("US/Eastern")
 day = st.date_input("Date", datetime.now(eastern).date(), key="ss_day", format="MM/DD/YYYY").strftime("%Y-%m-%d")
+# Nov 26 (owner, "build all 7"): every sport with a league-wide defense table -- NFL, college football, NBA, college
+# hoops. NHL isn't here: our hockey sample is only the two teams' last 10 games, so there's no league ranking to make.
+try:
+    import sports as _sports
+    _act = _sports.active().key
+except Exception:                                               # noqa: BLE001
+    _act = "NBA"
+sport = st.pills("Sport", list(SS.SPORTS), default=_act if _act in SS.SPORTS else "NBA", key="ss_sport") or "NBA"
+
+
+def _other_sport(sport: str, day: str) -> None:
+    @st.cache_data(ttl=1800, show_spinner="Reading the league's defenses…", max_entries=8)
+    def load(sp, d):
+        return SS.load_league(sp, d)
+    try:
+        data = load(sport, day)
+    except Exception as exc:                                    # noqa: BLE001
+        st.warning(f"The league's defensive numbers couldn't be read just now ({type(exc).__name__}). "
+                   "Try again shortly.")
+        return
+    if not data.get("games") or not data.get("summary"):
+        st.info(f"No {sport} games for this date (football reads the week the date falls in).")
+        return
+    stats_ = SS.stats_for(sport)
+    slots_ = SS.slots_for(sport)
+    c1, c2 = st.columns(2)
+    stat = c1.pills("Stat", ["all"] + list(stats_), default="all", key=f"ss_stat_{sport}",
+                    format_func=lambda k: "All" if k == "all" else stats_[k].title()) or "all"
+    slot = c2.pills("Position", ["all"] + list(slots_), default="all", key=f"ss_slot_{sport}",
+                    format_func=lambda k: "All" if k == "all" else k) or "all"
+    rows = SS.spots_any(sport, data["summary"], SS.tonight_pairs(data["games"]), SS.depth_fn(sport, data),
+                        data.get("names") or {}, stats=None if stat == "all" else (stat,),
+                        slots=None if slot == "all" else (slot,))
+    st.caption(f"{len(rows)} soft spot{'s' if len(rows) != 1 else ''} — defenses in the league's top sixth for what "
+               f"they allow at a position, and {SS.SOFT_PCT:.0%}+ above the average defense. Most-allowed first.")
+    if not rows:
+        st.info("No soft spots for this filter.")
+    try:
+        picks = TB.load_all_props(sport, day)
+    except Exception:                                           # noqa: BLE001
+        picks = []
+    for s in rows[:40]:
+        with st.container(border=True):
+            st.markdown(f'<span style="color:{HB.BLUE};font-weight:800;font-size:12px;letter-spacing:.06em;">'
+                        f'{s["grade"]} · {s["slot"]} · {stats_[s["stat"]].upper()}</span>'
+                        f'<div style="color:{HB.INK};font-weight:700;margin-top:2px;">{SS.headline_any(s)}</div>'
+                        f'<div style="color:{HB.INK_SOFT};font-size:12px;">{s["offense"]} · {s["game"]}'
+                        f'{" · " + s["time"] if s.get("time") else ""}</div>', unsafe_allow_html=True)
+            names_ = [p.get("name") for p in s["players"] if p.get("name")]
+            if not names_:
+                st.caption("No regular at this position for them lately.")
+            for nm in names_:
+                pk = SS.pick_for(nm, picks)
+                st.markdown(f"**{nm}** · " + (f"H2 pick: {pk.get('pick')}"
+                                               + ("" if pk.get("chance") is None else f" · earned {float(pk['chance']):.0%}")
+                                               if pk else "no H2 pick on him"))
+    st.caption("A soft spot is a tendency, not a pick: the model already prices each defense into its projections. "
+               "The letter is the rank as a grade (A+ = among the softest).")
+
+
+if sport != "NBA":
+    _other_sport(sport, day)
+    st.stop()
 
 
 @st.cache_data(ttl=900, show_spinner="Reading the league's defenses…", max_entries=4)

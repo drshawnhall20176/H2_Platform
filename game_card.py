@@ -545,6 +545,12 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         st.caption("Offense / defense: each team's rank in the ratings model the projection uses (adjusted for "
                    "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
                    "Context only — the projection already counts all of it.")
+    if lg in ("NFL", "NCAAF"):
+        try:                                                    # Nov 26: weather on football cards
+            import football_weather as FW
+            FW.render_card(lg, day, g.get("away") or "", g.get("home") or "")
+        except Exception:                                       # noqa: BLE001
+            pass
     try:
         _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day, key)
     except Exception:                                           # noqa: BLE001
@@ -563,12 +569,60 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         _simulation(w)
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 26: defense vs position, in the card
+        _soft_spots(w.get("sport") or lg, day, g.get("away") or "", g.get("home") or "")
+    except Exception:                                           # noqa: BLE001
+        pass
     if (w.get("sport") or lg) == "NBA":
         try:
             _rotations(g.get("away") or "", g.get("home") or "", day, key=key)
         except Exception:                                       # noqa: BLE001
             pass
     _log_boxes(g, w, day, key)
+
+
+def _soft_league(sport: str, day: str):
+    import streamlit as st
+
+    @st.cache_data(ttl=1800, show_spinner="Reading the league's defenses…", max_entries=8)
+    def load(sp, d):
+        import soft_spots as SS
+        return SS.load_league(sp, d)
+    return load(sport, str(day)[:10])
+
+
+def soft_spot_lines(sport: str, data: dict, away: str, home: str) -> dict:
+    """{defense label: [lines]} for the card -- each defense's softest spots tonight and who lines up there."""
+    import soft_spots as SS
+    x = SS.match_game(sport, data.get("games") or [], away, home)
+    if not x or not data.get("summary"):
+        return {}
+    names = dict(data.get("names") or {})
+    names.update({x["home_id"]: home, x["away_id"]: away})
+    spots = SS.spots_any(sport, data["summary"], SS.tonight_pairs([x]), SS.depth_fn(sport, data), names)
+    return SS.card_lines(spots)
+
+
+def _soft_spots(sport: str, day: str, away: str, home: str) -> None:
+    """Nov 26 (owner, PropSeason pass 3): the defenses' softest spots in this game and who lines up there."""
+    import soft_spots as SS
+    if sport not in SS.SPORTS:
+        return
+    import streamlit as st
+    got = soft_spot_lines(sport, _soft_league(sport, day), away, home)
+    if not got:
+        return
+    st.markdown("**Soft spots in this game**")
+    for col, team in zip(st.columns(2), (home, away)):
+        with col:
+            st.markdown(f'<div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.05em;">'
+                        f'{str(team).upper()} DEFENSE ALLOWS THE</div>', unsafe_allow_html=True)
+            lines = got.get(team) or []
+            st.markdown("\n".join(f"- {ln}" for ln in lines) if lines else "_No soft spot — average or better at "
+                        "every position._")
+    st.caption("Ranked against every defense this season (1st = gives up the most); the letter is that rank as a "
+               "grade (A+ = among the softest). A tendency, not a pick — the projections already count it. "
+               "Full list: Soft Spots.")
 
 
 def _future(day) -> bool:

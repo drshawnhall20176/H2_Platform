@@ -372,7 +372,7 @@ def run():
         "54": ("NBA", "NCAAMB", "NHL", "WNBA", "INTL", "TENNIS", "NFL", "NCAAF", "SOCCER"),   # Live Games: in-game reads (Nov 12)
         "53": ("NBA", "NFL", "NHL", "NCAAF"),             # Long Shots: tail + price tests cover these (Nov 14)   # Game Script: each sport's own study (Nov 7)
         "41": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL", "UFC"),                    # Postgame Review -- kickoff snapshots graded vs box scores
-        "62": ("NBA",),                                  # Soft Spots (Nov 25): NBA league ranks only
+        "62": ("NBA", "NFL", "NCAAF", "NCAAMB"),          # Soft Spots: league ranks (NBA Nov 25; the rest Nov 26)
         "63": ("NBA", "NFL", "NHL", "NCAAF"),             # Alt Lines (Nov 25): the long-shot scan's archived alternates
         "38": ("NFL", "NCAAF", "NBA", "NCAAMB", "NHL"),  # Position Matchups -- depth chart vs the opposing
                                                           # defense by position + team head-to-head.
