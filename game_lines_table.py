@@ -377,8 +377,22 @@ def render(rows: Sequence[Dict], key: str, date_str: str, past: bool, show_sport
 
 @st.cache_data(ttl=300, show_spinner=False, max_entries=16)
 def _rows(league: str, day: str, past: bool) -> List[Dict]:
+    """One day's game rows, cached 5 minutes (Nov 26, owner: speed -- the NFL page read the database once per day of
+    its week on every load). Outside a Streamlit run (scripts, tests) it reads directly."""
+    try:
+        return _rows_cached(league, day, past)
+    except Exception:                                           # noqa: BLE001
+        return _rows_direct(league, day, past)
+
+
+def _rows_direct(league: str, day: str, past: bool) -> List[Dict]:
     import todays_best as TB
     return TB.winner_rows(day, leagues=[league], past=past)
+
+
+@st.cache_data(ttl=300, show_spinner=False, max_entries=64)
+def _rows_cached(league: str, day: str, past: bool) -> List[Dict]:
+    return _rows_direct(league, day, past)
 
 
 def lab_section(league: str, key: Optional[str] = None, day=None, keep: Optional[Callable[[Dict], bool]] = None,

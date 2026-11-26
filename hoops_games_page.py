@@ -530,8 +530,10 @@ def game_cards(league, day, keep=None, last=None) -> None:
             pass
     today = _today_et()
     span = [day + timedelta(days=i) for i in range(max(0, ((last or day) - day).days) + 1)]
+    import perf as _PF
     try:
-        rows = [dict(r) for d in span for r in GLT._rows(league, d.strftime("%Y-%m-%d"), d < today)]
+        with _PF.timed(f"Game rows for {len(span)} day(s) (GLT._rows)"):
+            rows = [dict(r) for d in span for r in GLT._rows(league, d.strftime("%Y-%m-%d"), d < today)]
     except Exception as exc:                                    # noqa: BLE001
         st.caption(f"The games are unavailable right now ({type(exc).__name__}).")
         return
@@ -574,7 +576,10 @@ def game_cards(league, day, keep=None, last=None) -> None:
 def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, cust, last=None):
     import game_lines_table as GLT
     import game_previews as GP
+    import perf as _PF
     shown = C.by_kickoff(list(upcoming) + list(finished))
+    _t = _PF.timed("Previews for every game (preview_rows)")
+    _t.__enter__()
     previews = GP.preview_rows(
         league, shown, lean_recs, _tip, lambda p: _tag(league, p),
         use=None if cust else (lambda p: _use(p, league)),
@@ -583,6 +588,7 @@ def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, 
             GP.WIN: f"{p.get('home')} " + ("—" if p.get("model_p") is None else f"{p['model_p']:.0%}") + " / "
                     + ("—" if p.get("fair_home") is None else f"{p['fair_home']:.0%}"),
             "Tracking pick": _pick(p), "Why": _why(league, p, lean_recs)}))
+    _t.__exit__(None, None, None)
     if no_rule:
         st.info(GP.NOTE)
     up = {_label(p) for p in upcoming}
@@ -597,7 +603,8 @@ def _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, 
     import view_mode as VM
     cards_view = VM.choose(f"games_{league}") == VM.CARDS
     if cards_view:                                              # Nov 25 (members): cards by default, tap to open
-        game_cards(league, day, keep, last)
+        with _PF.timed("Game cards grid (game_cards)"):
+            game_cards(league, day, keep, last)
     else:
         GLT.lab_section(league, key=f"hg_board_{league}", day=day, keep=keep, extra_cols=context_cols(previews),
                         title="Games: 💰 Money pick · Line pick · Winner pick", last=last)
@@ -660,8 +667,17 @@ def _two_tables(league, day, slot, title, upcoming, finished, lean_recs, no_rule
             hide_index=True, width="stretch")
 
 
+@st.cache_data(ttl=120, show_spinner=False, max_entries=16)
+def _league_picks(league: str):
+    """Nov 26 (owner: speed): the league's saved game picks, cached two minutes (read on every load before)."""
+    return MS.load_game_picks(league)
+
+
 def render(league: str, search: bool = False) -> None:
-    live_section(league)
+    import perf as _PF                                          # Nov 26 (owner: speed up the NFL page)
+    _PF.start()
+    with _PF.timed("Live games strip"):
+        live_section(league)
     if not I.LEAGUES.get(league, {}).get("odds_key"):
         return render_fair(league)
     rules = IP.HOOPS_RULES.get(league, {})
@@ -672,7 +688,8 @@ def render(league: str, search: bool = False) -> None:
                       if league == "NCAAMB" else ""))
     elif any(rules.get(k) is not None for k in ("spread", "total", "ml")):
         st.warning("Tracking only: this league's record is not proven yet.")
-    picks = MS.load_game_picks(league)
+    with _PF.timed("Every saved game pick (database)"):
+        picks = _league_picks(league)
     now = datetime.now(timezone.utc).isoformat()
     done = [p for p in picks if p.get("result")]
     title = I.LEAGUES[league]["title"]
@@ -702,15 +719,17 @@ def render(league: str, search: bool = False) -> None:
     # each row's Why, and the reason a page of passes isn't 22 copies of one sentence
     import pick_records as PR
     try:
-        lean_recs = PR.lean_records(league, recs=picks)
+        with _PF.timed("Lean records"):
+            lean_recs = PR.lean_records(league, recs=picks)
     except Exception:                                           # noqa: BLE001
         lean_recs = {}
     cust = _commercial()
     no_rule = not any(rules.get(k) is not None for k in ("spread", "total", "ml"))
-    if league in BOARD_LEAGUES:
-        _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, cust, last=last)
-    else:
-        _two_tables(league, day, slot, title, upcoming, finished, lean_recs, no_rule, cust, rules)
+    with _PF.timed("Game tiles / tables"):
+        if league in BOARD_LEAGUES:
+            _one_table(league, day, upcoming, finished, all_labels, lean_recs, no_rule, cust, last=last)
+        else:
+            _two_tables(league, day, slot, title, upcoming, finished, lean_recs, no_rule, cust, rules)
     st.markdown("##### Tracking record")
     st.caption(honesty_line(done, league))                      # Nov 12: the check that caught tennis, every league
     tagged = [] if cust else [p for p in done if p.get("use")]     # Nov 16: the by-Use table is the owner's view
@@ -739,6 +758,7 @@ def render(league: str, search: bool = False) -> None:
         st.dataframe(pd.DataFrame([{"Market": names.get(k, k), "Record": f"{r['w']}-{r['l']}" + (f"-{r['p']}" if r["p"] else ""),
                                     "Profit (units)": f"{r['units']:+.1f}", "Per $1": "—" if r["roi"] is None else f"{r['roi']:+.1%}"}
                                    for k, r in rec.items()]), hide_index=True, width="stretch")
+    _PF.panel(f"{league} games")
 
 
 def _side_options(p):
