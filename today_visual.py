@@ -663,35 +663,43 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
     import streamlit as st
     import game_card as GC
     player_dlg, game_dlg = _player_dialog, _game_dialog
+    import perf as _PF0
     sections = []
     for s in live:
-        try:
-            cards = sport_cards(s.key, rows, winners, day, records_for, line_rows)
-        except Exception:                                       # noqa: BLE001 -- one sport never blanks the page
-            cards = []
-        games = (soccer_games(day) if s.key == "SOCCER" else ufc_bouts(day) if s.key == "UFC"
-                 else games_for(winners, s.key))
+        with _PF0.timed(f"Cards: {s.key} picks + games"):
+            try:
+                cards = sport_cards(s.key, rows, winners, day, records_for, line_rows)
+            except Exception:                                   # noqa: BLE001 -- one sport never blanks the page
+                cards = []
+            games = (soccer_games(day) if s.key == "SOCCER" else ufc_bouts(day) if s.key == "UFC"
+                     else games_for(winners, s.key))
         if cards or games:
             sections.append((s, cards, games))
     if not sections:
         st.info("No games or picks on today's boards yet. Boards fill in through the day as the books post lines.")
         return
     sections.sort(key=lambda x: (-len(x[1]), -len(x[2])))
+    import perf as _PF
     try:
-        _search_and_favorites(list(rows or []) + list(search_rows or []), player_dlg)
+        with _PF.timed("Cards: search + favorites"):
+            _search_and_favorites(list(rows or []) + list(search_rows or []), player_dlg)
     except Exception:                                           # noqa: BLE001 -- extras never blank the page
         pass
     keys = {s.key for s in live}
     try:                                                        # Nov 25 (second PropSeason pass): two strips
-        _moves_strip([w for w in winners or [] if w.get("sport") in keys], game_dlg, rows)
+        with _PF.timed("Cards: game-line moves strip"):
+            _moves_strip([w for w in winners or [] if w.get("sport") in keys], game_dlg, rows)
     except Exception:                                           # noqa: BLE001
         pass
     try:                                                        # Nov 26: the prop market watch
-        _prop_moves_strip(sorted(keys), day)
+        with _PF.timed("Cards: prop market watch"):
+            _prop_moves_strip(sorted(keys), day)
     except Exception:                                           # noqa: BLE001
         pass
     try:
-        _streaks_strip([r for r in list(rows or []) + list(search_rows or []) if r.get("sport") in keys], player_dlg)
+        with _PF.timed("Cards: streaks strip"):
+            _streaks_strip([r for r in list(rows or []) + list(search_rows or []) if r.get("sport") in keys],
+                           player_dlg)
     except Exception:                                           # noqa: BLE001
         pass
     @st.fragment
@@ -742,7 +750,8 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                     if len(games) > STRIP_MAX:
                         st.caption(f"{len(games) - STRIP_MAX} more {s.key} games under **Games** in the sidebar, or "
                                    "switch to **Table** above.")
-    _cards()
+    with _PF.timed("Cards: every sport's cards and game tiles"):
+        _cards()
 
 
 def pick_text(r: Dict) -> str:
