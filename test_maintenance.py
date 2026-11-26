@@ -27,3 +27,21 @@ def test_wrong_password_then_restart():
     btn = next(b for b in at.button if "Restart the site now" in b.label)
     btn.click().run()
     assert not at.exception and at.success
+
+
+
+def test_restart_drops_only_the_sites_own_modules():
+    import types
+    src = open(PAGE).read()
+    ns = {"__file__": PAGE}
+    exec(src[src.index("def drop_site_modules"):src.index("\n\n\nnote = ")], ns)
+    here = str(Path(PAGE).parent)
+
+    def mod(name, f):
+        m = types.ModuleType(name)
+        m.__file__ = f
+        return m
+    mods = {"sports": mod("sports", here + "/sports.py"), "pandas": mod("pandas", "/usr/lib/site-packages/pandas/x.py"),
+            "venv_lib": mod("venv_lib", here + "/venv/lib/site-packages/x.py"), "__main__": mod("__main__", PAGE)}
+    assert ns["drop_site_modules"](mods, here) == 1
+    assert set(mods) == {"pandas", "venv_lib", "__main__"}
