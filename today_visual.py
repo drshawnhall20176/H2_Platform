@@ -302,6 +302,11 @@ def no_prop_card(name: str, w: Dict) -> None:
     note = PC.injury_note({"Player": name}, sport)
     if note:
         (_st.error if note.startswith("🚑") else _st.warning)(note)
+    try:                                                        # Nov 26 (owner): the day's news, on every player card
+        import news as NW
+        NW.render_player(sport, name)
+    except Exception:                                           # noqa: BLE001
+        pass
     games = []
     try:
         import game_card as GC
