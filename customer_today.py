@@ -217,7 +217,7 @@ def _book_name(k) -> str:
         return str(k)
 
 
-def empty_reason(off: List[str], with_reads: Dict[str, int], when: str = "today") -> str:
+def empty_reason(off: List[str], with_reads: Dict[str, int], when: str = "today", owner: bool = True) -> str:
     """Nov 26 (owner): why Today has no player picks, in one plain line -- never a silent 0 that looks like a failure.
     `off`: in-season prop sports with no games on the day; `with_reads`: {sport: props the model read}."""
     bits = []
@@ -229,8 +229,9 @@ def empty_reason(off: List[str], with_reads: Dict[str, int], when: str = "today"
                     "bet — they're tracking only")
     if not bits:
         return f"No pick clears the bar {when}, and the boards haven't been built yet — they fill through the day."
-    return (f"No pick clears the bar {when}: " + "; ".join(bits) + ". Every read is on the game cards (Game Labs) and "
-            "in the Test list.")
+    where = ("on the game cards (Game Labs) and in the Test list" if owner
+             else "on the game cards — open any game under Games")      # Nov 26: the Test list is the owner's Office
+    return f"No pick clears the bar {when}: " + "; ".join(bits) + f". Every read is {where}."
 
 
 def _join(xs: List[str]) -> str:

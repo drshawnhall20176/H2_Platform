@@ -45,3 +45,9 @@ def test_warm_slates_merges_the_days_counts():
                      get=lambda k, d=None: store.get(k, d))
     assert store["games_on:2026-11-26"]["n"] == {"NBA": 0, "NCAAMB": 21, "NFL": 16}
     WS.save_games_on("2026-11-26", {}, save=lambda *a: (_ for _ in ()).throw(AssertionError("no write")))
+
+
+def test_members_are_not_sent_to_the_office():
+    t = CT.empty_reason(["NBA"], {"NFL": 10}, owner=False)
+    assert "Test list" not in t and "under Games" in t
+    assert "Test list" in CT.empty_reason(["NBA"], {"NFL": 10})
