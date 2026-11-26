@@ -182,3 +182,24 @@ def _book_name(k) -> str:
         return O.book_label(k)
     except Exception:                                           # noqa: BLE001
         return str(k)
+
+
+def empty_reason(off: List[str], with_reads: Dict[str, int], when: str = "today") -> str:
+    """Nov 26 (owner): why Today has no player picks, in one plain line -- never a silent 0 that looks like a failure.
+    `off`: in-season prop sports with no games on the day; `with_reads`: {sport: props the model read}."""
+    bits = []
+    if off:
+        bits.append(f"{_join(off)} {'has' if len(off) == 1 else 'have'} no games {when}")
+    if with_reads:
+        n = sum(with_reads.values())
+        bits.append(f"the model read {n:,} {_join(sorted(with_reads))} prop{'s' if n != 1 else ''}, and none earned a "
+                    "bet — they're tracking only")
+    if not bits:
+        return f"No pick clears the bar {when}, and the boards haven't been built yet — they fill through the day."
+    return (f"No pick clears the bar {when}: " + "; ".join(bits) + ". Every read is on the game cards (Game Labs) and "
+            "in the Test list.")
+
+
+def _join(xs: List[str]) -> str:
+    xs = list(xs)
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
