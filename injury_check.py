@@ -41,6 +41,8 @@ def classify(status: Optional[str], comment: Optional[str]) -> Optional[str]:
     st = (status or "").strip().lower()
     if st in _OUT_STATUS:
         return "out"
+    if st == "active":                                          # Nov 26: cleared on the inactives list -- an old
+        return None                                             # "questionable" note no longer counts
     c = comment or ""
     if _OUT_TEXT.search(c):
         return "out"
