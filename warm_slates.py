@@ -20,6 +20,7 @@ def main(argv=None) -> int:
     which = [s for s in (argv[0].split(",") if argv and argv[0] else DEFAULT)]
     day = argv[1] if len(argv) > 1 else SS._today_et()
     enabled = {s.key for s in sports.enabled_sports()}
+    seen = {}                                                   # Nov 26: games per sport, for Today's sport bar
     for key in which:
         if key not in enabled:
             print(f"{key}: not enabled, skipped")
@@ -34,6 +35,7 @@ def main(argv=None) -> int:
         except Exception as exc:                                # noqa: BLE001 -- one sport failing never stops the rest
             print(f"{key}: build failed ({type(exc).__name__}: {exc})")
             continue
+        seen[key] = len(meta or [])
         if rows:
             SS.save(key, day, (rows, meta))
         print(f"{key} {day}: {len(rows)} players, {len(meta)} games, {time.time() - t0:.0f}s"
@@ -47,8 +49,29 @@ def main(argv=None) -> int:
                       f"{time.time() - t0:.0f}s")
             except Exception as exc:                            # noqa: BLE001
                 print(f"NBA league sample failed ({type(exc).__name__}: {exc})")
+    save_games_on(day, seen)
     boards(day)
     return 0
+
+
+GAMES_KEY = "games_on:{day}"
+
+
+def save_games_on(day: str, seen: dict, save=None, get=None) -> None:
+    """Nov 26 (owner: speed): how many games each sport has on the day, as this hourly build found them -- Today's
+    sport bar reads this one record instead of asking every schedule feed (the NBA's can hang 5 s). Merged with the
+    day's earlier record so a sport skipped this run keeps its count."""
+    if not seen:
+        return
+    try:
+        from datetime import datetime, timezone
+        import model_store as MS
+        save, get = save or MS.save_setting, get or MS.get_setting
+        prev = (get(GAMES_KEY.format(day=day), None) or {}).get("n") or {}
+        save(GAMES_KEY.format(day=day), {"at": datetime.now(timezone.utc).isoformat(), "n": dict(prev, **seen)})
+        print(f"games on {day}: {seen}")
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"games-on record failed ({type(exc).__name__}: {exc})")
 
 
 BOARD_SPORTS = ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB")   # Nov 12: college basketball's board too
