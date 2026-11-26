@@ -1,0 +1,28 @@
+# Keep the site awake and its caches full (keep_warm.py, Nov 26): a headless browser opens Today a few minutes after
+# each hourly board build, so the first visitor of the hour is this job, not a member. Dispatched by clockwork.
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "57 * * * *"     # every hour, after warm-slates (:49) has started
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the browser
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+      - name: Open the site
+        run: python keep_warm.py
