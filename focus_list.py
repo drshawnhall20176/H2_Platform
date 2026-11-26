@@ -40,13 +40,15 @@ def breakeven(price) -> Optional[float]:
 
 
 def _row(kind: str, sport: str, r: Dict, pick: str, price, chance, book=None, what: str = "", move: str = "",
-         open_as: str = "player", src: Optional[Dict] = None) -> Dict:
+         open_as: str = "player", src: Optional[Dict] = None, **how) -> Dict:
+    """`how`: what the book check needs -- props: player, market_key, side, line; games: market, side, line,
+    home, away."""
     be = breakeven(price)
     ch = _f(chance)
     return {"kind": kind, "sport": sport, "time": r.get("time") or "", "game": r.get("game") or "", "pick": pick,
             "price": _f(price), "book": book or "", "chance": ch, "need": be,
             "edge": None if ch is None or be is None else ch - be, "what": what, "move": move,
-            "open_as": open_as, "src": src if src is not None else r}
+            "open_as": open_as, "src": src if src is not None else r, **how}
 
 
 def prop_rows(rows: Iterable[Dict], bet_of: Optional[Callable] = None, track_of: Optional[Callable] = None) -> List[Dict]:
@@ -62,7 +64,9 @@ def prop_rows(rows: Iterable[Dict], bet_of: Optional[Callable] = None, track_of:
             continue
         sp = r.get("sport") or ""
         verdict = str(bet_of(r) or "")
-        args = dict(price=r.get("price"), chance=r.get("chance"), book=r.get("book"), move=r.get("move") or "")
+        args = dict(price=r.get("price"), chance=r.get("chance"), book=r.get("book"), move=r.get("move") or "",
+                    player=r.get("player"), market_key=r.get("market_key"), side=r.get("side") or "Over",
+                    line=_f(r.get("line")))
         if r.get("money"):
             out.append(_row(MONEY, sp, r, r["pick"], what="Money pick (live test)", **args))
         elif verdict.startswith(GP.BET_YES):
@@ -89,7 +93,7 @@ def close_gap(p: Dict) -> Optional[Dict]:
     except Exception:                                           # noqa: BLE001
         price = None
     return {"pick": f"{p.get(side)} {line:+g}", "price": price if price is not None else -110, "gap": abs(d),
-            "assumed": price is None}
+            "assumed": price is None, "side": side, "line": line}
 
 
 def game_rows(winners: Iterable[Dict]) -> List[Dict]:
@@ -99,19 +103,26 @@ def game_rows(winners: Iterable[Dict]) -> List[Dict]:
     for w in winners or []:
         sp = w.get("sport") or ""
         move = w.get("spread_move") or ""
+        full = w.get("_full") or {}
+        teams = dict(home=full.get("home"), away=full.get("away"))
         if w.get("money") and w.get("money_pick"):
             out.append(_row(MONEY, sp, w, w["money_pick"], w.get("money_price"), w.get("money_chance"),
                             what=f"Money Score {w.get('money_score'):+.0%}" if _f(w.get("money_score")) is not None
-                            else "Money pick (live test)", move=move, open_as="game"))
+                            else "Money pick (live test)", move=move, open_as="game",
+                            market=w.get("money_market"), side=w.get("money_side"), line=_f(w.get("money_line")),
+                            **teams))
         if w.get("best") and (w.get("lock") or w.get("use") in TB.PLAYABLE):
             if not (w.get("money") and w.get("money_pick") == w.get("best")):
                 out.append(_row(BET, sp, w, w["best"], w.get("best_price"), w.get("best_chance"),
-                                what="Tested line rule", move=move, open_as="game"))
+                                what="Tested line rule", move=move, open_as="game",
+                                market=w.get("bet_market"), side=w.get("bet_side"), line=_f(w.get("bet_line")),
+                                **teams))
         if sp == "NCAAMB":
-            cg = close_gap(w.get("_full") or {})
+            cg = close_gap(full)
             if cg:
                 row = _row(GAP, sp, w, cg["pick"], cg["price"], None,
-                           what=f"Model and market {cg['gap']:.1f} pts apart — paper-track", move=move, open_as="game")
+                           what=f"Model and market {cg['gap']:.1f} pts apart — paper-track", move=move, open_as="game",
+                           market="Spread", side=cg["side"], line=cg["line"], **teams)
                 row["assumed"] = cg["assumed"]
                 out.append(row)
     return out
