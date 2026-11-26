@@ -17,8 +17,10 @@ import time
 import os
 
 # The members' (public) site: the owner site is private on Streamlit -- a bot visit there gets "You do not have access
-# to this app" (Nov 26), and it is never signed in with anyone's credentials. Set as the repo variable PUBLIC_APP_URL.
-URL = os.environ.get("PUBLIC_APP_URL", "").strip()
+# to this app" (Nov 26), and it is never signed in with anyone's credentials. The members' site is public (owner,
+# Nov 26); PUBLIC_APP_URL overrides it.
+PUBLIC = "https://h2discorduser.streamlit.app/"
+URL = os.environ.get("PUBLIC_APP_URL", "").strip() or PUBLIC
 WAKE_TEXT = ("get this app back up", "Yes, get this app back up")
 DONE_TEXT = ("GAMES · EARLIEST", "No pick clears the bar", "Player picks today", "PLAYER PICKS TODAY")
 
