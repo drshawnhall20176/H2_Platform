@@ -48,6 +48,23 @@ c1.metric("Memory in use", f"{used:,.0f} MB" if used is not None else "—",
           help=f"The site clears its own caches past {limit:,.0f} MB.")
 c2.metric("Automatic clears since the last start", f"{CG._STATE.get('clears', 0)}")
 
+def drop_site_modules(mods=None, here=None) -> int:
+    """Forget the site's own imported modules (files in this app's folder, not Streamlit or other libraries), so the
+    next page load imports today's code. Nov 26: a deploy updated a page but the server kept the old module it
+    imports, and the page failed until a full reboot. Returns how many were dropped."""
+    import os
+    import sys
+    mods = sys.modules if mods is None else mods
+    here = here or os.path.dirname(os.path.abspath(__file__))
+    n = 0
+    for name, mod in list(mods.items()):
+        f = getattr(mod, "__file__", None) or ""
+        if f and os.path.abspath(f).startswith(here + os.sep) and "site-packages" not in f and name != "__main__":
+            mods.pop(name, None)
+            n += 1
+    return n
+
+
 note = st.text_input("What went wrong? (optional, goes in the log)", key="maint_note",
                      placeholder="e.g. Command Center stuck loading on NCAA Football")
 if st.button("🔄 Restart the site now", type="primary"):
@@ -67,6 +84,8 @@ if st.button("🔄 Restart the site now", type="primary"):
         except Exception:                                       # noqa: BLE001
             pass
     CG.clear_module_caches()
+    import os as _os                                            # Nov 26: so new code is picked up, not just caches
+    reloaded = 0 if _os.environ.get("PYTEST_CURRENT_TEST") else drop_site_modules()   # (never inside the test run)
     gc.collect()
     after = CG.rss_mb()
     try:
@@ -81,7 +100,8 @@ if st.button("🔄 Restart the site now", type="primary"):
     for k in list(st.session_state.keys()):
         if k not in keep:
             del st.session_state[k]
-    st.success(f"Restarted: caches cleared, memory {before or 0:,.0f} → {after or 0:,.0f} MB. Open any page to "
+    st.success(f"Restarted: caches cleared, {reloaded} site modules set to reload, memory {before or 0:,.0f} → "
+               f"{after or 0:,.0f} MB. Open any page to "
                "carry on — the first load rebuilds what it needs, so give it a minute.")
 
 with st.expander("If it's still broken"):
