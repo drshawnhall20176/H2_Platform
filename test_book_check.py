@@ -74,3 +74,12 @@ def test_game_lines():
     ml = BC.game_quotes(ev, "Moneyline", "away", "North Carolina", "Duke")
     assert BC.judge({"kind": "🃏 Bet", "line": None, "side": "away", "chance": 0.45}, ml, "draftkings",
                     ["draftkings"])["book_verdict"] == BC.GO
+
+
+def test_compare_price_and_line():
+    assert BC.compare(-105, 18.5, -110, 18.5, "Under") == "▲ -105 vs -110"
+    assert BC.compare(-120, 18.5, -110, 18.5, "Under") == "▼ -120 vs -110"
+    assert BC.compare(-110, 18.5, -110, 18.5, "Under") == "= same"
+    assert BC.compare(-130, 19.5, -110, 18.5, "Under").startswith("▲ line 19.5 vs 18.5")
+    assert BC.compare(100, 1.5, -110, 2.5, "home").startswith("▼ line 1.5 vs 2.5")
+    assert BC.compare(None, None, -110, 2.5, "home") == "—"
