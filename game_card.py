@@ -527,7 +527,7 @@ def form_html(p: Optional[Dict], label: str) -> str:
             + rank_bar("Offense", p.get("off_rank")) + rank_bar("Defense", p.get("def_rank")) + '</div>')
 
 
-def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
+def render_extras(g: Dict, w: Dict, day: str, key: str, soft_spots: bool = True) -> None:
     """Pace, each team's form and offense / defense rank, and (owner) log boxes -- under the game card."""
     import streamlit as st
     lg = g.get("league") or ""
@@ -594,16 +594,23 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         _simulation(w)
     except Exception:                                           # noqa: BLE001
         pass
-    try:                                                        # Nov 26: defense vs position, in the card
-        _soft_spots(w.get("sport") or lg, day, g.get("away") or "", g.get("home") or "")
-    except Exception:                                           # noqa: BLE001
-        pass
+    if soft_spots:                                              # Nov 26: defense vs position, in the card
+        render_soft_spots(g, w, day)
     if (w.get("sport") or lg) == "NBA":
         try:
             _rotations(g.get("away") or "", g.get("home") or "", day, key=key)
         except Exception:                                       # noqa: BLE001
             pass
     _log_boxes(g, w, day, key)
+
+
+def render_soft_spots(g: Dict, w: Dict, day: str) -> None:
+    """The card's Soft spots box, never raising. Its first read of the half hour takes ~5 s (every defense in the
+    league), so the Today game card draws it after the players (owner, Nov 26: speed)."""
+    try:
+        _soft_spots(w.get("sport") or g.get("league") or "", day, g.get("away") or "", g.get("home") or "")
+    except Exception:                                           # noqa: BLE001
+        pass
 
 
 def _soft_league(sport: str, day: str):
