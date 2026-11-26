@@ -397,7 +397,7 @@ def test_game_card_extras_render_and_offer_owner_log_boxes(monkeypatch):
         GC.render_extras(g, w, "2026-11-25", "t")
     at = AppTest.from_function(app, default_timeout=60).run()
     assert not at.exception
-    assert any("Pace" in m.value for m in at.markdown) and any("Offense" in m.value for m in at.markdown)
+    assert any("Scoring — our model" in m.value for m in at.markdown) and any("Offense" in m.value for m in at.markdown)
     labels = [c.label for c in at.checkbox]
     assert any(l.startswith("📏 Line pick") for l in labels) and any(l.startswith("Likely winner") for l in labels)
 

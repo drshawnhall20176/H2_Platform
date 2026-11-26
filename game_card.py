@@ -423,6 +423,65 @@ def pace_pct(results: List[Dict], total) -> Optional[float]:
     return sum(1 for x in tots if x < t) / len(tots)
 
 
+# --------------------------------------------------------------------------- the game environment (Nov 26)
+# Owner: a market reading of the game's shape beside the model's, and plain one-line verdicts under the rank bars.
+SCRIPT_SCALE = {"NFL": 14.0, "NCAAF": 24.0, "NBA": 15.0, "WNBA": 14.0, "NCAAMB": 20.0}   # a spread this size = blowout
+
+
+def script_frac(league: str, market: Optional[Dict]) -> Optional[float]:
+    """How lopsided the market expects the game: 0 = a coin flip (pick'em), 1 = a blowout. None where the spread is
+    fixed (hockey's puck line) or missing."""
+    scale = SCRIPT_SCALE.get(league)
+    if not scale or not market:
+        return None
+    return max(0.0, min(1.0, abs(market["home"] - market["away"]) / scale))
+
+
+def script_word(frac: Optional[float]) -> str:
+    if frac is None:
+        return "—"
+    return "coin flip" if frac < 0.15 else "close" if frac < 0.35 else "clear favorite" if frac < 0.65 else "blowout"
+
+
+def pace_word(pc: Optional[float]) -> str:
+    if pc is None:
+        return "—"
+    return ("low-scoring" if pc < 0.25 else "slightly low-scoring" if pc < 0.45 else "average-scoring" if pc <= 0.55
+            else "slightly high-scoring" if pc <= 0.75 else "high-scoring")
+
+
+def _a(word: str) -> str:
+    return ("an " if word[:1] in "aeiou" else "a ") + word
+
+
+def environment_line(model_pc: Optional[float], market_pc: Optional[float]) -> str:
+    """One sentence: do the model and the market see the same kind of game?"""
+    if market_pc is None:
+        return ""
+    mk = _a(pace_word(market_pc))
+    if model_pc is None:
+        return f"The market expects {mk} game."
+    if abs(model_pc - market_pc) < 0.15:
+        return f"Model and market agree: {mk} game."
+    more = "more" if model_pc > market_pc else "less"
+    return f"The market expects {mk} game; our model expects {more} scoring ({pace_word(model_pc)})."
+
+
+def matchup_lines(ap: Optional[Dict], hp: Optional[Dict], away: str, home: str) -> List[str]:
+    """Plain verdicts from the rank bars: who scores more, who has the tougher defense."""
+    out = []
+    for key, verb in (("off_rank", "scores more"), ("def_rank", "has the tougher defense")):
+        a, h = (ap or {}).get(key), (hp or {}).get(key)
+        if a is None or h is None:
+            continue
+        if a == h:
+            out.append(f"Even on {'offense' if key == 'off_rank' else 'defense'} (#{a} each).")
+            continue
+        who = away if a < h else home
+        out.append(f"**{who}** {verb} (#{min(a, h)} vs #{max(a, h)}).")
+    return out
+
+
 def form_html(p: Optional[Dict], label: str) -> str:
     if not p:
         return (f'<div style="flex:1;min-width:150px;"><div style="font-weight:700;color:{HB.INK};">{label}</div>'
@@ -455,15 +514,34 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         loose = lg != "NCAAMB"
         hp, ap = profile(res, rat, g.get("home") or "", loose), profile(res, rat, g.get("away") or "", loose)
         pc = pace_pct(res, g.get("model_total"))
-        html = ""
+        mpc = pace_pct(res, g.get("market_total"))
+        sf = script_frac(lg, g.get("market"))
+        env = ""
+        if mpc is not None:
+            env += meter("Scoring — the market's total", mpc, "low-scoring", "high-scoring", HB.GOLD,
+                         f"higher than {mpc:.0%} of games")
         if pc is not None:
-            html += meter("Pace — the model's total vs this season's games", pc, "low-scoring", "high-scoring",
-                          HB.BLUE, f"higher than {pc:.0%} of games")
-        html += (f'<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'
-                 + form_html(ap, f"{g.get('away')} · last {len((ap or {}).get('last') or [])}")
-                 + form_html(hp, f"{g.get('home')} · last {len((hp or {}).get('last') or [])}") + '</div>')
+            env += meter("Scoring — our model's total", pc, "low-scoring", "high-scoring", HB.BLUE,
+                         f"higher than {pc:.0%} of games")
+        if sf is not None:
+            env += meter("Game script — the market's spread", sf, "coin flip", "blowout", HB.GOLD, script_word(sf))
+        if env:
+            st.markdown("**Game environment**")
+            st.markdown(env, unsafe_allow_html=True)
+            line = environment_line(pc, mpc)
+            if line:
+                st.markdown(line)
+            st.caption("Scoring: where the total sits among this season's finished games — the books' total in gold, "
+                       "our projection in blue. Game script: how lopsided the books' spread says this game should be. "
+                       "Context, not a pick.")
+        html = (f'<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:6px;">'
+                + form_html(ap, f"{g.get('away')} · last {len((ap or {}).get('last') or [])}")
+                + form_html(hp, f"{g.get('home')} · last {len((hp or {}).get('last') or [])}") + '</div>')
         st.markdown("**The matchup**")
         st.markdown(html, unsafe_allow_html=True)
+        said = matchup_lines(ap, hp, g.get("away") or "", g.get("home") or "")
+        if said:
+            st.markdown("  \n".join(said))
         st.caption("Offense / defense: each team's rank in the ratings model the projection uses (adjusted for "
                    "opponents and home court). Form: the last results, newest on the right (hover for the margin). "
                    "Context only — the projection already counts all of it.")
