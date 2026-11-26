@@ -101,6 +101,15 @@ def text(m: Dict) -> str:
             f"({m['books']} books)")
 
 
+def market_names(sport: str) -> Dict[str, str]:
+    """{'player_pass_yds': 'Pass Yards', ...} -- the snapshot job stores the books' market keys."""
+    try:
+        import sports
+        return {v: k for k, v in (sports.get(sport).market_map or {}).items()}
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
 def for_sports(sports_: Iterable[str], day: str, index_for=None, now: Optional[datetime] = None, n: int = 8) -> List[Dict]:
     """The day's biggest moves across the given sports."""
     out = []
@@ -109,5 +118,6 @@ def for_sports(sports_: Iterable[str], day: str, index_for=None, now: Optional[d
             idx = index_for(sp, day) if index_for else __import__("line_history").sport_index(sp, since=day)
         except Exception:                                       # noqa: BLE001
             continue
-        out += [dict(m, sport=sp) for m in moves(idx, now)]
+        names = market_names(sp)
+        out += [dict(m, sport=sp, market=names.get(m["market"], m["market"])) for m in moves(idx, now)]
     return sorted(out, key=lambda m: -m["pct"])[:n]

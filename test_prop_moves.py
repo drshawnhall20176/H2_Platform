@@ -40,3 +40,11 @@ def test_best_price_skips_a_quote_that_looks_off_and_the_verdict_says_so():
     j = BC.judge(row, quotes, "novig", ["draftkings", "fanduel", "betmgm", "novig"])
     assert j["book_verdict"].startswith("⚠ Looks off")
     assert not BC.judge(row, quotes, "draftkings", ["draftkings"])["book_verdict"].startswith("⚠")
+
+
+def test_for_sports_uses_plain_market_names(monkeypatch):
+    monkeypatch.setattr(PMV, "market_names", lambda sp: {"player_pass_yds": "Pass Yards"})
+    idx = {("Dak Prescott", "player_pass_yds"): [_r("dk", 249.5, "2026-11-26T12:00Z"), _r("dk", 274.5, "2026-11-26T16:00Z"),
+                                                  _r("fd", 249.5, "2026-11-26T12:00Z"), _r("fd", 270.5, "2026-11-26T16:00Z")]}
+    got = PMV.for_sports(["NFL"], "2026-11-26", index_for=lambda sp, d: idx, now=NOW)
+    assert got[0]["market"] == "Pass Yards" and got[0]["sport"] == "NFL"
