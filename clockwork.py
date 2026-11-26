@@ -31,7 +31,9 @@ WORKFLOWS = ("warm-slates", "settle-results", "capture-closing-lines", "capture-
              "capture-intl", "refresh-matchups", "refresh-ncaaf", "refresh-statcast", "refresh-calibration",
              "script-learn", "settle-analyst", "money-review",
              # Nov 22: skipped today -- close-watch ran once (3:44 AM) of four, analyst-lock 0 of 2, hot-tickets 0 of 3
-             "close-watch", "analyst-lock", "hot-tickets", "backup")
+             "close-watch", "analyst-lock", "hot-tickets", "backup",
+             # Nov 26: the Rule scoreboard (owner: the rules must run with no intervention)
+             "rule-scoreboard")
 # Inputs for a dispatch, where the defaults would change what the run does. A run started by clockwork (GitHub's
 # token) doesn't set off the workflow_run chain the scheduled one would, so morning-brief is dispatched on its own
 # crons -- as "auto" (whatever note is due, never resent), which also runs the morning review when it's due.
