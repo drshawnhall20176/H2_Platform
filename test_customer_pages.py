@@ -97,7 +97,8 @@ def test_today_page_renders_with_no_data_and_with_picks(monkeypatch):
     monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [], "props": {}})
     monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
     at = AppTest.from_file("views/57_Today.py", default_timeout=60).run()
-    assert not at.exception and len(at.info) == 2 and not at.dataframe
+    assert not at.exception and len(at.info) == 3 and not at.dataframe
+    assert any("No pick clears the bar" in i.value for i in at.info)       # Nov 26: an empty day says why
     assert any(CT.DISCLAIMER in c.value for c in at.caption)
 
     st.cache_data.clear()                                       # the page caches the day's rows for 10 minutes
