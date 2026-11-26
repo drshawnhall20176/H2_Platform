@@ -113,6 +113,5 @@ def render() -> None:
     if st.button("❓ How to read Today", key="tour_reopen"):
         st.session_state[OPEN_KEY] = True
         st.session_state[STEP_KEY] = 0
-    if st.session_state.get(OPEN_KEY) or not seen():
-        st.session_state[OPEN_KEY] = True
-        _show()
+    if st.session_state.get(OPEN_KEY):                          # Nov 26 (owner): never pops up by itself -- only
+        _show()                                                 # the "How to read Today" button opens it
