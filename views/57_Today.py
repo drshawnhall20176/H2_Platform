@@ -192,6 +192,15 @@ C.kpi_row([{"icon": "🎯", "value": str(s["picks"]), "label": "Player picks tod
            {"icon": "✅", "value": str(s["winning"]), "label": "From pick types with a winning record"},
            {"icon": "🏟️", "value": str(s["lines"]), "label": "Playable game lines"},
            {"icon": "📅", "value": str(len(s["sports"])), "label": "Sports with a pick"}])
+if not s["picks"] and not _past:                                # Nov 26 (owner): say why, never a bare 0
+    try:
+        _keys = [k for k in props_sports if not picked or k in picked]
+        _off = [k for k in _keys if k not in _with and _has_games(k, _day) is False]
+        _reads = {k: len(TB.load_reads(k, _day)) for k in _keys if k not in _off}
+        st.info(CT.empty_reason(_off, {k: n for k, n in _reads.items() if n},
+                                "today" if _when == "Today" else f"on {_sel:%b} {_sel.day}"))
+    except Exception:                                           # noqa: BLE001
+        pass
 
 # Nov 25 (owner: "the ability to click a card and have it jump to a game or prop"): a Cards view -- every pick and game
 # opens its player card or game card (today_visual.py). Commercial layout only (this page already is); the tables are
