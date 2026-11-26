@@ -473,7 +473,8 @@ def run():
         "50": ("Game Script", "🎬", "game_script"),
         "51": ("My Coach", "🧑‍🏫", "my_coach"),
         "57": ("Today", "🏠", "today"),                  # the customer's front page (commercial layout only, Nov 16)
-        "61": ("Pick'em Board", "🎲", "pickem_board"),  # PrizePicks / Underdog / Pick6 lines, books-checked (Nov 18)
+        "61": ("Pick'em Board", "🎲", "pickem_board"),
+        "64": ("Test list", "🎯", "test_list"),          # Nov 26: the owner's 🃏 / 💰 / 🧪 close-gap list (Office)  # PrizePicks / Underdog / Pick6 lines, books-checked (Nov 18)
         "62": ("Soft Spots", "🎯", "soft_spots"),        # tonight's softest defense-vs-position spots, NBA (Nov 25)
         "63": ("Alt Lines", "📐", "alt_lines"),          # alternate rungs' hit rates vs break-even (Nov 25)
         "59": ("Promotions", "🎁", "promotions"),       # the books' recurring promotions + the tools that play them (Nov 17)
@@ -512,7 +513,7 @@ def run():
         SECTION_OF[k] = "🛰️ LIVE SIGNALS"
     for k in ("7", "8", "9", "10", "11", "12", "13", "14", "15", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "43", "44", "45", "46", "47", "55", "58", "38", "62", "63"):
         SECTION_OF[k] = "🔬 DEEP RESEARCH"
-    for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51", "56"):
+    for k in ("16", "17", "18", "19", "40", "41", "42", "48", "51", "56", "64"):
         SECTION_OF[k] = "🔍 SELF-GRADING & PROOF"
     for k in ("20", "21", "22"):
         SECTION_OF[k] = "📣 OPS & CONTENT"

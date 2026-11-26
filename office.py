@@ -17,7 +17,7 @@ from typing import Optional
 
 # page number -> the Office section it sits in
 PAGES = {
-    "18": "📒 MONEY", "19": "📒 MONEY", "42": "📒 MONEY", "48": "📒 MONEY", "51": "📒 MONEY",
+    "64": "📒 MONEY", "18": "📒 MONEY", "19": "📒 MONEY", "42": "📒 MONEY", "48": "📒 MONEY", "51": "📒 MONEY",
     "16": "🔍 GRADING & PROOF", "17": "🔍 GRADING & PROOF", "40": "🔍 GRADING & PROOF", "41": "🔍 GRADING & PROOF",
     "56": "🔍 GRADING & PROOF",
     "20": "📣 OPS & CONTENT", "21": "📣 OPS & CONTENT", "22": "📣 OPS & CONTENT",

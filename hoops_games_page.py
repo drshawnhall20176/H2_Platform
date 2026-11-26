@@ -520,6 +520,14 @@ def game_cards(league, day, keep=None, last=None) -> None:
     import today_visual as TV
     from datetime import timedelta
     C.section_header("🃏", "Games")
+    if league == "NCAAMB":                                      # Nov 26: the close-gap rule's forward record, on the cards too
+        try:
+            import candidate_rules as CR
+            _cg = CR.status_line(league, str(day))
+            if _cg:
+                st.caption(_cg)
+        except Exception:                                       # noqa: BLE001
+            pass
     today = _today_et()
     span = [day + timedelta(days=i) for i in range(max(0, ((last or day) - day).days) + 1)]
     try:
