@@ -13,7 +13,7 @@ import streamlit as st
 import components as C
 import focus_list as FL
 
-if not hasattr(FL, "log_item"):                                 # Nov 26: a server still holding the old module
+if not hasattr(FL, "merge_props"):                               # Nov 26: a server still holding the old module
     import importlib
     FL = importlib.reload(FL)
 import todays_best as TB
