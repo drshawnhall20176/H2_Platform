@@ -555,9 +555,13 @@ def game_cards(league, day, keep=None, last=None) -> None:
                         k = GLT._when(w)
                         if k is not None and hasattr(k, "strftime"):
                             st.caption(k.strftime("%a %b %-d"))
-                    st.markdown(TV.game_tile_html(w), unsafe_allow_html=True)
+                    try:                                        # Nov 26: each side's top read on the tile
+                        tp = TV.players_in_game(TV.all_props(league), w)
+                    except Exception:                           # noqa: BLE001
+                        tp = []
+                    st.markdown(TV.game_tile_html(w, tp), unsafe_allow_html=True)
                     if st.button("Game card →", key=f"hgc_{league}_{tag}_{start + j}", width="stretch"):
-                        TV._game_dialog(w, TV.players_in_game(TV.all_props(league), w))
+                        TV._game_dialog(w, tp)
     @st.fragment
     def tiles():                                                # Nov 25: a tap reruns only the tiles -- the card opens
         grid(live, "up")                                        # in a second, not after the whole page reruns

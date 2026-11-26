@@ -265,3 +265,16 @@ def match_game(sport: str, games: Sequence[Dict], away: str, home: str) -> Optio
         return bool(c) and any(c == k or c.startswith(k + " ") or k.startswith(c + " ") or c.endswith(" " + k)
                                for k in keys)
     return next((g for g in games or [] if hit(home, names(g, "home")) and hit(away, names(g, "away"))), None)
+
+
+_league_cache = None
+
+
+def cached_league(sport: str, day: str) -> Dict:
+    """load_league, cached 30 minutes and shared by every card and page that needs it."""
+    global _league_cache
+    import streamlit as st
+    if _league_cache is None:
+        _league_cache = st.cache_data(ttl=1800, show_spinner="Reading the league's defenses…", max_entries=8)(
+            lambda sp, d: load_league(sp, d))
+    return _league_cache(sport, str(day)[:10])

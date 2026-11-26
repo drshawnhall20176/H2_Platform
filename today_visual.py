@@ -587,7 +587,47 @@ def fight_tile_html(w: Dict) -> str:
             f'<div style="margin-top:6px;">{HB.bet_chip("Info only")}</div></div>')
 
 
-def game_tile_html(w: Dict) -> str:
+MKT_SHORT = {"points": "Pts", "rebounds": "Reb", "assists": "Ast", "threes made": "3PM", "pts+reb+ast": "PRA",
+             "pra": "PRA", "passing yards": "Pass Yds", "pass yards": "Pass Yds", "rushing yards": "Rush Yds",
+             "rush yards": "Rush Yds", "receiving yards": "Rec Yds", "receptions": "Rec", "shots on goal": "SOG",
+             "goals": "Goals", "passing tds": "Pass TDs", "rush attempts": "Carries"}
+
+
+def standouts(props: Sequence[Dict], n_sides: int = 2) -> List[Dict]:
+    """Nov 26 (PropSeason pass 3): each side's top read on the board -- the playable prop with the best earned chance
+    per team (a 'No edge' read never counts). [{team, player, text, chance}], at most one per team."""
+    best: Dict[str, Dict] = {}
+    for r in props or []:
+        if r.get("kind") not in (None, "Prop") or not r.get("player") or not r.get("team"):
+            continue
+        if str(r.get("use") or "").startswith("⚪"):
+            continue
+        ch = r.get("earned") if r.get("earned") is not None else r.get("chance")
+        try:
+            ch = float(ch)
+        except (TypeError, ValueError):
+            continue
+        t = str(r["team"])
+        if t not in best or ch > best[t]["chance"]:
+            mk = str(r.get("market") or "")
+            side = str(r.get("side") or "")[:1].upper()
+            line = r.get("line")
+            txt = (f"{str(r['player']).split()[-1]} {MKT_SHORT.get(mk.lower(), mk)} "
+                   + (f"{side} {float(line):g}" if line is not None and side else str(r.get("pick") or "")[:24]))
+            best[t] = {"team": t, "player": r["player"], "text": txt.strip(), "chance": ch}
+    return sorted(best.values(), key=lambda x: -x["chance"])[:n_sides]
+
+
+def standouts_html(props: Sequence[Dict]) -> str:
+    got = standouts(props)
+    if not got:
+        return ""
+    return ('<div style="color:{c};font-size:11.5px;margin-top:3px;line-height:1.35;">⭐ '.format(c=HB.INK_SOFT)
+            + " · ".join(f'{x["team"]}: <b style="color:{HB.INK};">{x["text"]}</b> {x["chance"]:.0%}' for x in got)
+            + "</div>")
+
+
+def game_tile_html(w: Dict, props: Optional[Sequence[Dict]] = None) -> str:
     if w.get("sport") == "UFC":
         return fight_tile_html(w)
     import game_lines_table as GLT
@@ -612,6 +652,7 @@ def game_tile_html(w: Dict) -> str:
             f'<div style="color:{HB.BLUE_SOFT};font-size:12px;">Model: {w.get("model_txt") or w.get("best") or _win_txt(w)}</div>'
             + (f'<div style="color:{HB.INK};font-size:12px;margin-top:3px;">📏 Line pick: <b>{w["best"]}</b></div>'
                if w.get("best") and w.get("sport") not in ("SOCCER", "UFC", "TENNIS") else "")
+            + (standouts_html(props) if props else "")
             + f'<div style="margin-top:6px;">{HB.bet_chip(bet) if bet else ""}</div></div>')
 
 
@@ -643,6 +684,10 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
     keys = {s.key for s in live}
     try:                                                        # Nov 25 (second PropSeason pass): two strips
         _moves_strip([w for w in winners or [] if w.get("sport") in keys], game_dlg, rows)
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:                                                        # Nov 26: the prop market watch
+        _prop_moves_strip(sorted(keys), day)
     except Exception:                                           # noqa: BLE001
         pass
     try:
@@ -689,7 +734,8 @@ def render(live: Sequence, rows: Sequence[Dict], winners: Sequence[Dict], day: s
                         cols = st.columns(4)
                         for j, w in enumerate(shown[start:start + 4]):
                             with cols[j].container(border=True):
-                                st.markdown(game_tile_html(w), unsafe_allow_html=True)
+                                st.markdown(game_tile_html(w, None if w.get("sport") == "SOCCER"
+                                                           else props_in_game(rows, w)), unsafe_allow_html=True)
                                 if st.button("Game card →", key=f"tv_game_{s.key}_{start + j}", width="stretch"):
                                     game_dlg(w, soccer_flags(day) if w.get("sport") == "SOCCER"
                                              else props_in_game(rows, w))
@@ -808,6 +854,31 @@ def hot_streaks(rows: Sequence[Dict], min_len: int = 5, n: int = 8) -> List[Dict
         if st_ >= min_len:
             out.append(dict(r, _streak=st_, _of=len(r.get("values") or [])))
     return sorted(out, key=lambda r: (-r["_streak"], -(r.get("chance") or 0)))[:n]
+
+
+def _prop_index(sport: str, day: str):
+    import streamlit as st
+
+    @st.cache_data(ttl=900, show_spinner=False, max_entries=16)
+    def load(sp, d):
+        import line_history as LH
+        return LH.sport_index(sp, since=d)
+    return load(sport, day)
+
+
+def _prop_moves_strip(sports_: Sequence[str], day: str) -> None:
+    """Nov 26 (PropSeason pass 3): the biggest pregame prop line moves today, two or more books agreeing."""
+    import streamlit as st
+    import prop_moves as PMV
+    mv = PMV.for_sports([s for s in sports_ if s in ("NBA", "NFL", "NHL", "NCAAF", "NCAAMB")], day, _prop_index)
+    if not mv:
+        return
+    with st.expander(f"📊 Prop market watch — biggest line moves today ({len(mv)})", expanded=False):
+        for m in mv:
+            st.markdown(f"- **{m['sport']}** · {PMV.text(m)}" + (f" · {m['game']}" if m.get("game") else ""))
+        st.caption("Each prop's line from today's first check to now, the books' median move (two or more books moving "
+                   "the same way). Games that have started are left out. A move is the market adjusting — news, money "
+                   "or both — not a pick on either side.")
 
 
 def _moves_strip(winners: Sequence[Dict], game_dlg, rows) -> None:

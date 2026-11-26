@@ -87,3 +87,8 @@ def _no_live_injury_report(monkeypatch):
         monkeypatch.setattr(SS, "load_league", lambda sport, day: {"games": []})
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 26: nor for NFL play-by-play (zones)
+        import nfl_zones as NZ
+        monkeypatch.setattr(NZ, "_load", lambda season: [])
+    except Exception:                                           # noqa: BLE001
+        pass

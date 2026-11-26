@@ -430,6 +430,17 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             PCX.render(p, sport)
         except Exception:                                       # noqa: BLE001 -- the card never breaks on context
             pass
+    if extras:                                                  # Nov 26: what tonight's defense allowed to his role
+        try:
+            import role_history as RH
+            RH.render(p, sport)
+        except Exception:                                       # noqa: BLE001
+            pass
+        try:                                                    # Nov 26: NFL zones -- where his targets go
+            import nfl_zones as NZ
+            NZ.render(p, sport)
+        except Exception:                                       # noqa: BLE001
+            pass
     if extras:                                                  # Nov 26 (owner): the day's news on the player card
         try:
             import news as NW

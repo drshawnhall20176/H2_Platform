@@ -35,11 +35,8 @@ sport = st.pills("Sport", list(SS.SPORTS), default=_act if _act in SS.SPORTS els
 
 
 def _other_sport(sport: str, day: str) -> None:
-    @st.cache_data(ttl=1800, show_spinner="Reading the league's defenses…", max_entries=8)
-    def load(sp, d):
-        return SS.load_league(sp, d)
     try:
-        data = load(sport, day)
+        data = SS.cached_league(sport, day)
     except Exception as exc:                                    # noqa: BLE001
         st.warning(f"The league's defensive numbers couldn't be read just now ({type(exc).__name__}). "
                    "Try again shortly.")
