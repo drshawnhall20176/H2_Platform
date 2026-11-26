@@ -65,3 +65,13 @@ def test_college_needs_the_team_tag():
                        _art("Georgia upsets No. 5", 3, teams=["Georgia Bulldogs"])]}
     got = NW.for_game(NW.parse(js), "Georgia Bulldogs", "Cincinnati Bearcats", now=NOW, sport="NCAAMB")
     assert [g["headline"] for g in got] == ["Georgia upsets No. 5"]
+
+
+def test_league_wide_roundups_are_left_out_unless_the_headline_names_the_team():
+    every = ["Chicago Bears", "Detroit Lions", "Dallas Cowboys", "Kansas City Chiefs", "Buffalo Bills", "Miami Dolphins"]
+    js = {"articles": [_art("NFL Week 12 betting odds: lines for every game", 1, teams=every),
+                       _art("2027 NFL draft order projections", 2, teams=every),
+                       _art("Can Caleb Williams steer Bears past Lions?", 3, teams=every),
+                       _art("How Jeffery Simmons changed the Bears' defense", 4, teams=["Chicago Bears"])]}
+    got = [it["headline"] for it in NW.for_game(NW.parse(js), "Chicago Bears", "Detroit Lions", sport="NFL", now=NOW)]
+    assert got == ["Can Caleb Williams steer Bears past Lions?", "How Jeffery Simmons changed the Bears' defense"]
