@@ -214,8 +214,12 @@ if not s["picks"] and not _past:                                # Nov 26 (owner)
         _keys = [k for k in props_sports if not picked or k in picked]
         _off = [k for k in _keys if k not in _with and _has_games(k, _day) is False]
         _reads = {k: len(TB.load_reads(k, _day)) for k in _keys if k not in _off}
+        try:
+            _own = st.secrets.get("AUDIENCE", "owner") == "owner"
+        except Exception:                                       # noqa: BLE001
+            _own = True
         st.info(CT.empty_reason(_off, {k: n for k, n in _reads.items() if n},
-                                "today" if _when == "Today" else f"on {_sel:%b} {_sel.day}"))
+                                "today" if _when == "Today" else f"on {_sel:%b} {_sel.day}", owner=_own))
     except Exception:                                           # noqa: BLE001
         pass
 
