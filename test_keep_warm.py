@@ -22,3 +22,8 @@ def test_page_text_reads_every_frame():
         frames = [F("Hosted with Streamlit"), F(None), F("Today · Thursday · GAMES · EARLIEST FIRST")]
     t = KW.page_text(P())
     assert "Today ·" in t and any(d in t for d in KW.DONE_TEXT)
+
+
+def test_no_url_is_a_quiet_skip(monkeypatch, capsys):
+    monkeypatch.setattr(KW, "URL", "")
+    assert KW.main([]) == 0 and "isn't set" in capsys.readouterr().out
