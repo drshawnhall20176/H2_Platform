@@ -13,9 +13,11 @@ import streamlit as st
 
 import components as C
 import customer_today as CT
+import perf as _PF
 import sports
 import todays_best as TB
 
+_PF.start()                                                     # Nov 26 (owner: speed is a priority): where the time goes
 C.base_css()
 _now = datetime.now(pytz.timezone("US/Eastern"))
 _today = _now.date()
@@ -53,7 +55,8 @@ with st.container(horizontal=True, vertical_alignment="center"):     # Nov 25: o
 
 try:                                                            # Nov 26 (owner: "where do I find the morning report?"); before the slow board load
     import brief_panel as _BPT
-    _BPT.render()
+    with _PF.timed("Morning brief"):
+        _BPT.render()
 except Exception:                                               # noqa: BLE001
     pass
 live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]
@@ -96,7 +99,8 @@ def _lean_recs(lg):
     return PR.lean_records(lg)
 
 
-rows, winners = _load(_day, tuple(props_sports), _past)
+with _PF.timed("Boards: picks + game lines (TB.collect, winner_rows)"):
+    rows, winners = _load(_day, tuple(props_sports), _past)
 
 
 def _injury_screen(rs):
@@ -113,7 +117,8 @@ def _injury_screen(rs):
         return rs
 
 
-rows = _injury_screen(rows)
+with _PF.timed("Injury report screen"):
+    rows = _injury_screen(rows)
 
 # Nov 25 (owner): one sport bar at the top -- "All sports" by default, one sport at a time (it also sets the sidebar's
 # sport, so the old "Explore a sport" buttons at the bottom are gone), and several at once only when switched on.
@@ -125,7 +130,8 @@ for _sp in live:                                                # anything in se
 # Nov 25 (owner): only sports with games scheduled on the chosen day -- a pick or game on the boards counts, else the
 # sport's own schedule is asked (cached an hour)
 _with = {r.get("sport") for r in list(rows) + list(winners) if r.get("sport")}
-_bar = [k for k in _bar if k in _with or _has_games(k, _day) is not False]
+with _PF.timed("Which sports have games (schedules)"):
+    _bar = [k for k in _bar if k in _with or _has_games(k, _day) is not False]
 if st.session_state.get("today_one") not in (None, ALL) and st.session_state.get("today_one") not in _bar:
     st.session_state["today_one"] = ALL                         # the sport has no games that day
 if st.session_state.get("today_sports"):
@@ -185,8 +191,11 @@ f1.toggle("Show several sports at once", key="today_multi", on_change=_mode_chan
 include_new = f2.toggle("Include pick types too new to judge", value=False, key="today_new",
                         help="Pick types with fewer than 20 graded picks in the last 30 days. Losing pick types are "
                              "never shown.")
-props = CT.prop_picks(rows, include_new=include_new, sports=picked or None, records_for=_tag_recs, parse_time=C._kick_dt)
-lines = CT.line_picks(winners, sports=picked or None, records_for=_lean_recs, parse_time=C._kick_dt)
+with _PF.timed("Pick records (30-day tag records)"):
+    props = CT.prop_picks(rows, include_new=include_new, sports=picked or None, records_for=_tag_recs,
+                          parse_time=C._kick_dt)
+with _PF.timed("Game-line records (lean records)"):
+    lines = CT.line_picks(winners, sports=picked or None, records_for=_lean_recs, parse_time=C._kick_dt)
 s = CT.summary(props, lines)
 C.kpi_row([{"icon": "🎯", "value": str(s["picks"]), "label": "Player picks today"},
            {"icon": "✅", "value": str(s["winning"]), "label": "From pick types with a winning record"},
@@ -225,7 +234,8 @@ if _view == "Cards":
     try:
         import today_visual as _TV
         try:
-            _all = _injury_screen(_search_rows(_day, tuple(props_sports)))
+            with _PF.timed("Every playable pick (search rows)"):
+                _all = _injury_screen(_search_rows(_day, tuple(props_sports)))
         except Exception:                                       # noqa: BLE001
             _all = []
         _TV.render([sports.get(k) for k in _bar if (not picked or k in picked)], rows, winners, _day,
@@ -278,3 +288,4 @@ st.caption("Every game, every lean and the full board are under Games and All pi
 
 st.caption("Beta sports are tracking only: their record is not proven yet, and they are not counted in the picks above.")
 st.caption(CT.DISCLAIMER)
+_PF.panel("Today")
