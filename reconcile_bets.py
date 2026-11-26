@@ -24,6 +24,10 @@ ARCHIVE_FOR = {"NCAAMB": "NCAAMB", "NBA": "NBA", "NHL": "NHL", "WNBA": "WNBA"}
 
 
 def _out(t: str = "") -> None:
+    # Nov 26: the repo is public, so its job logs and step summaries are too -- in GitHub Actions nothing about the
+    # owner's bets is written; the counts line at the end says what happened, the Bet Log page has the details.
+    if os.environ.get("GITHUB_ACTIONS"):
+        return
     print(t)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
@@ -205,6 +209,8 @@ def main(argv=None) -> int:
     if still:
         _out(f"**Still open: {len(still)}** — " + "; ".join(f"#{b['id']} {b.get('player') or b.get('ticket')} {b.get('market')}"
                                                           for b in still[:30]))
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"Reconciliation done: {len(settled_now)} settled now, {len(still)} still open (details on the Bet Log).")
     return 0
 
 

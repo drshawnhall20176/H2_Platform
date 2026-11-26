@@ -413,7 +413,8 @@ def run(kind: str, day: str, force: bool = False) -> int:
     else:
         print(f"unknown brief kind: {kind}")
         return 2
-    print(text)
+    # Nov 26: never print the note -- it carries the owner's bets and the repo's job logs are public
+    print(f"{kind} brief for {day}: {len(text.splitlines())} lines ready")
     sent = False
     try:
         sent = deliver(text, os.environ.get("OWNER_BRIEF_WEBHOOK"))
