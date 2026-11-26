@@ -18,9 +18,13 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Iterable, List, Optional
 
-MONEY, BET, GAP, TRACK = "💰 Money pick", "🃏 Bet", "🧪 Close gap (paper)", "🧪 Other tracking"
-KINDS = (MONEY, BET, GAP, TRACK)
-DEFAULT_KINDS = (MONEY, BET, GAP)
+MONEY, BET, GAP, TRACK = "💰 Money pick", "🃏 Bet", "🧪 Close gap (paper)", "🧪 Prop rule (paper)"
+PAUSED, HELD = "⏸ Paused / off rule (paper)", "📉 Tag held back (paper)"
+KINDS = (MONEY, BET, GAP, TRACK, PAUSED, HELD)
+REAL = (MONEY, BET)                                             # the rest are paper: tracked, never sized
+# Nov 26 (owner: "include player props in all sports ... and any other rules that are paused. We need to keep testing
+# all aspects until we can get to a baseline we agree is solid"): every kind on by default.
+DEFAULT_KINDS = KINDS
 CLOSE_GAP_MAX = 2.0
 
 
@@ -71,9 +75,46 @@ def prop_rows(rows: Iterable[Dict], bet_of: Optional[Callable] = None, track_of:
             out.append(_row(MONEY, sp, r, r["pick"], what="Money pick (live test)", **args))
         elif verdict.startswith(GP.BET_YES):
             out.append(_row(BET, sp, r, r["pick"], what=str(r.get("use") or "Tested tag"), **args))
+        elif r.get("money_band"):
+            out.append(_row(PAUSED, sp, r, r["pick"], what="💰 rule — off for this sport or market today", **args))
+        elif r.get("lock_rule") and not r.get("lock"):
+            out.append(_row(PAUSED, sp, r, r["pick"], what="🔒 Most probable — market switched off by its record",
+                            **args))
+        elif _prop_rule(sp, r):
+            out.append(_row(TRACK, sp, r, r["pick"], what="NFL / college football Under rule — tested forward",
+                            **args))
         elif verdict.startswith(GP.BET_TRACK):
-            out.append(_row(TRACK, sp, r, r["pick"], what="Tracked prop rule — paper only", **args))
+            short = GP.earned_short(r)
+            what = (f"{r.get('use')} — earned {short['earned']:.0%}, the price needs {short['needed']:.0%}" if short
+                    else "Tracked — paper only")
+            out.append(_row(HELD if short else TRACK, sp, r, r["pick"], what=what, **args))
     return out
+
+
+def _prop_rule(sport: str, r: Dict) -> bool:
+    """The NFL / college football Under rules (candidate_rules.PROP_RULES) on a saved row: the model's own chance and
+    the books' no-vig chance of the side."""
+    if r.get("p_market") is None:
+        return False
+    try:
+        import game_previews as GP
+        return GP.prop_tracking(sport, {"Side": r.get("side"), "ModelProb": r.get("raw_chance", r.get("chance")),
+                                        "MarketProb": r.get("p_market"), "Line": r.get("line"),
+                                        "PricedAt": r.get("book"), "PriceSource": r.get("price_src")})
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def merge_props(*groups: Iterable[Dict]) -> List[Dict]:
+    """One row per prop across the saved lists (every read, and the playable list): the first copy wins, except that
+    a copy carrying the paper-rule flags replaces one without them."""
+    out: Dict[tuple, Dict] = {}
+    for g in groups:
+        for r in g or []:
+            k = (r.get("sport"), r.get("pick"))
+            if k not in out or ("money_band" in r and "money_band" not in out[k]):
+                out[k] = r
+    return list(out.values())
 
 
 def close_gap(p: Dict) -> Optional[Dict]:
@@ -105,6 +146,11 @@ def game_rows(winners: Iterable[Dict]) -> List[Dict]:
         move = w.get("spread_move") or ""
         full = w.get("_full") or {}
         teams = dict(home=full.get("home"), away=full.get("away"))
+        if not w.get("money") and w.get("money_pick") and _money_score_band(w):
+            out.append(_row(PAUSED, sp, w, w["money_pick"], w.get("money_price"), w.get("money_chance"),
+                            what=f"💰 game-line rule (paused) — Money Score {float(w['money_score']):+.0%}",
+                            move=move, open_as="game", market=w.get("money_market"), side=w.get("money_side"),
+                            line=_f(w.get("money_line")), **teams))
         if w.get("money") and w.get("money_pick"):
             out.append(_row(MONEY, sp, w, w["money_pick"], w.get("money_price"), w.get("money_chance"),
                             what=f"Money Score {w.get('money_score'):+.0%}" if _f(w.get("money_score")) is not None
@@ -126,6 +172,18 @@ def game_rows(winners: Iterable[Dict]) -> List[Dict]:
                 row["assumed"] = cg["assumed"]
                 out.append(row)
     return out
+
+
+def _money_score_band(w: Dict) -> bool:
+    """A game line the 💰 Money Score rule would flag if it weren't paused (money_score: BAND, MIN_CHANCE, markets)."""
+    try:
+        import money_score as MSC
+        sc, ch = _f(w.get("money_score")), _f(w.get("money_chance"))
+        names = {MSC.MARKET_NAME.get(m) for m in MSC.MONEY_MARKETS}
+        return (w.get("sport") in MSC.MONEY_LEAGUES and sc is not None and MSC.BAND[0] <= sc < MSC.BAND[1]
+                and ch is not None and ch >= MSC.MIN_CHANCE and w.get("money_market") in names)
+    except Exception:                                           # noqa: BLE001
+        return False
 
 
 def build(prop_src: Iterable[Dict], winners: Iterable[Dict], kinds: Iterable[str] = DEFAULT_KINDS,
@@ -168,7 +226,8 @@ def table(rows: Iterable[Dict]) -> List[Dict]:
     out = []
     for r in rows:
         price = "—" if r["price"] is None else f"{r['price']:+.0f}" + ("*" if r.get("assumed") else "")
-        out.append({"Time": r["time"], "Sport": r["sport"], "Type": r["kind"], "Pick": r["pick"],
+        out.append({"Time": r["time"], "Sport": r["sport"], "Bet or paper": "Bet" if r["kind"] in REAL else "Paper",
+                    "Type": r["kind"], "Pick": r["pick"],
                     "Price": price,
                     "Chance": pct(r["chance"]), "Needs": pct(r["need"]), "Edge": pct(r["edge"], True),
                     "Line move": r["move"] or "", "Why it's here": r["what"], "Game": r["game"]})
@@ -199,4 +258,5 @@ def log_item(r: Dict, book: str) -> Optional[Dict]:
             "market": src.get("market"), "side": src.get("side") or r.get("side"), "line": r.get("line"),
             "price": float(price), "chance": r.get("chance"),
             "book": book if use_book else (src.get("book") or "draftkings"),
-            "notes_extra": "money-pick" if r["kind"] == MONEY else ("tracked-rule" if r["kind"] == TRACK else None)}
+            "notes_extra": {MONEY: "money-pick", TRACK: "tracked-rule", PAUSED: "paused-rule",
+                            HELD: "held-back"}.get(r["kind"])}

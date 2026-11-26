@@ -24,7 +24,8 @@ KEY_ALL = "todays_best_all:{sport}:{date}"     # Nov 25: every playable pick on 
 KEY_READS = "todays_reads:{sport}:{date}"         # Nov 25: every prop the model read (the game card's player list)
 READ_FIELDS = ("sport", "player", "pid", "team", "game", "time", "market", "market_key", "side", "line", "pick",
                "price", "book", "chance", "raw_chance", "earned", "use", "lock", "money", "projection", "values",
-               "mins", "proj_min", "factor", "slot", "l10", "l5", "team_id", "opp_id")
+               "mins", "proj_min", "factor", "slot", "l10", "l5", "team_id", "opp_id",
+               "edge", "money_band", "lock_rule", "p_market", "price_src")   # Nov 26: the Test list's paper rules
 TOP_PER_SPORT = 40
 PLAYABLE = (PE.USE_BOTH, PE.USE_PARLAY, PE.USE_SINGLE)
 RANK = {PE.USE_BOTH: 1, PE.USE_PARLAY: 2, PE.USE_SINGLE: 3}
@@ -63,7 +64,7 @@ MONEY_TOP = 8
 def props_rows(sport: str, plays, cap: bool = True, playable_only: bool = True) -> List[Dict]:
     out = []
     for p in plays or []:
-        lock = PE.play_is_lock(p)
+        lock = lock_rule = PE.play_is_lock(p)
         if lock:                                                # Nov 21: a market switched off by its record
             try:
                 import shutoff as _SO
@@ -71,6 +72,10 @@ def props_rows(sport: str, plays, cap: bool = True, playable_only: bool = True) 
             except Exception:                                   # noqa: BLE001
                 pass
         money = PE.play_is_money(sport, p)                   # Nov 19: 💰 shown whatever its Use tag
+        try:                                                    # Nov 26: the paused / off rules, kept for paper tests
+            money_band = PE.play_in_money_band(sport, p)
+        except Exception:                                       # noqa: BLE001
+            money_band = False
         if playable_only and p.get("Use") not in PLAYABLE and not lock and not money:
             continue
         if playable_only and p.get("Use") == PE.USE_PASS and not money:
@@ -95,6 +100,8 @@ def props_rows(sport: str, plays, cap: bool = True, playable_only: bool = True) 
                     # Nov 18: a line only a pick'em app posts -- no sportsbook price behind it, never a 🔒
                     "pickem_only": bool(p.get("Pickem")),
                     "money": money, "edge": p.get("EV"), "l10": p.get("L10"), "l5": p.get("L5"),
+                    "money_band": bool(money_band), "lock_rule": bool(lock_rule),
+                    "p_market": p.get("MarketProb"), "price_src": p.get("PriceSource"),
                     # Nov 24: the player card's game-by-game bars (newest first) and its projection
                     "values": list(p.get("_values") or [])[:20], "projection": p.get("Projection"),
                     # Nov 25: minutes chart + matchup chip on the player card

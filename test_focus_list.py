@@ -29,9 +29,11 @@ WINNERS = [
 
 def test_default_kinds_and_time_order():
     rows = FL.build(PROPS, WINNERS, bet_of=_bet_of, parse_time=lambda t: __import__("components")._kick_dt(t))
-    assert [r["kind"] for r in rows] == [FL.GAP, FL.BET, FL.MONEY, FL.MONEY]
+    assert [r["kind"] for r in rows] == [FL.GAP, FL.BET, FL.MONEY, FL.MONEY, FL.TRACK]
     assert rows[0]["pick"] == "UNC -3"                         # model -4 vs line -3: 1 point apart, model's side
-    assert all(r["sport"] != "NHL" for r in rows)              # other tracking off, info-only never listed
+    assert "D SOG Over 1.5" not in [r["pick"] for r in rows]   # info only is never listed
+    real = FL.build(PROPS, WINNERS, kinds=FL.REAL, bet_of=_bet_of)
+    assert all(r["sport"] != "NHL" for r in real)
 
 
 def test_other_tracking_on_request_and_sport_filter():
@@ -103,3 +105,25 @@ def test_logged_tags_group_with_the_model():
     it = FL.log_item(FL.build([], [w])[0], "fanduel")
     row = TB.bet_rows([it], 2.7, True, "test-list", "2026-11-26")[0]
     assert "close-gap-test" in row["notes"] and B.model_group(row) == "with" and row["book"] == "draftkings"
+
+
+def test_paper_kinds_props_and_paused_game_lines():
+    reads = [
+        {"sport": "NFL", "pick": "R Under 50.5", "side": "Under", "money_band": True, "chance": 0.5, "price": -110},
+        {"sport": "NHL", "pick": "L Over 0.5", "lock_rule": True, "lock": False, "price": -200, "chance": 0.7},
+        {"sport": "NBA", "pick": "H Over 9.5", "use": "🎯 Single only", "earned": 0.5, "price": -120,
+         "_v": GP.BET_TRACK},
+    ]
+    win = [{"sport": "NCAAMB", "time": "1:00 PM", "game": "A @ B", "money": False, "money_pick": "B -3",
+            "money_score": 0.06, "money_chance": 0.55, "money_market": "Spread", "money_price": -110,
+            "_full": {"home": "B", "away": "A"}}]
+    rows = FL.build(reads, win, kinds=FL.KINDS, bet_of=_bet_of)
+    kinds = {r["pick"]: r["kind"] for r in rows}
+    assert kinds == {"R Under 50.5": FL.PAUSED, "L Over 0.5": FL.PAUSED, "H Over 9.5": FL.HELD, "B -3": FL.PAUSED}
+    assert {t["Bet or paper"] for t in FL.table(rows)} == {"Paper"}
+
+
+def test_merge_prefers_rows_with_the_paper_flags():
+    a = {"sport": "NBA", "pick": "X Over 1.5", "money": True}
+    b = {"sport": "NBA", "pick": "X Over 1.5", "money": True, "money_band": True}
+    assert FL.merge_props([a], [b]) == [b]
