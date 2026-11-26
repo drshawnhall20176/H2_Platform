@@ -31,3 +31,8 @@ def test_panel_stays_off_the_public_build(monkeypatch):
     import streamlit as st
     monkeypatch.setattr(st, "secrets", {"AUDIENCE": "public"}, raising=False)
     assert brief_panel.render("2026-11-26") is False
+
+
+def test_today_draws_the_brief_once():
+    src = open("views/57_Today.py").read()
+    assert src.count("_BPT.render()") == 1
