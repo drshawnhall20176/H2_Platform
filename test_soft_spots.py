@@ -130,3 +130,11 @@ def test_page_other_sport(monkeypatch):
     assert not at.exception
     md = " ".join(m.value for m in at.markdown)
     assert "Detroit Lions allows the most passing TDs to QBs" in md and "Caleb Williams" in md
+
+
+def test_out_players_leave_and_the_next_man_moves_up():
+    d = {"RB1": [{"name": "Kenneth Walker III"}, {"name": "Emmett Johnson"}], "RB2": [{"name": "Emmett Johnson"},
+                                                                                     {"name": "Jaydn Ott"}]}
+    got = SS.without_out(d, {"Kenneth Walker III"})
+    assert got["RB1"][0]["name"] == "Emmett Johnson" and got["RB2"][0]["name"] == "Jaydn Ott"
+    assert SS.without_out(d, set())["RB2"][0]["name"] == "Emmett Johnson"   # nobody out: unchanged

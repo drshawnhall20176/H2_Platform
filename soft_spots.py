@@ -217,9 +217,26 @@ def load_league(sport: str, day: str) -> Dict:
             "names": b.get("all_names") or {}, "pgames": (b.get("props") or {}).get("pgames") or []}
 
 
-def depth_fn(sport: str, data: Dict) -> Callable:
+PROMOTE = {"RB2": ("RB1",), "WR2": ("WR1",), "WR3": ("WR1", "WR2")}
+
+
+def without_out(depth: Dict[str, List[Dict]], out: set, norm: Callable = None) -> Dict[str, List[Dict]]:
+    """Nov 26 (live check: Kenneth Walker III out, Emmett Johnson shown as the 'backup' RB): players ruled out leave
+    every slot and the next man moves up; a player now leading a higher slot isn't also listed in the lower one."""
+    import re
+    norm = norm or (lambda s: re.sub(r"[^a-z]", "", str(s or "").lower()))
+    gone = {norm(n) for n in out or ()}
+    d = {slot: [p for p in lst if norm(p.get("name")) not in gone] for slot, lst in (depth or {}).items()}
+    for slot, above in PROMOTE.items():
+        tops = {norm((d.get(a) or [{}])[0].get("name")) for a in above if d.get(a)}
+        if slot in d:
+            d[slot] = [p for p in d[slot] if norm(p.get("name")) not in tops]
+    return d
+
+
+def depth_fn(sport: str, data: Dict, out: Optional[set] = None) -> Callable:
     """depth_of(team) for spots_any: the NBA's minutes-based rotation when the props sample has it, else the slot
-    holders from the allowed tables."""
+    holders from the allowed tables -- minus anyone ruled out tonight (`out`: player names)."""
     import position_matchups as PM
     cache: Dict = {}
 
@@ -228,9 +245,21 @@ def depth_fn(sport: str, data: Dict) -> Callable:
             d = {}
             if sport == "NBA" and data.get("pgames"):
                 d = PM.usage_depth(data["pgames"], team, "NBA", last_n=10)
-            cache[team] = d or depth_from_allowed(data.get("allowed") or {}, team)
+            d = d or depth_from_allowed(data.get("allowed") or {}, team)
+            cache[team] = without_out(d, out or set()) if out else d
         return cache[team]
     return depth_of
+
+
+def out_tonight(sport: str, day: str) -> set:
+    """Names ruled out on ESPN's injury report (today's games only)."""
+    try:
+        import injury_check as IC
+        if not IC.live_for(day):
+            return set()
+        return {e["name"] for e in IC.entries(sport) if e.get("status") == "out"}
+    except Exception:                                           # noqa: BLE001
+        return set()
 
 
 def tonight_pairs(games: Sequence[Dict]) -> List[Tuple]:
