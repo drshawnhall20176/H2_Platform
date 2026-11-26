@@ -65,6 +65,72 @@ if hide_started:
             return False
     rows = [r for r in rows if not _gone(r)]
 
+# ---------- Nov 26 (owner): what a chosen sportsbook and pick'em app offer right now, with a go / no-go ----------
+import book_check as BC
+import my_books as MB
+import odds_api as O
+import pickem as PK
+
+b1, b2, b3 = st.columns([1.2, 1.2, 1])
+_books = MB.sportsbooks()
+book = b1.selectbox("Check prices at", _books, index=_books.index(MB.book()) if MB.book() in _books else 0,
+                    format_func=O.book_label, key="tl_book",
+                    help="Scroll through the books: the price, what it needs, and Go / No go update for each.")
+_apps = MB.apps()
+app = b2.selectbox("Pick'em app", _apps, index=_apps.index(MB.app()) if MB.app() in _apps else 0,
+                   format_func=MB.app_label, key="tl_app")
+n_picks = b3.slider("Picks in the entry", 2, 6, 3, key="tl_n")
+_pay = (PK.APPS.get(app) or {}).get("power") or {}
+app_need = PK.breakeven(_pay[n_picks], n_picks) if _pay.get(n_picks) else None
+
+
+@st.cache_data(ttl=300, show_spinner="Checking the books' current prices…", max_entries=16)
+def _prop_offers(sp, d, extra):
+    import best_bets_data as BBD
+    api = BBD.get_odds_api_key()
+    if not api:
+        return []
+    got = BBD.recent_offers(sp, d, api)
+    if extra:
+        got = BBD.merge_offers(got, BBD.fetch_pickem_extra_offers(sp, d, api))
+    return got
+
+
+@st.cache_data(ttl=300, show_spinner="Checking the books' current game lines…", max_entries=16)
+def _game_events(sp):
+    import best_bets_data as BBD
+    import sports as _S
+    api = BBD.get_odds_api_key()
+    if not api:
+        return []
+    data, _h = O._get(f"sports/{_S.get(sp).odds_sport_key}/odds",
+                      {"apiKey": api, "bookmakers": ",".join(_books), "markets": "h2h,spreads,totals",
+                       "oddsFormat": "american", "dateFormat": "iso"})
+    return data if isinstance(data, list) else []
+
+
+_extra = app not in ("pick6", "prizepicks")                     # the boards' main fetch carries these two
+_offers, _events = {}, {}
+for _sp in sorted({r["sport"] for r in rows}):
+    try:
+        if any(r["open_as"] != "game" for r in rows if r["sport"] == _sp):
+            _offers[_sp] = _prop_offers(_sp, day, _extra)
+        if any(r["open_as"] == "game" for r in rows if r["sport"] == _sp):
+            _events[_sp] = _game_events(_sp)
+    except Exception:                                           # noqa: BLE001 -- a feed hiccup never blanks the list
+        pass
+for r in rows:
+    try:
+        if r["open_as"] == "game":
+            ev = BC.find_event(_events.get(r["sport"]), r.get("home"), r.get("away"))
+            q = BC.game_quotes(ev, r.get("market"), r.get("side"), r.get("home"), r.get("away"))
+        else:
+            q = BC.prop_quotes(_offers.get(r["sport"]), r.get("player"), r.get("market_key"), r.get("side"))
+        r.update(BC.judge(r, q, book, _books))
+        r["app_verdict"] = BC.judge_app(r, q, app, app_need)
+    except Exception:                                           # noqa: BLE001
+        r.update({"book_verdict": "— Couldn't check", "app_verdict": "—"})
+
 n = FL.counts(rows)
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("💰 Money picks", n[FL.MONEY])
@@ -95,11 +161,32 @@ def _open(r):
         CL.open_player(r["sport"])(r["src"])
 
 
-CL.table(pd.DataFrame(FL.table(rows)), key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=True,
+_df = pd.DataFrame(FL.table(rows))
+_bl = O.book_label(book)
+_df.insert(_df.columns.get_loc("Edge") + 1, "Go?", [r.get("book_verdict") or "—" for r in rows])
+_df.insert(_df.columns.get_loc("Go?") + 1, f"{_bl} now",
+           ["—" if r.get("book_price") is None else f"{r['book_price']:+.0f}" +
+            ("" if r.get("book_line") in (None, r.get("line")) else f" at {r['book_line']:g}") for r in rows])
+_df.insert(_df.columns.get_loc(f"{_bl} now") + 1, f"{_bl} needs",
+           [float("nan") if r.get("book_need") is None else r["book_need"] for r in rows])
+_df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Best price now",
+           ["—" if r.get("best_price") is None else f"{r['best_price']:+.0f} {O.book_label(r['best_book'])}"
+            for r in rows])
+_df.insert(_df.columns.get_loc("Best price now") + 1, MB.app_label(app), [r.get("app_verdict") or "—" for r in rows])
+st.caption(f"**Go?** compares the earned chance with what **{_bl}'s price right now** needs: ✅ Go = 1+ point over "
+           "break-even · 🟡 Thin = 0–1 point (shop the price) · ⛔ No go = under break-even · 🔁 = the book posts a "
+           "different line (re-check: the chance was read at the pick's line) · 📝 Paper = a close-gap test pick (no "
+           "chance of its own yet). **Best price now** is the best of every sportsbook at the pick's exact line. "
+           f"**{MB.app_label(app)}**: is it on the app at the same line, and does its chance clear the "
+           + (f"{app_need:.1%} each pick needs for a {n_picks}-pick entry." if app_need else "app's own price.")
+           + " Prices refresh every 5 minutes.")
+CL.table(_df, key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=True,
          width="stretch", caption="Tap a row for its card — the read, the recent games and the line history.",
          column_config={"Chance": st.column_config.NumberColumn(format="percent"),
                         "Needs": st.column_config.NumberColumn(format="percent", help="Break-even for the price"),
-                        "Edge": st.column_config.NumberColumn(format="percent", help="Chance minus break-even")})
+                        "Edge": st.column_config.NumberColumn(format="percent", help="Chance minus break-even"),
+                        f"{_bl} needs": st.column_config.NumberColumn(format="percent",
+                                                                       help="Break-even for this book's price now")})
 st.caption("**Chance** is the earned chance (how picks like it have actually done). **Needs** is what the price needs "
            "to break even; a price with * is the standard −110, shown where the boards saved no quote for that side. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
            "track them on paper. Prices are the best the boards saw at their last read; check your book before you "
