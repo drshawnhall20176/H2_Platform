@@ -534,6 +534,51 @@ def rewrite_game_pick_payload(sport: str, game_id: str, payload: Dict, db_path: 
         return False
 
 
+def _load_many(sports, ungraded: bool) -> Optional[Dict[str, List[Dict]]]:
+    if not available() or not sports:
+        return None
+    try:
+        with _conn(None) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT * FROM game_picks WHERE sport IN ({', '.join([ph] * len(sports))})"
+                        + (" AND result IS NULL AND final_home IS NULL" if ungraded else "") + " ORDER BY kickoff",
+                        list(sports))
+            out: Dict[str, List[Dict]] = {}
+            for r in _rows(cur):
+                p = json.loads(r.get("payload") or "{}")
+                p.update(final_home=r.get("final_home"), final_away=r.get("final_away"), result=r.get("result"))
+                out.setdefault(r.get("sport"), []).append(p)
+            return out
+    except Exception:                                           # noqa: BLE001 -- fall back to one league at a time
+        return None
+
+
+def game_picks_by_sport(sports, ungraded: bool = False) -> Dict[str, List[Dict]]:
+    """Nov 26 (owner: speed): every league's game picks in ONE query -- Today's soccer section asked once per league,
+    up to 57 connections and ~12 of the page's 15 seconds. Falls back to one league at a time (load_game_picks) when
+    the single query can't run."""
+    sports = [str(x) for x in sports or []]
+    got = _load_many(sports, ungraded)
+    if got is None:
+        out = {}
+        for sp in sports:
+            try:
+                out[sp] = load_game_picks(sp, ungraded=ungraded)
+            except Exception as exc:                            # noqa: BLE001 -- kept, raised by picks_of
+                out[sp] = exc
+        return out
+    return {sp: got.get(sp, []) for sp in sports}
+
+
+def picks_of(by_sport: Dict, sport: str) -> List[Dict]:
+    """One league's picks from game_picks_by_sport -- re-raising that league's load error, so callers still say which
+    league failed."""
+    v = by_sport.get(sport)
+    if isinstance(v, Exception):
+        raise v
+    return list(v or [])
+
+
 def load_game_picks(sport: str, ungraded: bool = False, db_path: Optional[str] = None) -> List[Dict]:
     if db_path is None and not available():
         return []
