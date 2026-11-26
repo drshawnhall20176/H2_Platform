@@ -611,7 +611,7 @@ def _soft_league(sport: str, day: str):
     return SS.cached_league(sport, day)
 
 
-def soft_spot_lines(sport: str, data: dict, away: str, home: str) -> dict:
+def soft_spot_lines(sport: str, data: dict, away: str, home: str, out: Optional[set] = None) -> dict:
     """{defense label: [lines]} for the card -- each defense's softest spots tonight and who lines up there."""
     import soft_spots as SS
     x = SS.match_game(sport, data.get("games") or [], away, home)
@@ -619,7 +619,7 @@ def soft_spot_lines(sport: str, data: dict, away: str, home: str) -> dict:
         return {}
     names = dict(data.get("names") or {})
     names.update({x["home_id"]: home, x["away_id"]: away})
-    spots = SS.spots_any(sport, data["summary"], SS.tonight_pairs([x]), SS.depth_fn(sport, data), names)
+    spots = SS.spots_any(sport, data["summary"], SS.tonight_pairs([x]), SS.depth_fn(sport, data, out), names)
     return SS.card_lines(spots)
 
 
@@ -629,7 +629,7 @@ def _soft_spots(sport: str, day: str, away: str, home: str) -> None:
     if sport not in SS.SPORTS:
         return
     import streamlit as st
-    got = soft_spot_lines(sport, _soft_league(sport, day), away, home)
+    got = soft_spot_lines(sport, _soft_league(sport, day), away, home, SS.out_tonight(sport, str(day)[:10]))
     if not got:
         return
     st.markdown("**Soft spots in this game**")

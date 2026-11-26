@@ -51,7 +51,8 @@ def _other_sport(sport: str, day: str) -> None:
                     format_func=lambda k: "All" if k == "all" else stats_[k].title()) or "all"
     slot = c2.pills("Position", ["all"] + list(slots_), default="all", key=f"ss_slot_{sport}",
                     format_func=lambda k: "All" if k == "all" else k) or "all"
-    rows = SS.spots_any(sport, data["summary"], SS.tonight_pairs(data["games"]), SS.depth_fn(sport, data),
+    rows = SS.spots_any(sport, data["summary"], SS.tonight_pairs(data["games"]),
+                        SS.depth_fn(sport, data, SS.out_tonight(sport, day)),
                         data.get("names") or {}, stats=None if stat == "all" else (stat,),
                         slots=None if slot == "all" else (slot,))
     st.caption(f"{len(rows)} soft spot{'s' if len(rows) != 1 else ''} — defenses in the league's top sixth for what "
