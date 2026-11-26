@@ -147,4 +147,7 @@ def test_page_shows_baseline_and_selected_book(monkeypatch):
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     cols = list(at.dataframe[0].value.columns)
     assert "FanDuel now" in cols and "FanDuel vs DraftKings" in cols
-    assert cols.index("Go?") > cols.index("FanDuel needs")
+    assert cols.index("Go?") > cols.index("FanDuel vs DraftKings") and "FanDuel needs" not in cols   # compact
+    at.toggle(key="tl_all_cols").set_value(True).run()
+    cols = list(at.dataframe[0].value.columns)
+    assert cols.index("Go?") > cols.index("FanDuel needs") and "Board price" in cols

@@ -208,24 +208,43 @@ _df.insert(_df.columns.get_loc("Go?") + 1, "Best price now",
            ["—" if r.get("best_price") is None else f"{r['best_price']:+.0f} {O.book_label(r['best_book'])}"
             for r in rows])
 _df.insert(_df.columns.get_loc("Best price now") + 1, MB.app_label(app), [r.get("app_verdict") or "—" for r in rows])
-st.caption(f"**{_base_l} now** is your book's price right now (My sportsbook, the baseline); **{_base_l} move** is "
-           "how it has moved since the board read the pick (▲ better for you, ▼ worse, line changes first). "
-           + (f"**{_bl} now** and **{_bl} vs {_base_l}** show the book picked above against your baseline. " if book != base
-              else "Pick another book above to put its price beside your baseline. ")
-           + f"**Go?** compares the earned chance with what **{_bl}'s price right now** needs: ✅ Go = 1+ point over "
-           "break-even · 🟡 Thin = 0–1 point (shop the price) · ⛔ No go = under break-even · 🔁 = the book posts a "
-           "different line (re-check: the chance was read at the pick's line) · 📝 Paper = a close-gap test pick (no "
-           "chance of its own yet). **Best price now** is the best of every sportsbook at the pick's exact line. "
-           f"**{MB.app_label(app)}**: is it on the app at the same line, and does its chance clear the "
-           + (f"{app_need:.1%} each pick needs for a {n_picks}-pick entry." if app_need else "app's own price.")
-           + " Prices refresh every 5 minutes.")
-CL.table(_df, key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=True,
+_SHORT = {FL.MONEY: "💰 Money", FL.BET: "🃏 Bet", FL.GAP: "🧪 Close gap", FL.TRACK: "🧪 Prop rule",
+          FL.PAUSED: "⏸ Paused rule", FL.HELD: "📉 Held back"}
+_df["Type"] = [_SHORT.get(r["kind"], r["kind"]) for r in rows]
+# Nov 26 (owner: "the table does not fit the screen well"): the columns a decision needs, the rest one switch away
+_all = st.toggle("Show all columns", value=False, key="tl_all_cols",
+                 help="Adds the sport, Bet or paper, the board's own price / needs / edge, the selected book's "
+                      "break-even, the pick'em app, the line move, why each pick is here and the game.")
+_core = ["Time", "Pick", "Type", f"{_base_l} now", f"{_base_l} move"]
+if book != base:
+    _core += [f"{_bl} now", f"{_bl} vs {_base_l}"]
+_core += ["Go?", "Best price now"]
+_view_df = _df if _all else _df[[c for c in _core if c in _df.columns]]
+CL.table(_view_df, key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=True,
          width="stretch", caption="Tap a row for its card — the read, the recent games and the line history.",
-         )
-st.caption("**Chance** is the earned chance (how picks like it have actually done). **Needs** is what the price needs "
-           "to break even; a price with * is the standard −110, shown where the boards saved no quote for that side. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
-           "track them on paper. Prices are the best the boards saw at their last read; check your book before you "
-           "bet. Started games drop off the list.")
+         column_config={"Pick": st.column_config.TextColumn("Pick", width="medium"),
+                        "Time": st.column_config.TextColumn("Time", width="small"),
+                        "Type": st.column_config.TextColumn("Type", width="small")})
+with st.expander("📖 How to read the columns", expanded=False):
+    st.markdown(
+        f"- **{_base_l} now**: your book's price right now (My sportsbook, the baseline); a different line shows as "
+        "\"at <line>\".\n"
+        f"- **{_base_l} move**: how it has moved since the board read the pick: ▲ better for you, ▼ worse, = "
+        "unchanged (a line change is shown first).\n"
+        + (f"- **{_bl} now** / **{_bl} vs {_base_l}**: the book picked above, and how it compares with your "
+           "baseline.\n" if book != base else
+           "- Pick another book in **Check prices at** to put its price and its comparison beside your baseline.\n")
+        + f"- **Go?** (at {_bl}): ✅ Go = earned chance 1+ point over the price's break-even · 🟡 Thin = 0–1 point "
+        "(shop the price) · ⛔ No go = under break-even, or a worse line · 🔁 = a different, better line (re-check: "
+        "the chance was read at the pick's line) · 📝 Paper = a test pick with no chance of its own yet.\n"
+        "- **Best price now**: the best of every sportsbook at the pick's exact line.\n"
+        f"- With **Show all columns**: the board's own price / needs / edge at its last read (a * price is the "
+        f"standard −110 where no quote was saved), **{_bl} needs**, **{MB.app_label(app)}** (on the app at the same "
+        "line, and whether the chance clears "
+        + (f"the {app_need:.1%} each pick needs for a {n_picks}-pick entry)" if app_need else "the app's own price)")
+        + ", the line move, why the pick is here and the game.\n"
+        "- **Types**: 💰 Money and 🃏 Bet are bets; 🧪 Close gap, 🧪 Prop rule, ⏸ Paused rule and 📉 Held back are "
+        "paper. Prices refresh every 5 minutes; started games drop off.")
 
 # ---------- Nov 26 (owner: "Do I have log capability from the site?"): log straight from the list ----------
 with st.expander("📝 Log bets from this list", expanded=False):
