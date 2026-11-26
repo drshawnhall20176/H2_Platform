@@ -236,13 +236,22 @@ def _game_dialog(w: Dict, props: List[Dict]):
     g = GC.build(w)
     GC.render(g, props, key=k)
     try:                                                        # Nov 25: pace, form, team strength, log boxes
-        GC.render_extras(g, w, _today_et(), k)
+        late = hasattr(GC, "render_soft_spots")                 # an older loaded game_card draws it itself
+        if late:
+            GC.render_extras(g, w, _today_et(), k, soft_spots=False)
+        else:
+            GC.render_extras(g, w, _today_et(), k)
     except Exception:                                           # noqa: BLE001 -- the card never breaks on an extra
-        pass
+        late = False
     try:
         _players_section(w, game_props, k)
     except Exception:                                           # noqa: BLE001
         pass
+    if late:                                                    # Nov 26 (speed): slow first read -- after the players
+        try:
+            GC.render_soft_spots(g, w, _today_et())
+        except Exception:                                       # noqa: BLE001
+            pass
 
 
 STAT_LABEL = {"pts": "Points", "reb": "Rebounds", "ast": "Assists", "pra": "Pts+Reb+Ast", "fg3m": "Threes",
