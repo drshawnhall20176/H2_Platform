@@ -20,6 +20,7 @@ The last WINDOW days (the shut-off's window), saved compactly under KEY for the 
 """
 from __future__ import annotations
 
+import math
 import random
 import sys
 from datetime import date, timedelta
@@ -35,7 +36,7 @@ CLOSE_GAP_GATE = {"n": 200, "hit": 0.55}
 MIN_BEAT = 0.50
 LABELS = {"money_props": "💰 Money props", "lock": "🔒 Most probable", "money_games": "💰 Money Score game lines",
           "close_gap": "🧪 Close gap", "nfl_under_vs_fav": "🧪 NFL Under vs the favorite",
-          "ncaaf_under": "🧪 College football Under"}
+          "ncaaf_under": "🧪 College football Under", "ncaaf_under_same": "🧪 College football Under, model & market agree"}
 
 
 def _dec(price) -> Optional[float]:
@@ -288,3 +289,73 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --------------------------------------------------------------------------- when could each rule clear? (Nov 26)
+# Owner, Nov 26: "the fear would be that a season will be over before proven rules produce picks." For each rule: at
+# its current return and pace, how many graded picks the next gate needs and roughly when it gets there. Gate 2's
+# "90% low end above zero" needs n >= (1.645 x sd / edge)^2 picks -- a small edge takes thousands, a big one a few
+# hundred. A forecast, not a promise: the return will move as the sample grows.
+Z90 = 1.645
+SEASON_END = {"NBA": "04-12", "NHL": "04-16", "NFL": "01-10", "NCAAF": "01-19", "NCAAMB": "04-06"}
+
+
+def season_end(sport: str, today: str) -> Optional[date]:
+    md = SEASON_END.get(sport)
+    if not md:
+        return None
+    t = date.fromisoformat(today)
+    y = t.year + (1 if int(md[:2]) < t.month or (int(md[:2]) == t.month and int(md[3:]) < t.day) else 0)
+    return date.fromisoformat(f"{y}-{md}")
+
+
+def sd_per_pick(picks: Sequence[List], roi: float) -> float:
+    """The standard deviation of one $1 bet's result at these prices, if the true return were `roi`."""
+    vs = []
+    for p in picks:
+        d = float(p[2])
+        q = min(0.99, max(0.01, (1 + roi) / d))
+        vs.append(q * (d - 1) ** 2 + (1 - q) - roi ** 2)
+    return (sum(vs) / len(vs)) ** 0.5 if vs else 1.0
+
+
+def picks_needed(picks: Sequence[List], roi: float, floor: int) -> int:
+    if roi <= 0:
+        return 10 ** 9
+    return max(floor, int(math.ceil((Z90 * sd_per_pick(picks, roi) / roi) ** 2)))
+
+
+def forecast(r: Dict, today: str) -> Dict:
+    """{"text", "date", "state"} -- state: on_track / not_this_season / below_bar / losing / proven / no_data."""
+    m, picks, sport = r.get("m") or {}, r.get("picks") or [], r.get("sport")
+    n = m.get("n") or 0
+    if not n:
+        return {"state": "no_data", "text": "No graded picks yet", "date": None}
+    first = date.fromisoformat(m["first"])
+    span = max(1, (date.fromisoformat(today) - first).days)
+    pace = n / span                                             # picks a calendar day
+    end = season_end(sport, today)
+    if r.get("ready"):
+        return {"state": "proven", "text": "Clears its next gate now", "date": today}
+    if r.get("rule") == "close_gap":
+        g = CLOSE_GAP_GATE
+        if m["hit"] < g["hit"]:
+            return {"state": "below_bar", "text": f"Hitting {m['hit']:.0%}; the gate needs {g['hit']:.0%}", "date": None}
+        need = max(0, g["n"] - n)
+    else:
+        roi = m.get("roi") or 0.0
+        if roi <= 0:
+            return {"state": "losing", "text": f"Losing ({roi:+.1%} per $1) — can't clear at this edge", "date": None}
+        gate_ = GATE2 if r.get("stage") in ("Live test", "Paused") else GATE1
+        if roi < gate_["roi"]:
+            return {"state": "below_bar", "text": f"Edge {roi:+.1%} is below the {gate_['roi']:+.0%} the gate needs",
+                    "date": None}
+        total = picks_needed(picks, roi, gate_["n"]) if gate_ is GATE2 else gate_["n"]
+        need = max(0, total - n)
+    days = int(math.ceil(need / pace)) if pace > 0 else 10 ** 6
+    eta = date.fromisoformat(today) + timedelta(days=days)
+    if end and eta > end:
+        return {"state": "not_this_season", "date": None,
+                "text": f"Not this season at this pace — needs ~{need:,} more picks (~{pace:.1f} a day)"}
+    return {"state": "on_track", "date": eta.isoformat(),
+            "text": f"On track for ~{eta:%b} {eta.day} if the edge holds ({need:,} more picks at ~{pace:.1f} a day)"}
