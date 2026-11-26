@@ -555,8 +555,9 @@ def render_sport_selector(picker: bool = False):
             # exit out to the today screen"): inside the Owner Office the sidebar's sport is a real picker
             st.session_state["_office_sport"] = current
 
-            def _pick():
-                st.session_state["sport"] = st.session_state["_office_sport"]
+            def _pick():                                        # Nov 26: the widget's value can be gone mid-switch
+                st.session_state["sport"] = st.session_state.get("_office_sport") or st.session_state.get(
+                    "sport", DEFAULT_SPORT)
             st.selectbox("Sport", keys, key="_office_sport", on_change=_pick,
                          format_func=lambda k: f"{get(k).icon} {get(k).label}" if get(k) else k,
                          help="Every page in the menu shows this sport (Today's own bar sets it too).")
