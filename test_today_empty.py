@@ -29,3 +29,19 @@ def test_has_games_many_runs_side_by_side(monkeypatch):
     got = CT.has_games_many(["NBA", "NHL", "NFL", "BAD"], "2026-11-26")
     assert time.time() - t0 < 0.6                                # four 0.2 s checks, not 0.8 s in a row
     assert got == {"NBA": True, "NHL": False, "NFL": True, "BAD": None} and CT.has_games_many([], "x") == {}
+
+
+def test_saved_counts_answer_first(monkeypatch):
+    asked = []
+    monkeypatch.setattr(CT, "has_games", lambda k, d: asked.append(k) or True)
+    got = CT.has_games_many(["NBA", "NHL", "NFL", "SOCCER"], "2026-11-26", saved={"NBA": 0, "NHL": 0, "NFL": 16})
+    assert got == {"NBA": False, "NHL": False, "NFL": True, "SOCCER": True} and asked == ["SOCCER"]
+
+
+def test_warm_slates_merges_the_days_counts():
+    import warm_slates as WS
+    store = {"games_on:2026-11-26": {"n": {"NBA": 0, "NCAAMB": 21}}}
+    WS.save_games_on("2026-11-26", {"NFL": 16, "NBA": 0}, save=store.__setitem__,
+                     get=lambda k, d=None: store.get(k, d))
+    assert store["games_on:2026-11-26"]["n"] == {"NBA": 0, "NCAAMB": 21, "NFL": 16}
+    WS.save_games_on("2026-11-26", {}, save=lambda *a: (_ for _ in ()).throw(AssertionError("no write")))

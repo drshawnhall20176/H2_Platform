@@ -165,12 +165,27 @@ def has_games(key: str, day: str):
         return None
 
 
-def has_games_many(keys, day: str, workers: int = 8) -> Dict[str, Optional[bool]]:
-    """has_games for several sports at once -- each sport's feed is its own wait (NBA's stats feed can hang for its
-    full timeout), so they run side by side. A sport whose check fails gets None (it stays on the bar)."""
+def saved_games_on(day: str, get=None) -> Dict[str, int]:
+    """Nov 26: games per sport as the hourly board build found them (warm_slates.save_games_on); {} before its run."""
+    try:
+        import model_store as MS
+        return dict(((get or MS.get_setting)(f"games_on:{day}", None) or {}).get("n") or {})
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
+def has_games_many(keys, day: str, workers: int = 8, saved: Optional[Dict[str, int]] = None) -> Dict[str, Optional[bool]]:
+    """has_games for several sports at once. The hourly build's saved counts answer first (one read, no feeds); the
+    rest are checked side by side -- each feed is its own wait (NBA's can hang for its full timeout). A sport whose
+    check fails gets None (it stays on the bar)."""
     keys = list(keys or [])
     if not keys:
         return {}
+    saved = saved_games_on(day) if saved is None else saved
+    known = {k: saved[k] > 0 for k in keys if isinstance(saved.get(k), int)}
+    keys = [k for k in keys if k not in known]
+    if not keys:
+        return known
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=min(workers, len(keys))) as ex:
         futs = {k: ex.submit(has_games, k, day) for k in keys}
@@ -180,7 +195,7 @@ def has_games_many(keys, day: str, workers: int = 8) -> Dict[str, Optional[bool]
                 out[k] = f.result(timeout=20)
             except Exception:                                   # noqa: BLE001
                 out[k] = None
-        return out
+        return dict(known, **out)
 
 
 def odds_key():
