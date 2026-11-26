@@ -76,3 +76,30 @@ def test_blanks_are_blank_and_assumed_prices_are_marked():
     t = FL.table(rows)[0]
     assert t["Chance"] == "—" and t["Edge"] == "—"
     assert t["Price"] == "-110*"
+
+
+def test_log_items_carry_the_kind_and_the_book_price():
+    w = dict(WINNERS[0], _rec={"sport": "NCAAMB", "home": "UNC", "away": "Duke", "kickoff": "2026-11-26T17:00:00Z"})
+    gap = FL.build([], [w])[0]
+    gap.update(book_price=-105, book_line=gap["line"])
+    it = FL.log_item(gap, "fanduel")
+    assert it["tracking"] and it["price"] == -105 and it["book"] == "fanduel" and it["bet_market"] == "Spread"
+    money = FL.build([], [dict(WINNERS[2], _rec={"sport": "NBA", "home": "Knicks", "away": "Heat"},
+                               money_market="Spread", money_side="home", money_line=-4.5)])[0]
+    it = FL.log_item(money, "draftkings")                      # no book quote: the board's price
+    assert it["note"] == "💰" and it["price"] == -108 and not it["tracking"]
+    prop = dict(PROPS[0], player="A", market="Points", side="Over", line=20.5, book="fanduel")
+    r = FL.build([prop], [], kinds=[FL.MONEY], bet_of=_bet_of)[0]
+    r.update(book_price=-102, book_line=19.5)                  # a different line: keep the board's price and book
+    it = FL.log_item(r, "draftkings")
+    assert it["price"] == -110 and it["book"] == "fanduel" and it["notes_extra"] == "money-pick"
+
+
+def test_logged_tags_group_with_the_model():
+    import betlog as B
+    import todays_best as TB
+    w = dict(WINNERS[0], _rec={"sport": "NCAAMB", "home": "UNC", "away": "Duke", "kickoff": "2026-11-26T17:00:00Z",
+                               "game_id": "g1"})
+    it = FL.log_item(FL.build([], [w])[0], "fanduel")
+    row = TB.bet_rows([it], 2.7, True, "test-list", "2026-11-26")[0]
+    assert "close-gap-test" in row["notes"] and B.model_group(row) == "with" and row["book"] == "draftkings"
