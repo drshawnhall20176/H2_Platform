@@ -430,6 +430,12 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             PCX.render(p, sport)
         except Exception:                                       # noqa: BLE001 -- the card never breaks on context
             pass
+    if extras:                                                  # Nov 26 (owner): the day's news on the player card
+        try:
+            import news as NW
+            NW.render_player(sport, p.get("Player") or "", p.get("Team"))
+        except Exception:                                       # noqa: BLE001 -- news never breaks the card
+            pass
     if extras:                                                  # Nov 25 (owner): Long shots / Alt-line hit rates, merged in
         try:
             import alt_hits as AH

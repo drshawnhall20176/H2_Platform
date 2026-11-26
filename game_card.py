@@ -471,6 +471,11 @@ def render_extras(g: Dict, w: Dict, day: str, key: str) -> None:
         _injuries(w.get("sport") or lg, g.get("away") or "", g.get("home") or "", day, key)
     except Exception:                                           # noqa: BLE001
         pass
+    try:                                                        # Nov 26 (owner): the day's news on the game card
+        import news as NW
+        NW.render_game(w.get("sport") or lg, g.get("away") or "", g.get("home") or "")
+    except Exception:                                           # noqa: BLE001 -- news never breaks the card
+        pass
     if (w.get("sport") or lg) == "NHL":
         try:
             _nhl(g.get("away") or "", g.get("home") or "", day)
