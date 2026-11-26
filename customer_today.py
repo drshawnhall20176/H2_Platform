@@ -165,6 +165,24 @@ def has_games(key: str, day: str):
         return None
 
 
+def has_games_many(keys, day: str, workers: int = 8) -> Dict[str, Optional[bool]]:
+    """has_games for several sports at once -- each sport's feed is its own wait (NBA's stats feed can hang for its
+    full timeout), so they run side by side. A sport whose check fails gets None (it stays on the bar)."""
+    keys = list(keys or [])
+    if not keys:
+        return {}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, len(keys))) as ex:
+        futs = {k: ex.submit(has_games, k, day) for k in keys}
+        out = {}
+        for k, f in futs.items():
+            try:
+                out[k] = f.result(timeout=20)
+            except Exception:                                   # noqa: BLE001
+                out[k] = None
+        return out
+
+
 def odds_key():
     import os
     try:

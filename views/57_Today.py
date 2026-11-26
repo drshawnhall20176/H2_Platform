@@ -78,6 +78,12 @@ def _has_games(key, day):
     return CT.has_games(key, day)
 
 
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=32)
+def _games_map(keys, day):
+    """Nov 26 (owner: speed): every sport's schedule checked at once, not one after another (~7.5 s cold)."""
+    return CT.has_games_many(keys, day)
+
+
 @st.cache_data(ttl=600, show_spinner=False, max_entries=4)
 def _search_rows(day, keys):
     """Nov 25: every playable pick saved for the day (the player search), not just the top picks."""
@@ -131,7 +137,8 @@ for _sp in live:                                                # anything in se
 # sport's own schedule is asked (cached an hour)
 _with = {r.get("sport") for r in list(rows) + list(winners) if r.get("sport")}
 with _PF.timed("Which sports have games (schedules)"):
-    _bar = [k for k in _bar if k in _with or _has_games(k, _day) is not False]
+    _hg = _games_map(tuple(k for k in _bar if k not in _with), _day)
+    _bar = [k for k in _bar if k in _with or _hg.get(k) is not False]
 if st.session_state.get("today_one") not in (None, ALL) and st.session_state.get("today_one") not in _bar:
     st.session_state["today_one"] = ALL                         # the sport has no games that day
 if st.session_state.get("today_sports"):

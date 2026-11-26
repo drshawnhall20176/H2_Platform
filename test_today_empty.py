@@ -12,3 +12,20 @@ def test_empty_reason_names_the_dark_sports_and_the_reads():
 def test_empty_reason_before_any_build():
     assert "haven't been built yet" in CT.empty_reason([], {})
     assert CT.empty_reason(["NHL"], {}).startswith("No pick clears the bar today: NHL has no games today.")
+
+
+def test_has_games_many_runs_side_by_side(monkeypatch):
+    import time
+    calls = []
+
+    def slow(k, day):
+        calls.append(k)
+        time.sleep(0.2)
+        if k == "BAD":
+            raise RuntimeError("feed down")
+        return k != "NHL"
+    monkeypatch.setattr(CT, "has_games", slow)
+    t0 = time.time()
+    got = CT.has_games_many(["NBA", "NHL", "NFL", "BAD"], "2026-11-26")
+    assert time.time() - t0 < 0.6                                # four 0.2 s checks, not 0.8 s in a row
+    assert got == {"NBA": True, "NHL": False, "NFL": True, "BAD": None} and CT.has_games_many([], "x") == {}
