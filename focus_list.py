@@ -156,8 +156,11 @@ def counts(rows: Iterable[Dict]) -> Dict[str, int]:
     return out
 
 
-def _num(v) -> float:
-    return float("nan") if v is None else float(v)              # a blank cell, not the word "None"
+def pct(v, signed: bool = False) -> str:
+    """A percent as text, "—" when missing (Streamlit draws any missing number as a grey "None")."""
+    if v is None:
+        return "—"
+    return f"{float(v) * 100:+.1f}%" if signed else f"{float(v):.1%}"
 
 
 def table(rows: Iterable[Dict]) -> List[Dict]:
@@ -167,6 +170,6 @@ def table(rows: Iterable[Dict]) -> List[Dict]:
         price = "—" if r["price"] is None else f"{r['price']:+.0f}" + ("*" if r.get("assumed") else "")
         out.append({"Time": r["time"], "Sport": r["sport"], "Type": r["kind"], "Pick": r["pick"],
                     "Price": price,
-                    "Chance": _num(r["chance"]), "Needs": _num(r["need"]), "Edge": _num(r["edge"]),
+                    "Chance": pct(r["chance"]), "Needs": pct(r["need"]), "Edge": pct(r["edge"], True),
                     "Line move": r["move"] or "", "Why it's here": r["what"], "Game": r["game"]})
     return out

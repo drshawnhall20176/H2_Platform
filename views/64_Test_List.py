@@ -168,7 +168,7 @@ _df.insert(_df.columns.get_loc("Go?") + 1, f"{_bl} now",
            ["—" if r.get("book_price") is None else f"{r['book_price']:+.0f}" +
             ("" if r.get("book_line") in (None, r.get("line")) else f" at {r['book_line']:g}") for r in rows])
 _df.insert(_df.columns.get_loc(f"{_bl} now") + 1, f"{_bl} needs",
-           [float("nan") if r.get("book_need") is None else r["book_need"] for r in rows])
+           [FL.pct(r.get("book_need")) for r in rows])
 _df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Best price now",
            ["—" if r.get("best_price") is None else f"{r['best_price']:+.0f} {O.book_label(r['best_book'])}"
             for r in rows])
@@ -182,11 +182,7 @@ st.caption(f"**Go?** compares the earned chance with what **{_bl}'s price right 
            + " Prices refresh every 5 minutes.")
 CL.table(_df, key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=True,
          width="stretch", caption="Tap a row for its card — the read, the recent games and the line history.",
-         column_config={"Chance": st.column_config.NumberColumn(format="percent"),
-                        "Needs": st.column_config.NumberColumn(format="percent", help="Break-even for the price"),
-                        "Edge": st.column_config.NumberColumn(format="percent", help="Chance minus break-even"),
-                        f"{_bl} needs": st.column_config.NumberColumn(format="percent",
-                                                                       help="Break-even for this book's price now")})
+         )
 st.caption("**Chance** is the earned chance (how picks like it have actually done). **Needs** is what the price needs "
            "to break even; a price with * is the standard −110, shown where the boards saved no quote for that side. Close-gap picks have no chance of their own yet: they're a rule being tested forward, so "
            "track them on paper. Prices are the best the boards saw at their last read; check your book before you "
