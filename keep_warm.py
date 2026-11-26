@@ -56,6 +56,9 @@ def visit(url: str = URL, wait_s: int = 180) -> dict:
                 break
             time.sleep(1)
         time.sleep(5)                                           # let the last cached loads finish
+        if "done" not in marks:                                 # say what it saw instead (no picks are printed)
+            marks["frames"] = [(fr.url[:80]) for fr in page.frames]
+            marks["saw"] = " | ".join(page_text(page).split("\n")[:12])[:400]
         b.close()
     marks["total"] = round(time.time() - t0, 1)
     return marks
