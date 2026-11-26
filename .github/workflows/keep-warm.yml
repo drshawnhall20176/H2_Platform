@@ -20,9 +20,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install the browser
+        if: ${{ vars.PUBLIC_APP_URL != '' }}
         run: |
           python -m pip install --upgrade pip
           pip install playwright==1.48.0
           python -m playwright install --with-deps chromium
       - name: Open the site
+        env:
+          PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
         run: python keep_warm.py

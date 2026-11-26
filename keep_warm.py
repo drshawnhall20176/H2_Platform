@@ -14,7 +14,11 @@ from __future__ import annotations
 import sys
 import time
 
-URL = "https://h2ownersplatform.streamlit.app/"
+import os
+
+# The members' (public) site: the owner site is private on Streamlit -- a bot visit there gets "You do not have access
+# to this app" (Nov 26), and it is never signed in with anyone's credentials. Set as the repo variable PUBLIC_APP_URL.
+URL = os.environ.get("PUBLIC_APP_URL", "").strip()
 WAKE_TEXT = ("get this app back up", "Yes, get this app back up")
 DONE_TEXT = ("GAMES · EARLIEST", "No pick clears the bar", "Player picks today", "PLAYER PICKS TODAY")
 
@@ -66,7 +70,11 @@ def visit(url: str = URL, wait_s: int = 180) -> dict:
 
 def main(argv=None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    m = visit(argv[0] if argv else URL)
+    url = argv[0] if argv else URL
+    if not url:
+        print("keep-warm: PUBLIC_APP_URL isn't set -- nothing to visit (the owner site is private)")
+        return 0
+    m = visit(url)
     print("keep-warm:", m)
     return 0 if "done" in m else 1
 
