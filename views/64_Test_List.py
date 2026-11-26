@@ -13,9 +13,8 @@ import streamlit as st
 import components as C
 import focus_list as FL
 
-if not hasattr(FL, "merge_props"):                               # Nov 26: a server still holding the old module
-    import importlib
-    FL = importlib.reload(FL)
+import importlib                                                # Nov 26: deploys kept old copies of these two small
+FL = importlib.reload(FL)                                       # helpers on the server; always use the current code
 import todays_best as TB
 
 ET = pytz.timezone("US/Eastern")
@@ -76,6 +75,7 @@ if hide_started:
 
 # ---------- Nov 26 (owner): what a chosen sportsbook and pick'em app offer right now, with a go / no-go ----------
 import book_check as BC
+BC = importlib.reload(BC)
 import my_books as MB
 import odds_api as O
 import pickem as PK
