@@ -196,6 +196,11 @@ try:
     _commercial = _NL.is_commercial(st.secrets.get("AUDIENCE", "owner"), st.session_state.get(_NL.PREVIEW_KEY))
 except Exception:                                               # noqa: BLE001
     _commercial = False
+try:                                                            # Nov 26 (owner: "where do I find the morning report?")
+    import brief_panel as _BPT
+    _BPT.render()
+except Exception:                                               # noqa: BLE001
+    pass
 _view = "Table"
 if _commercial:
     try:                                                        # Nov 25 (PropSeason scrub item 7): first-visit tour

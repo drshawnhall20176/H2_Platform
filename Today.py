@@ -213,32 +213,8 @@ except Exception:                                               # noqa: BLE001 -
     pass
 # ---------- the owner's brief (Nov 19: moved to the top -- owner: "so it does not get overlooked") ----------
 if _owner:
-    try:
-        import model_store as _MS
-        import pandas as _pd
-        _bday = _dt.now(_ET).strftime("%Y-%m-%d")
-        _briefs = [(k, t, _MS.get_setting(f"brief:{_bday}:{k}")) for k, t in
-                   (("picks", "🎯 This afternoon's picks"), ("morning", "☀️ Morning brief"))]
-        _briefs = [(k, t, b) for k, t, b in _briefs if isinstance(b, dict) and b.get("text")]
-        for _i, (_kind, _title, _b) in enumerate(_briefs):
-            with st.expander(_title, expanded=_i == 0):         # the newest note open, the other one folded
-                _lines = _b["text"].split("\n")[1:]          # the first line is the note's own title
-                if _b.get("table"):
-                    # Nov 21: every heading above the table (the game-lines heading sat under it), the footer below
-                    _head = [l for l in _lines if l.strip() and not l.startswith("•")]
-                    _foot = [l for l in _head if l.startswith("Singles only")]
-                    for _l in [l for l in _head if l not in _foot]:
-                        st.markdown(C.money_md(_l))
-                    _tdf = _pd.DataFrame(_b["table"])
-                    if "Price" in _tdf:
-                        _tdf["Price"] = _tdf["Price"].fillna("—")
-                    st.dataframe(_tdf, hide_index=True, width="stretch")
-                    for _l in _foot:
-                        st.caption(C.money_md(_l))
-                else:
-                    st.markdown(C.money_md("  \n".join(_lines)))
-    except Exception:                                           # noqa: BLE001 -- the brief is a bonus
-        pass
+    import brief_panel as _BP
+    _BP.render()
 
 # ---------- 💰 live test scoreboard (Nov 20, owner: "run that concept live this weekend to see how it does") ----------
 @st.cache_data(ttl=600, show_spinner=False)

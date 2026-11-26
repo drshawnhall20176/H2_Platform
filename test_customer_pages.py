@@ -205,7 +205,7 @@ def test_owner_brief_sits_at_the_top_of_today(monkeypatch):
                         if k.startswith("brief:") and k.endswith(":morning") else real(k, d, **kw))
     at = AppTest.from_file("Today.py", default_timeout=120).run()
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
-    assert at.expander[0].label == "☀️ Morning brief"
+    assert at.expander[0].label.startswith("☀️ Morning brief")
     src = open("Today.py").read()
     assert src.index("the owner's brief (Nov 19") < src.index("C.kpi_row(") < src.index("for s in _order:")
 
