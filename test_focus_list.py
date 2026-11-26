@@ -127,3 +127,24 @@ def test_merge_prefers_rows_with_the_paper_flags():
     a = {"sport": "NBA", "pick": "X Over 1.5", "money": True}
     b = {"sport": "NBA", "pick": "X Over 1.5", "money": True, "money_band": True}
     assert FL.merge_props([a], [b]) == [b]
+
+
+def test_page_shows_baseline_and_selected_book(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    import streamlit as st
+    import todays_best as TB
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda d, keys, past=False: {"rows": []})
+    monkeypatch.setattr(TB, "load_reads", lambda sp, d: [])
+    monkeypatch.setattr(TB, "winner_rows", lambda d, leagues=None, past=False: [
+        {"sport": "NBA", "time": "11:59 PM", "game": "Heat @ Knicks", "money": True, "money_pick": "Knicks -4.5",
+         "money_price": -108, "money_chance": 0.55, "money_score": 0.05}])
+    at = AppTest.from_file("views/64_Test_List.py", default_timeout=60).run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    cols = list(at.dataframe[0].value.columns)
+    assert "DraftKings now" in cols and "DraftKings move" in cols and "Go?" in cols
+    at.selectbox(key="tl_book").set_value("fanduel").run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    cols = list(at.dataframe[0].value.columns)
+    assert "FanDuel now" in cols and "FanDuel vs DraftKings" in cols
+    assert cols.index("Go?") > cols.index("FanDuel needs")

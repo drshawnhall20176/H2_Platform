@@ -82,6 +82,7 @@ import pickem as PK
 
 b1, b2, b3 = st.columns([1.2, 1.2, 1])
 _books = MB.sportsbooks()
+base = MB.book()                                                # Nov 26: the baseline -- My sportsbook (DraftKings)
 book = b1.selectbox("Check prices at", _books, index=_books.index(MB.book()) if MB.book() in _books else 0,
                     format_func=O.book_label, key="tl_book",
                     help="Scroll through the books: the price, what it needs, and Go / No go update for each.")
@@ -137,6 +138,14 @@ for r in rows:
             q = BC.prop_quotes(_offers.get(r["sport"]), r.get("player"), r.get("market_key"), r.get("side"))
         r.update(BC.judge(r, q, book, _books))
         r["app_verdict"] = BC.judge_app(r, q, app, app_need)
+        # Nov 26 (owner): the baseline book (My sportsbook) beside the selected one, and how each has moved
+        bq = BC.at_book(q, r.get("line"), base, r.get("side") or "")
+        r["base_price"], r["base_line"] = bq["price"], bq["line"]
+        r["base_move"] = BC.compare(bq["price"], bq["line"], r.get("price"), r.get("line"), r.get("side") or "",
+                                    "= unchanged")
+        r["vs_base"] = ("— same book" if book == base else
+                        BC.compare(r.get("book_price"), r.get("book_line"), bq["price"], bq["line"],
+                                   r.get("side") or ""))
     except Exception:                                           # noqa: BLE001
         r.update({"book_verdict": "— Couldn't check", "app_verdict": "—"})
 
@@ -173,19 +182,37 @@ def _open(r):
         CL.open_player(r["sport"])(r["src"])
 
 
-_df = pd.DataFrame(FL.table(rows))
+_df = pd.DataFrame(FL.table(rows)).rename(columns={"Price": "Board price", "Needs": "Board needs",
+                                                  "Edge": "Board edge"})
 _bl = O.book_label(book)
-_df.insert(_df.columns.get_loc("Edge") + 1, "Go?", [r.get("book_verdict") or "—" for r in rows])
-_df.insert(_df.columns.get_loc("Go?") + 1, f"{_bl} now",
-           ["—" if r.get("book_price") is None else f"{r['book_price']:+.0f}" +
-            ("" if r.get("book_line") in (None, r.get("line")) else f" at {r['book_line']:g}") for r in rows])
-_df.insert(_df.columns.get_loc(f"{_bl} now") + 1, f"{_bl} needs",
-           [FL.pct(r.get("book_need")) for r in rows])
-_df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Best price now",
+_base_l = O.book_label(base)
+
+
+def _q(price, line, pick_line):
+    if price is None:
+        return "—"
+    return f"{price:+.0f}" + ("" if line in (None, pick_line) else f" at {line:g}")
+
+
+_df.insert(_df.columns.get_loc("Board edge") + 1, f"{_base_l} now",
+           [_q(r.get("base_price"), r.get("base_line"), r.get("line")) for r in rows])
+_df.insert(_df.columns.get_loc(f"{_base_l} now") + 1, f"{_base_l} move", [r.get("base_move") or "—" for r in rows])
+if book != base:
+    _df.insert(_df.columns.get_loc(f"{_base_l} move") + 1, f"{_bl} now",
+               [_q(r.get("book_price"), r.get("book_line"), r.get("line")) for r in rows])
+    _df.insert(_df.columns.get_loc(f"{_bl} now") + 1, f"{_bl} vs {_base_l}", [r.get("vs_base") or "—" for r in rows])
+_after = f"{_bl} vs {_base_l}" if book != base else f"{_base_l} move"
+_df.insert(_df.columns.get_loc(_after) + 1, f"{_bl} needs", [FL.pct(r.get("book_need")) for r in rows])
+_df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Go?", [r.get("book_verdict") or "—" for r in rows])
+_df.insert(_df.columns.get_loc("Go?") + 1, "Best price now",
            ["—" if r.get("best_price") is None else f"{r['best_price']:+.0f} {O.book_label(r['best_book'])}"
             for r in rows])
 _df.insert(_df.columns.get_loc("Best price now") + 1, MB.app_label(app), [r.get("app_verdict") or "—" for r in rows])
-st.caption(f"**Go?** compares the earned chance with what **{_bl}'s price right now** needs: ✅ Go = 1+ point over "
+st.caption(f"**{_base_l} now** is your book's price right now (My sportsbook, the baseline); **{_base_l} move** is "
+           "how it has moved since the board read the pick (▲ better for you, ▼ worse, line changes first). "
+           + (f"**{_bl} now** and **{_bl} vs {_base_l}** show the book picked above against your baseline. " if book != base
+              else "Pick another book above to put its price beside your baseline. ")
+           + f"**Go?** compares the earned chance with what **{_bl}'s price right now** needs: ✅ Go = 1+ point over "
            "break-even · 🟡 Thin = 0–1 point (shop the price) · ⛔ No go = under break-even · 🔁 = the book posts a "
            "different line (re-check: the chance was read at the pick's line) · 📝 Paper = a close-gap test pick (no "
            "chance of its own yet). **Best price now** is the best of every sportsbook at the pick's exact line. "

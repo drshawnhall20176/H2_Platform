@@ -188,3 +188,26 @@ def judge_app(row: Dict, quotes: Dict, app: str, app_need: Optional[float]) -> s
         return f"{GO} ({ch:.0%} vs {app_need:.1%})" if ch >= app_need else f"{NOGO} ({ch:.0%} vs {app_need:.1%})"
     pt = min(lines, key=lambda x: abs(x - (line or 0)))
     return f"{OTHER} App has {pt:g} ({'better' if better_line(side, line, pt) else 'worse'})"
+
+
+# --------------------------------------------------------------------------- comparing two quotes (Nov 26)
+def _dec(price) -> Optional[float]:
+    p = _f(price)
+    if p is None or -100 < p < 100:
+        return None
+    return 1 + (p / 100 if p > 0 else 100 / -p)
+
+
+def compare(new_price, new_line, old_price, old_line, side: str, same_word: str = "= same") -> str:
+    """How quote `new` stands against quote `old` for the pick's side: ▲ better / ▼ worse, price and line.
+    A better line beats any price change; a worse line is worse whatever the price."""
+    if new_price is None or old_price is None:
+        return "—"
+    nl, ol = _f(new_line), _f(old_line)
+    if nl is not None and ol is not None and nl != ol:
+        better = better_line(side, ol, nl)
+        return f"{'▲' if better else '▼'} line {nl:g} vs {ol:g} ({'better' if better else 'worse'})"
+    dn, do = _dec(new_price), _dec(old_price)
+    if dn is None or do is None or abs(dn - do) < 1e-9:
+        return same_word
+    return f"{'▲' if dn > do else '▼'} {float(new_price):+.0f} vs {float(old_price):+.0f}"
