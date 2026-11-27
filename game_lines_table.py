@@ -143,6 +143,10 @@ def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
                               price=r.get("price"))
             if it:
                 out.append(it)
+        elif col in ("✓ Spread", "✓ Total") and full:          # Nov 27 (owner): the model's side of either line
+            it = market_item(r, "Spread" if col == "✓ Spread" else "Total")
+            if it:
+                out.append(it)
         elif col == "✓ Money" and full and r.get("money_market"):
             it = HG.side_item(full, r["money_market"], r.get("money_side"), line=r.get("money_line"),
                               price=r.get("money_price"))
@@ -150,6 +154,35 @@ def line_items(rows: Sequence[Dict], ticks) -> List[Dict]:
                 out.append(dict(it, pick=r.get("money_pick") or it["pick"],
                                 note="💰 Money pick" if r.get("money") else "Money Score pick"))
     return out
+
+
+def _model_side(full: Dict, market: str) -> Optional[str]:
+    """The side the model's numbers favour against the book's line (the edge needn't clear any bar)."""
+    try:
+        if market == "Spread":
+            if full.get("edge") is not None:
+                return "home" if float(full["edge"]) >= 0 else "away"
+            if full.get("model_margin") is not None and full.get("home_spread") is not None:
+                return "home" if float(full["model_margin"]) + float(full["home_spread"]) >= 0 else "away"
+        elif full.get("model_total") is not None and full.get("line_total") is not None:
+            return "over" if float(full["model_total"]) >= float(full["line_total"]) else "under"
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def market_item(r: Dict, market: str) -> Optional[Dict]:
+    """Nov 27 (owner: "I do not see the ability to log the spread on the game card"): the model's side of the spread or
+    of the total as a log item, at the book's line and price -- whichever one isn't already the row's Line pick."""
+    import hoops_games_page as HG
+    full = r.get("_full") or {}
+    side = full.get("pick") if market == "Spread" else full.get("total_pick")
+    if side not in (("home", "away") if market == "Spread" else ("over", "under")):
+        side = _model_side(full, market)                        # no flagged pick: still the model's side of the line
+    if side is None:
+        return None
+    it = HG.side_item(full, market, side)
+    return dict(it, note="model's side") if it else None
 
 
 def extras(r: Dict) -> Dict:

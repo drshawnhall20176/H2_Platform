@@ -879,6 +879,13 @@ def _log_boxes(g: Dict, w: Dict, day: str, key: str) -> None:
     opts = []
     if w.get("best") and w.get("bet_market"):
         opts.append(("✓ Pick", f"📏 Line pick: {w['best']}"))
+    # Nov 27 (owner): the spread (or the total) can be logged too, not only whichever one is the Line pick
+    for mk, col in (("Spread", "✓ Spread"), ("Total", "✓ Total")):
+        if w.get("bet_market") == mk and w.get("best"):
+            continue                                            # already the Line pick above
+        it = GLT.market_item(w, mk)
+        if it:
+            opts.append((col, f"{'📐' if mk == 'Spread' else '🔢'} {mk}: {it['pick']}"))
     if w.get("money_pick") and w.get("money_market"):
         opts.append(("✓ Money", f"💰 Money pick: {w['money_pick']}"))
     if w.get("winner"):
