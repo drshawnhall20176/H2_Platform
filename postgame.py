@@ -594,7 +594,8 @@ def _single_advice(graded, row) -> Dict:
     if len(sides["Over"]) >= 15 and po is not None and pu is not None and po < pu - 0.10:
         return {"kind": "advice", "n": row["Graded"],
                 "text": f"{head} Over singles are the drain ({po:+.0%} per $1 over {len(sides['Over'])}; Unders "
-                        f"{pu:+.0%}).{tail} Approve the Overs correction under ⚖️ Overs vs Unders."}
+                        f"{pu:+.0%}).{tail} The Over / Under calibration corrects this by itself each morning when it holds up "
+                        "on held-out days (⚖️ Overs vs Unders shows it)."}
     return {"kind": "info", "n": row["Graded"], "text": f"{head}{tail} No rule change suggested yet."}
 
 
