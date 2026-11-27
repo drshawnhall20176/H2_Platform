@@ -228,3 +228,18 @@ def test_player_card_header_shows_the_coach_grade():
     assert "MY COACH" in html and f">{chk['grade']}<" in html and "$" not in html
     assert PC.coach_html(None) == ""
     assert PC.coach_grade(dict(p, Side=None), "NCAAMB", bets=[], tag_records_for=lambda sp: {}) is None
+
+
+def test_game_card_can_log_the_spread_and_the_total():
+    import game_lines_table as GLT
+    full = {"home": "Pittsburgh Steelers", "away": "Denver Broncos", "home_spread": 2.5, "line_total": 37.0,
+            "pick": "away", "total_pick": "over", "model_margin": -2.1, "model_total": 43.3, "over_price": -110,
+            "under_price": -110, "league": "NFL", "home_spread_price": -110, "away_spread_price": -110}
+    w = {"_full": full, "bet_market": "Total", "best": "Over 37", "league": "NFL"}
+    sp = GLT.market_item(w, "Spread")
+    assert sp and sp["pick"].startswith("Denver Broncos -2.5")
+    items = GLT.line_items([w], [(0, "✓ Spread"), (0, "✓ Total")])
+    assert [i["pick"].split(" (")[0] for i in items] == [sp["pick"].split(" (")[0], "Over 37"]
+    no_flag = GLT.market_item({"_full": dict(full, pick=None)}, "Spread")       # not flagged: still the model's side
+    assert no_flag and no_flag["pick"].startswith("Pittsburgh Steelers +2.5")    # Denver by 2.1 < 2.5: home covers
+    assert GLT.market_item({"_full": dict(full, pick=None, model_margin=None)}, "Spread") is None
