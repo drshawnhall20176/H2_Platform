@@ -208,12 +208,37 @@ def _pg_conn():
         con.close()
 
 
+_INT_COLS = {"player_id", "hit", "rank", "of_total"}
+_REAL_COLS = {"line", "model_prob", "conviction", "actual_value", "game_margin", "team_margin"}
+
+
+def _typed(col, v):
+    """Nov 27 (owner: Retrospective broken on NFL): Postgres refuses text in a number column -- NFL player ids are
+    strings like '00-0036355'. A value that isn't a number becomes NULL in a number column (SQLite stored anything);
+    NaN becomes NULL too."""
+    if v is None:
+        return None
+    if col in _INT_COLS:
+        try:
+            f = float(v)
+            return int(f) if f == f and f == int(f) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if col in _REAL_COLS:
+        try:
+            f = float(v)
+            return f if f == f else None
+        except (TypeError, ValueError):
+            return None
+    return v
+
+
 def _pg_replace_day(slate_date, sport, rows) -> int:
     with _pg_conn() as con, con.cursor() as cur:
         cur.execute("DELETE FROM graded_plays WHERE slate_date=%s AND sport=%s", (slate_date, sport))
         # Nov 21 (page audit: Retrospective spent 2+ minutes here, one round trip per row): one batched insert
         from psycopg2.extras import execute_values
-        vals = [[fields.get(c) for c in _FIELDS] for fields in rows]
+        vals = [[_typed(c, fields.get(c)) for c in _FIELDS] for fields in rows]
         if vals:
             execute_values(cur, f"INSERT INTO graded_plays ({','.join(_FIELDS)}) VALUES %s", vals, page_size=1000)
         return len(vals)
