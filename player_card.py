@@ -348,6 +348,10 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
     extras = extras_on() if extras is None else extras
     mc = matchup_chip(p.get("_factor"), p.get("_slot")) if extras else None
     mchip = "" if not mc else " " + HB.chip(mc["text"], {"soft": HB.BLUE}.get(mc["tone"], HB.GRAY))
+    try:                                                        # Nov 27 (owner): the coach's grade up top
+        coach_mid = coach_html(coach_grade(p, sport))
+    except Exception:                                           # noqa: BLE001 -- the card never breaks on it
+        coach_mid = ""
     head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
             f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
@@ -356,7 +360,7 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             f' vs {p.get("Opp") or p.get("Versus") or ""} · {p.get("Time") or ""}</div>'
             f'<div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap;">{HB.bet_chip(bet or "Info only")}'
             + (f' {HB.chip(str(p.get("_use") or p.get("Use")), HB.BLUE)}' if (p.get("_use") or p.get("Use")) else "")
-            + mchip + f'</div></div>'
+            + mchip + f'</div></div>' + coach_mid +
             f'<div style="text-align:right;"><div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.06em;">'
             f'TONIGHT</div><div style="color:{HB.GOLD};font-size:26px;font-weight:800;">{side} {"" if line is None else f"{line:g}"}'
             f'</div><div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""}'
@@ -464,6 +468,75 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
         log_box(p, sport)
     except Exception:                                           # noqa: BLE001 -- the card never breaks on the log box
         pass
+
+
+# --------------------------------------------------------------------------- My Coach's grade in the header (Nov 27)
+# Owner, Nov 27: "put the My Coach Grade in the blank space between Player and tonight? Right now the grade only shows up
+# when I click log it and it is all the way down the bottom. this takes too long when trying to make quick decisions."
+# The same check the log box runs (coach.ticket_check on this one pick, as a single, against your Bet Log and your
+# limits), shown before you tick anything. Owner build only, like the log box -- it reads your Bet Log.
+COACH_COLOR = {"A": HB.WIN, "B": HB.WIN, "C": HB.GOLD, "D": HB.GOLD, "F": HB.LOSS, "T": HB.TEAL}
+COACH_SHORT = {"A": "Good bet — your normal stake", "B": "Fine — one thing to watch", "C": "Shaky — halve the stake",
+               "D": "Fix the red flag first", "F": "Don't place it", "T": "Test pick — small stake"}
+
+
+def _coach_bets():
+    import streamlit as st
+
+    @st.cache_data(ttl=60, show_spinner=False)
+    def bets():
+        import betlog as B
+        return B.list_bets()
+    return bets()
+
+
+def coach_grade(p: Dict, sport: str, bets=None, tag_records_for=None) -> Optional[Dict]:
+    """coach.ticket_check for this pick alone (a single, no stake yet), or None off the owner build / no gradable pick."""
+    import components as C
+    if bets is None and not C.is_owner():
+        return None
+    it = log_item(p, sport)
+    if it is None:
+        return None
+    import coach as CO
+    import pytz
+    from datetime import datetime
+    if tag_records_for is None:
+        import log_ui as LU
+        tag_records_for = LU._tag_records
+    day = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d")
+    return CO.ticket_check([it], "Singles", 0, 0, None, _coach_bets() if bets is None else bets, day,
+                           tag_records_for=tag_records_for)
+
+
+def coach_reason(chk: Dict) -> str:
+    """The one line that decides it: the first red flag, else the first caution, else the leg's own why."""
+    for lv in ("red", "amber", "test", "ok"):
+        for l, msg in chk.get("flags") or []:
+            if l == lv:
+                return str(msg).split(": ", 1)[-1] if lv in ("red", "amber") else str(msg)
+    legs = chk.get("legs") or [{}]
+    return str(legs[0].get("why") or "").split(";")[0]
+
+
+def coach_html(chk: Optional[Dict]) -> str:
+    if not chk:
+        return ""
+    g = chk["grade"]
+    col = COACH_COLOR.get(g, HB.GRAY)
+    why = coach_reason(chk)
+    short = COACH_SHORT.get(g, "")
+    if g in ("D", "F") and why.startswith("Skip"):              # the pick itself is the red flag, not your limits
+        short, why = "Skip this one", why[len("Skip — "):] if why.startswith("Skip — ") else why
+    why = why if len(why) <= 120 else why[:117].rstrip() + "…"
+    import html as _h
+    why = _h.escape(why).replace("$", "&#36;")                 # a $ would start math in the markdown
+    return (f'<div style="flex:1;min-width:200px;max-width:380px;display:flex;gap:12px;align-items:center;'
+            f'border-left:3px solid {col};padding:2px 0 2px 12px;">'
+            f'<div style="color:{col};font-size:34px;font-weight:800;line-height:1;">{g}</div>'
+            f'<div><div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.06em;">MY COACH</div>'
+            f'<div style="color:{HB.INK};font-size:14px;font-weight:700;">{short}</div>'
+            f'<div style="color:{HB.INK_SOFT};font-size:12.5px;line-height:1.35;">{why}</div></div></div>')
 
 
 def log_item(p: Dict, sport: str) -> Optional[Dict]:

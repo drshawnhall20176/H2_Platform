@@ -216,3 +216,15 @@ def test_one_sport_choice_for_the_whole_site():
     assert ss["g"] == "All"
     SC.pick_from_sidebar(SC.ALL, multi=False)                    # All sports on a one-sport page opens Today
     assert ss["_goto_page"] == "today" and SC.current() == SC.ALL
+
+
+def test_player_card_header_shows_the_coach_grade():
+    import player_card as PC
+    p = {"Player": "Chance Mallory", "Market": "Pts+Reb+Ast", "Side": "Under", "Line": 24.5, "RealPrice": -110,
+         "ModelProb": 0.55, "_earned": 0.50, "Game": "Virginia Cavaliers @ Xavier Musketeers", "Use": "No edge"}
+    chk = PC.coach_grade(p, "NCAAMB", bets=[], tag_records_for=lambda sp: {})
+    assert chk and chk["grade"] in "ABCDFT"
+    html = PC.coach_html(chk)
+    assert "MY COACH" in html and f">{chk['grade']}<" in html and "$" not in html
+    assert PC.coach_html(None) == ""
+    assert PC.coach_grade(dict(p, Side=None), "NCAAMB", bets=[], tag_records_for=lambda sp: {}) is None
