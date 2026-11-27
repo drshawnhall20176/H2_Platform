@@ -23,7 +23,8 @@ ALL = "__all__"
 MANY = "__many__"
 FLAG = "cc_all"
 MANY_KEY = "sport_many"
-MULTI_PAGES = ("today", "test_list", "rule_scoreboard", "analyst_record", "my_coach", "command_center", "")
+MULTI_PAGES = ("today", "test_list", "rule_scoreboard", "analyst_record", "my_coach", "command_center", "",
+               "pickem_board")                                   # Nov 27: the Pick'em board spans sports
 
 
 def _ss():
