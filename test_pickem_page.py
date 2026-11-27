@@ -61,7 +61,7 @@ def test_started_games_hidden_and_flags_block_the_entry(monkeypatch):
     assert PK.flag(dict(past), "draftkings") == "🔒 Started — locked"
     fut = {"kickoff": "2099-01-01T00:00:00Z", "posting": ["fanduel", "betmgm", "novig"], "basis": "books"}
     x = dict(fut)
-    assert PK.flag(x, "draftkings").startswith("ℹ️ Your book (DraftKings) doesn't post") and not x["blocked"]
+    assert PK.flag(x, "draftkings") is None and not x["blocked"]     # Nov 27: one book's absence says nothing
     y = dict(fut, posting=["draftkings", "fanduel"])
     assert PK.flag(y, "draftkings") is None and not y["blocked"]
     assert PK.flag(dict(y), "draftkings", injury="questionable").startswith("⚠️ Questionable")
@@ -113,4 +113,22 @@ def test_a_prop_pulled_since_the_last_snapshot_is_flagged():
     assert PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "draftkings")
     assert not PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "fanduel")
     x = {"kickoff": "2099-01-01T00:00:00Z", "posting": ["draftkings"], "basis": "books"}
-    assert PK.flag(x, "draftkings", pulled=True).startswith("ℹ️ Your book (DraftKings) dropped") and not x["blocked"]
+    assert PK.flag(x, "draftkings", pulled=True) is None             # superseded by the all-books check
+
+
+
+def test_books_dropped_reads_the_whole_market():
+    snap = lambda b, t: {"book": b, "captured_at": t}                       # noqa: E731
+    early, late = "2026-11-27T20:08:00Z", "2026-11-27T22:08:00Z"
+    idx = {("Isaiah Joe", "player_rebounds_assists"): [snap(b, early) for b in ("draftkings", "fanduel", "betmgm",
+                                                                              "caesars", "prizepicks")]
+           + [snap("caesars", late)],
+           ("Someone Else", "player_points"): [snap("fanduel", late)]}
+    assert PK.books_dropped(idx, "Isaiah Joe", "player_rebounds_assists") == (3, 4)   # pick'em apps don't count
+    x = {"kickoff": "2099-01-01T00:00:00Z", "basis": "books"}
+    assert PK.flag(x, "draftkings", dropped=(3, 4)).startswith("⚠️ 3 of 4 books dropped") and x["blocked"]
+    y = {"kickoff": "2099-01-01T00:00:00Z", "basis": "books"}
+    assert PK.flag(y, None, dropped=(2, 4)).startswith("ℹ️ 2 of 4") and not y["blocked"]
+    z = {"kickoff": "2099-01-01T00:00:00Z", "basis": "books"}
+    assert PK.flag(z, "draftkings", dropped=(1, 2)) is None                           # too few books to read
+    assert PK.flag(dict(z, posting=["fanduel"]), "draftkings") is None                # your book alone says nothing

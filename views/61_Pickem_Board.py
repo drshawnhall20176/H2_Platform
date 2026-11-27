@@ -292,6 +292,6 @@ with st.expander("How these chances are made, and how far to trust a 'model only
         "— check it on the app. These never go in an entry, however good the chance looks.\n"
         "- **One player per game** in every entry; the apps also pay less for same-game lineups.\n"
         "- **Check** column: 🔒 his game has started (the apps lock it) · ⛔ listed out · ⚠️ questionable — none of "
-        "these goes in an entry. ℹ️ notes are about **your sportsbook** (set in the sidebar), whatever app you're "
-        "on: it doesn't post this prop, or dropped it since earlier today. A book dropping a prop can be a status "
-        "doubt, but books also just skip markets, so it's a hint to check, not a block.")
+        "these goes in an entry. Books dropped: from today's hourly line snapshots, how many of the sportsbooks that "
+        "posted him earlier have taken this prop down — the market's own status alarm, whatever app you're on. "
+        "Three in four or more (of 3+ books) is ⚠️ and kept out of the entry; half is an ℹ️ hint to check.")
