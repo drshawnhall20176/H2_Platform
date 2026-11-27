@@ -223,7 +223,8 @@ def _entry_box():
                 st.markdown(f"All {n} hit: **{res['all']:.1%}** · expected return **{res['ev']:+.0%}** per entry "
                             f"({'+' if res['ev'] > 0 else ''}{res['ev'] * 10:.2f} on a $10 entry)")
     st.caption("Built only from lines the sportsbooks or exchanges also price, each from a different game, and never "
-               "from a started game, a player listed out or questionable, or a prop your sportsbook has pulled. A "
+               "from a started game or a player listed out or questionable (ℹ️ notes about your sportsbook are hints, not "
+               "blocks). A "
                "pick's chance is the books' no-vig chance moved to the app's line, with the model's measured say on "
                "top.")
 
@@ -290,6 +291,7 @@ with st.expander("How these chances are made, and how far to trust a 'model only
         "That's usually a discounted line that pays less (PrizePicks goblins), a stale number, or a different setup "
         "— check it on the app. These never go in an entry, however good the chance looks.\n"
         "- **One player per game** in every entry; the apps also pay less for same-game lineups.\n"
-        "- **Check** column: 🔒 his game has started (the apps lock it) · ⛔ listed out · ⚠️ questionable · ⚠️ not at "
-        "your sportsbook while others still post him — a book pulling a prop is often a status doubt. None of these "
-        "goes in an entry.")
+        "- **Check** column: 🔒 his game has started (the apps lock it) · ⛔ listed out · ⚠️ questionable — none of "
+        "these goes in an entry. ℹ️ notes are about **your sportsbook** (set in the sidebar), whatever app you're "
+        "on: it doesn't post this prop, or dropped it since earlier today. A book dropping a prop can be a status "
+        "doubt, but books also just skip markets, so it's a hint to check, not a block.")

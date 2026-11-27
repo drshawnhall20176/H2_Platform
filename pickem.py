@@ -318,20 +318,23 @@ def started(x: Dict, now=None) -> bool:
 def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, now=None,
          pulled: bool = False) -> Optional[str]:
     """The one warning that matters most for this pick, or None. Sets x["blocked"] when the entry must skip it."""
-    msg = None
+    # Nov 27 (owner, PrizePicks board showing "Not at DraftKings" on NHL saves): only a started game or the injury
+    # report keeps a pick out of the entry. What your sportsbook does is a hint, shown as one -- a book often just
+    # doesn't post a market (goalie saves), and hourly snapshots can miss a prop that's still up.
+    msg, block = None, False
     if started(x, now):
-        msg = "🔒 Started — locked"
+        msg, block = "🔒 Started — locked", True
     elif injury == "out":
-        msg = "⛔ Listed out"
+        msg, block = "⛔ Listed out", True
     elif injury == "questionable":
-        msg = "⚠️ Questionable — check his status"
+        msg, block = "⚠️ Questionable — check his status", True
     elif pulled and my_book:
-        msg = f"⚠️ {my_book_name(my_book)} pulled this prop since earlier today — check his status"
+        msg = f"ℹ️ Your book ({my_book_name(my_book)}) dropped this prop since earlier — worth a status check"
     else:
         books = [b for b in (x.get("posting") or []) if b not in SPORTSBOOKS_EXCLUDED]
         if my_book and books and my_book not in books and x.get("basis") == "books":
-            msg = f"⚠️ Not at {my_book_name(my_book)} — often a status doubt; check before you pick"
-    x["blocked"] = msg is not None
+            msg = f"ℹ️ Your book ({my_book_name(my_book)}) doesn't post this one — the other books do"
+    x["blocked"] = block
     x["flag"] = msg or ""
     return msg
 

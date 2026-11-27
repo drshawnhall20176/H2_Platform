@@ -61,13 +61,16 @@ def test_started_games_hidden_and_flags_block_the_entry(monkeypatch):
     assert PK.flag(dict(past), "draftkings") == "🔒 Started — locked"
     fut = {"kickoff": "2099-01-01T00:00:00Z", "posting": ["fanduel", "betmgm", "novig"], "basis": "books"}
     x = dict(fut)
-    assert PK.flag(x, "draftkings").startswith("⚠️ Not at DraftKings") and x["blocked"]
+    assert PK.flag(x, "draftkings").startswith("ℹ️ Your book (DraftKings) doesn't post") and not x["blocked"]
     y = dict(fut, posting=["draftkings", "fanduel"])
     assert PK.flag(y, "draftkings") is None and not y["blocked"]
     assert PK.flag(dict(y), "draftkings", injury="questionable").startswith("⚠️ Questionable")
     legs = [dict(y, player="A", game="g1", chance=0.6, side="More", app_line=1, market="Points", needed=None),
             dict(x, player="B", game="g2", chance=0.7, side="More", app_line=1, market="Points", needed=None)]
-    assert [l["player"] for l in PK.best_entry(legs, 2, 0.55)] == ["A"]
+    assert [l["player"] for l in PK.best_entry(legs, 2, 0.55)] == ["B", "A"]      # a hint never blocks
+    q = dict(fut, posting=["draftkings"])
+    PK.flag(q, "draftkings", injury="questionable")
+    assert q["blocked"]
 
 
 def test_board_spans_sports_and_slates_by_start(monkeypatch):
@@ -110,4 +113,4 @@ def test_a_prop_pulled_since_the_last_snapshot_is_flagged():
     assert PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "draftkings")
     assert not PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "fanduel")
     x = {"kickoff": "2099-01-01T00:00:00Z", "posting": ["draftkings"], "basis": "books"}
-    assert PK.flag(x, "draftkings", pulled=True).startswith("⚠️ DraftKings pulled") and x["blocked"]
+    assert PK.flag(x, "draftkings", pulled=True).startswith("ℹ️ Your book (DraftKings) dropped") and not x["blocked"]
