@@ -206,10 +206,13 @@ def test_one_sport_choice_for_the_whole_site():
     assert ss["f"] == ["NBA"]
     ss["f"] = ["NBA", "NHL"]
     SC.from_multi("f")
-    assert SC.current() == SC.MANY and SC.sidebar_options(["NBA", "NHL"], True)[:2] == [SC.ALL, SC.MANY]
+    assert SC.current() == SC.MANY and SC.sidebar_value(["NBA", "NHL"], True) == SC.ALL
+    assert SC.sidebar_options(["NBA", "NHL"], False) == SC.sidebar_options(["NBA", "NHL"], True)   # one widget everywhere
     assert SC.sidebar_value(["NBA", "NHL"], False) == "NHL"   # a single-sport page shows the last one picked
     ss["f"] = []
     SC.from_multi("f")
     assert SC.current() == SC.ALL
     SC.seed_single("g", ["All", "NBA"], "All")
     assert ss["g"] == "All"
+    SC.pick_from_sidebar(SC.ALL, multi=False)                    # All sports on a one-sport page opens Today
+    assert ss["_goto_page"] == "today" and SC.current() == SC.ALL
