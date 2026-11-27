@@ -135,8 +135,26 @@ for _sk in {x["sport"] for x in legs}:
         _inj[_sk] = _IC.report(_sk) if _IC else {}
     except Exception:                                           # noqa: BLE001
         _inj[_sk] = {}
+
+
+@st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+def _snapshots(sk, d):
+    """Today's hourly line snapshots for the sport (line_history): a book that posted a prop earlier and not in the
+    latest capture has pulled it (Nov 27)."""
+    import line_history as LH
+    return LH.sport_index(sk, since=d)
+
+
+_snaps = {}
+for _sk in {x["sport"] for x in legs}:
+    try:
+        _snaps[_sk] = _snapshots(_sk, date_str)
+    except Exception:                                           # noqa: BLE001
+        _snaps[_sk] = {}
 for x in legs:
-    PK.flag(x, _mine, (_inj.get(x["sport"]) or {}).get(_IC._norm(x["player"])) if _IC else None)
+    PK.flag(x, _mine, (_inj.get(x["sport"]) or {}).get(_IC._norm(x["player"])) if _IC else None,
+            pulled=bool(_mine) and PK.pulled_by(_snaps.get(x["sport"]) or {}, x["player"], x.get("market_key"),
+                                               _mine))
 
 f1, f2 = st.columns([1, 1])
 hide_started = f2.toggle("Hide games that have started", value=True, key="pk_hide_started",
@@ -199,6 +217,8 @@ def _entry_box():
                                         for k, m in sorted(res["table"].items(), reverse=True))
                             + f") · expected return **{res['ev']:+.0%}** per entry "
                               f"({'+' if res['ev'] > 0 else ''}{res['ev'] * 10:.2f} on a $10 entry)")
+                st.caption("Priced at PrizePicks' standard Flex payouts — the app sometimes pays less on a given "
+                           "entry, so check the Flex payouts on your entry screen before you submit.")
             else:
                 st.markdown(f"All {n} hit: **{res['all']:.1%}** · expected return **{res['ev']:+.0%}** per entry "
                             f"({'+' if res['ev'] > 0 else ''}{res['ev'] * 10:.2f} on a $10 entry)")
@@ -215,7 +235,7 @@ with st.container(border=True):
 def _fmt(x):
     return {"Time": PK.start_label(x.get("kickoff"), _today), "Sport": x.get("sport") or "",
             "Player": x["player"], "Pick": f"{x['side']} {x['app_line']:g} {x['market']}",
-            "Chance": x["chance"], "vs break-even": x["chance"] - _bar(x),
+            "Chance": round(x["chance"] * 100), "vs break-even": round((x["chance"] - _bar(x)) * 100, 1),
             "Check": x.get("flag") or (("⚠️ far from books" if x.get("far") else "📚 books")
                                        if x["basis"] == "books" else "model only"),
             "Team": x.get("team") or "", "Game": x.get("game") or "",
@@ -245,8 +265,9 @@ if rows:
               hide_index=True, width="stretch",
               caption="Tap a row to open the player's card — the sportsbooks' line and the model's read are on it.",
               column_config={
-        "Chance": st.column_config.NumberColumn(format="percent"),
-        "vs break-even": st.column_config.NumberColumn(format="percent"),
+        # Nov 27 (owner: 59.35% here, 61% in the entry box): whole percents for chances, points for the edge
+        "Chance": st.column_config.NumberColumn(format="%d%%"),
+        "vs break-even": st.column_config.NumberColumn(format="%+.1f pts"),
         "Needs": st.column_config.NumberColumn(format="percent"),
         "Books' line": st.column_config.NumberColumn(format="%.1f")})
 else:

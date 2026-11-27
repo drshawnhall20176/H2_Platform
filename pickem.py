@@ -315,7 +315,8 @@ def started(x: Dict, now=None) -> bool:
     return t <= (now or datetime.now(timezone.utc))
 
 
-def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, now=None) -> Optional[str]:
+def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, now=None,
+         pulled: bool = False) -> Optional[str]:
     """The one warning that matters most for this pick, or None. Sets x["blocked"] when the entry must skip it."""
     msg = None
     if started(x, now):
@@ -324,6 +325,8 @@ def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, n
         msg = "⛔ Listed out"
     elif injury == "questionable":
         msg = "⚠️ Questionable — check his status"
+    elif pulled and my_book:
+        msg = f"⚠️ {my_book_name(my_book)} pulled this prop since earlier today — check his status"
     else:
         books = [b for b in (x.get("posting") or []) if b not in SPORTSBOOKS_EXCLUDED]
         if my_book and books and my_book not in books and x.get("basis") == "books":
@@ -346,3 +349,19 @@ def start_label(kick, today) -> str:
     if d is None:
         return "Time TBD"
     return d.strftime("%-I:%M %p") if d.date() == today else d.strftime("%a %-I:%M %p")
+
+
+def pulled_by(index: Dict, player: str, market_key: str, book: str) -> bool:
+    """Nov 27 (owner: Isaiah Joe's prop gone from DraftKings while our feed still had it): `book` posted this player's
+    market in an earlier hourly snapshot today but not in the latest one that captured the market for other books --
+    a book pulling a prop mid-day is usually a status doubt. `index` = line_history.sport_index(sport, since=today)."""
+    rows = None
+    for (pl, mk), rs in (index or {}).items():
+        if mk == market_key and _norm(pl) == _norm(player):
+            rows = rs
+            break
+    if not rows:
+        return False
+    latest = max(str(r.get("captured_at") or "") for r in rows)
+    mine = [str(r.get("captured_at") or "") for r in rows if r.get("book") == book]
+    return bool(mine) and max(mine) < latest

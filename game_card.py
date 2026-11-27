@@ -86,7 +86,21 @@ def build(r: Dict) -> Dict:
         "money_price": r.get("money_price"),
         "move": " ".join(x for x in (r.get("spread_move") or "", r.get("spread_move_why") or "") if x) or "—",
         "last": safe(GP._last, lg, p) if p else "—",
+        "conflict": conflict(r),
     }
+
+
+def conflict(r: Dict) -> str:
+    """Nov 27 (owner: West Virginia +26 as the Line pick, Utah -26 as the 💰 Money pick, on one card): when two rules
+    take opposite sides of the same line, say so in one plain line instead of listing both as picks."""
+    if not (r.get("best") and r.get("money") and r.get("money_pick")):
+        return ""
+    if r.get("bet_market") != r.get("money_market") or not r.get("bet_side") or not r.get("money_side"):
+        return ""
+    if r.get("bet_side") == r.get("money_side"):
+        return ""
+    return ("Two rules disagree on this " + str(r.get("bet_market") or "line").lower() + ": the model's lean is "
+            f"{r['best']}, the 💰 Money Score side is {r['money_pick']}. Pick one or pass — not both.")
 
 
 def for_game(winners: List[Dict], game: str) -> Optional[Dict]:
@@ -180,6 +194,8 @@ def render(g: Dict, props: Optional[List[Dict]] = None, key: str = "gc") -> None
             bits.append(f"💰 Money pick: **{g['money_pick']}**"
                         + (f" · {g['money_chance']:.0%}" if g.get("money_chance") is not None else "")
                         + _price(g.get("money_price")))
+        if g.get("conflict"):
+            bits.append(f"⚖️ {g['conflict']}")
         bits.append(f"📈 Spread move: {g.get('move') or '—'}")
         bits.append(f"🤝 Last meetings: {g.get('last') or '—'}")
         st.markdown("  \n".join(bits))

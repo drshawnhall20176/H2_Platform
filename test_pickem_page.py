@@ -100,3 +100,14 @@ def test_flex_switch_changes_the_payout(monkeypatch):
     at.toggle(key="pk_flex").set_value(True).run()
     assert not at.exception
     assert any("6-pick Flex" in c.value and "6 of 6: 25x" in c.value for c in at.caption)
+
+
+def test_a_prop_pulled_since_the_last_snapshot_is_flagged():
+    idx = {("Isaiah Joe", "player_rebounds_assists"): [
+        {"book": "draftkings", "captured_at": "2026-11-27T15:08:00Z"},
+        {"book": "fanduel", "captured_at": "2026-11-27T15:08:00Z"},
+        {"book": "fanduel", "captured_at": "2026-11-27T20:08:00Z"}]}
+    assert PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "draftkings")
+    assert not PK.pulled_by(idx, "Isaiah Joe", "player_rebounds_assists", "fanduel")
+    x = {"kickoff": "2099-01-01T00:00:00Z", "posting": ["draftkings"], "basis": "books"}
+    assert PK.flag(x, "draftkings", pulled=True).startswith("⚠️ DraftKings pulled") and x["blocked"]
