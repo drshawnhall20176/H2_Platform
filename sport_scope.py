@@ -128,7 +128,7 @@ def sidebar_value(keys: Sequence[str], multi: bool) -> str:
     return sp if sp in keys else (list(keys) or [""])[0]
 
 
-def pick_from_sidebar(k: Optional[str], multi: bool, office: bool = False) -> None:
+def pick_from_sidebar(k: Optional[str], multi: bool, office: bool = False, sport_goto: Optional[str] = None) -> None:
     """The sidebar picker changed. All sports on a single-sport page opens Today (every sport) -- there is no
     all-sports version of that page."""
     if not k:
@@ -136,6 +136,8 @@ def pick_from_sidebar(k: Optional[str], multi: bool, office: bool = False) -> No
     choose(k)
     if k == ALL and not multi and not office:
         _ss()["_goto_page"] = "today"
+    elif k != ALL and sport_goto:                               # a page with no sport filter of its own (the classic
+        _ss()["_goto_page"] = sport_goto                        # Today) opens that sport's desk
 
 
 def label(k: str, get=None) -> str:

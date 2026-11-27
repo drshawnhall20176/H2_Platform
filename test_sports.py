@@ -2685,10 +2685,11 @@ A.sport_bar(st.session_state.get("_page", "command_center"), pages, ["NBA", "NHL
 ''').run()
     assert not at.exception, at.exception
     assert list(at.button_group[0].options)[0].endswith("All sports")
-    at.button_group[0].set_value("__all__").run()
-    assert at.session_state["cc_all"] is True and at.session_state["sport"] == "NBA"   # the sport stays for other pages
+    assert at.button_group[0].value == "__all__"                # Nov 27: a new visit starts on All sports (sport_scope)
     at.button_group[0].set_value("NHL").run()
     assert at.session_state["cc_all"] is False and at.session_state["sport"] == "NHL"
+    at.button_group[0].set_value("__all__").run()
+    assert at.session_state["cc_all"] is True and at.session_state["sport"] == "NHL"   # the sport stays for other pages
     at.session_state["_page"] = "nba_props"                     # other pages never offer "All"
     at.run()
     assert not any(o.endswith("All sports") for o in at.button_group[0].options)

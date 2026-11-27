@@ -105,4 +105,5 @@ def test_sidebar_controls_in_the_owners_order():
 
 def test_the_office_sidebar_has_sport_at_the_top_too():
     # Nov 27 (owner): the Test list's sidebar had Sport at the bottom; one order on every page
-    assert "_office_slot" not in SRC and SRC.count("slot=_sport_slot") == 2
+    assert "_office_slot" not in SRC and SRC.count("slot=_sport_slot") >= 4      # customer, Office, classic x2
+    assert "sports.render_sport_selector()" not in SRC                            # no read-only label anywhere
