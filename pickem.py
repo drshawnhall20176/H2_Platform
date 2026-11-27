@@ -22,7 +22,7 @@ What a pick'em pick needs: its chance of clearing the app's line has to beat the
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Tuple, Dict, List, Optional, Sequence
 
 NO_BOOK_SHARE = 0.10      # research/pickem_study.py: held-out best share of the model's lean with no book, 0.05-0.10
 
@@ -316,7 +316,7 @@ def started(x: Dict, now=None) -> bool:
 
 
 def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, now=None,
-         pulled: bool = False) -> Optional[str]:
+         pulled: bool = False, dropped: Optional[Tuple[int, int]] = None) -> Optional[str]:
     """The one warning that matters most for this pick, or None. Sets x["blocked"] when the entry must skip it."""
     # Nov 27 (owner, PrizePicks board showing "Not at DraftKings" on NHL saves): only a started game or the injury
     # report keeps a pick out of the entry. What your sportsbook does is a hint, shown as one -- a book often just
@@ -328,12 +328,12 @@ def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, n
         msg, block = "⛔ Listed out", True
     elif injury == "questionable":
         msg, block = "⚠️ Questionable — check his status", True
-    elif pulled and my_book:
-        msg = f"ℹ️ Your book ({my_book_name(my_book)}) dropped this prop since earlier — worth a status check"
-    else:
-        books = [b for b in (x.get("posting") or []) if b not in SPORTSBOOKS_EXCLUDED]
-        if my_book and books and my_book not in books and x.get("basis") == "books":
-            msg = f"ℹ️ Your book ({my_book_name(my_book)}) doesn't post this one — the other books do"
+    elif dropped and dropped[1] >= DROP_MIN_BOOKS and dropped[0] / dropped[1] >= DROP_BLOCK:
+        # Nov 27 (owner: check against all the books, not one): most of the books that posted him earlier today have
+        # taken him down -- the market's own status alarm
+        msg, block = f"⚠️ {dropped[0]} of {dropped[1]} books dropped this prop since earlier — check his status", True
+    elif dropped and dropped[1] >= DROP_MIN_BOOKS and dropped[0] / dropped[1] >= DROP_HINT:
+        msg = f"ℹ️ {dropped[0]} of {dropped[1]} books dropped this prop since earlier — worth a status check"
     x["blocked"] = block
     x["flag"] = msg or ""
     return msg
@@ -352,6 +352,34 @@ def start_label(kick, today) -> str:
     if d is None:
         return "Time TBD"
     return d.strftime("%-I:%M %p") if d.date() == today else d.strftime("%a %-I:%M %p")
+
+
+DROP_MIN_BOOKS = 3          # need this many books posting him earlier today to read anything into a drop
+DROP_HINT = 0.5             # half of them gone: a hint
+DROP_BLOCK = 0.75           # three in four gone: kept out of the entry
+
+
+def books_dropped(index: Dict, player: str, market_key: str) -> Optional[Tuple[int, int]]:
+    """(books that dropped him, books that posted him earlier today) for one player market, from today's hourly
+    snapshots: posted in an earlier capture, missing from the sport's latest capture hour. Sportsbooks only -- the
+    pick'em apps and exchanges don't count. None when there's nothing to compare."""
+    if not index:
+        return None
+    latest = max((str(r.get("captured_at") or "") for rs in index.values() for r in rs), default="")
+    if not latest:
+        return None
+    hour = latest[:13]
+    rows = None
+    for (pl, mk), rs in index.items():
+        if mk == market_key and _norm(pl) == _norm(player):
+            rows = rs
+            break
+    if not rows:
+        return None
+    books = lambda rs: {r.get("book") for r in rs if r.get("book") and r.get("book") not in SPORTSBOOKS_EXCLUDED}  # noqa: E731
+    earlier = books(rows)
+    now = books([r for r in rows if str(r.get("captured_at") or "")[:13] == hour])
+    return (len(earlier - now), len(earlier)) if earlier else None
 
 
 def pulled_by(index: Dict, player: str, market_key: str, book: str) -> bool:
