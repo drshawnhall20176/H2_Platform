@@ -301,10 +301,10 @@ _league_cache = None
 
 
 def cached_league(sport: str, day: str) -> Dict:
-    """load_league, cached 30 minutes and shared by every card and page that needs it."""
+    """load_league, cached 3 hours and shared by every card and page that needs it."""
     global _league_cache
     import streamlit as st
     if _league_cache is None:
-        _league_cache = st.cache_data(ttl=1800, show_spinner="Reading the league's defenses…", max_entries=8)(
+        _league_cache = st.cache_data(ttl=10800, show_spinner="Reading the league's defenses…", max_entries=8)(  # Nov 27: 3 h -- defenses change when games end
             lambda sp, d: load_league(sp, d))
     return _league_cache(sport, str(day)[:10])

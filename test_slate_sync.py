@@ -228,6 +228,7 @@ def test_nba_pick_pages_render_the_shared_model(monkeypatch, page):
     monkeypatch.setattr(quick_log, "render_quick_log", lambda *a, **k: None)
     at = AppTest.from_file(str(Path(__file__).parent / "views" / page), default_timeout=90)
     at.session_state["sport"] = "NBA"
+    at.session_state["bb_all_cols"] = True                      # Nov 27: All picks shows its core columns by default
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     if page.startswith("1_"):

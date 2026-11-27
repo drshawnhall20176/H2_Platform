@@ -143,6 +143,50 @@ def for_player(sport: str, data: Dict, name: str, team_label: str, game: str, ma
     return {"slot": slot, "label": label, "stat": key, "defense": opp_name, "rows": rows}
 
 
+# --------------------------------------------------------------------------- the matchup grade (Nov 27)
+# Owner build list (PropSeason's matchup letter beside every prop): how much tonight's defense gives up in the pick's
+# stat to the player's role, as soft_spots' A+ ... F (A+ = gives up the most). A description of the matchup, not a
+# chance -- the projection already counts the defense.
+def matchup_grade(sport: str, data: Dict, name: str, team_label: str, game: str, market: str,
+                  tables: Optional[Dict] = None) -> Optional[Dict]:
+    """{"grade", "rank", "of", "label", "stat"} or None when the role, the stat or the defense can't be read.
+    `tables`: a dict reused across calls (stat -> soft_spots.table_any), so a whole board is one pass."""
+    import soft_spots as SS
+    key = stat_key(market)
+    if not key or " @ " not in str(game or "") or not data.get("allowed") or not data.get("summary"):
+        return None
+    away, home = [x.strip() for x in str(game).split(" @ ", 1)]
+    x = SS.match_game(sport, data.get("games") or [], away, home)
+    if not x:
+        return None
+    t = _norm(team_label)
+    home_keys = {_norm(x.get("home")), _norm(x.get("home_abbr")), _norm(home)}
+    is_home = t in home_keys or any(k and (k.endswith(" " + t) or t.endswith(" " + k)) for k in home_keys)
+    mine, opp = (x["home_id"], x["away_id"]) if is_home else (x["away_id"], x["home_id"])
+    slot = his_slot(data["allowed"], mine, name)
+    if not slot:
+        return None
+    tables = {} if tables is None else tables
+    if key not in tables:
+        tables[key] = SS.table_any(data["summary"], key, tuple(SS.slots_for(sport)), min_teams=8)
+    tb = tables[key].get(slot) or {}
+    rec = tb.get(opp)
+    if not rec:
+        return None
+    label = SS.slots_for(sport).get(slot, slot)
+    return {"grade": SS.letter(rec[1], len(tb)), "rank": rec[1], "of": len(tb), "label": label, "stat": key}
+
+
+def grade_text(g: Optional[Dict]) -> str:
+    if not g:
+        return "—"
+    return f"{g['grade']} · {SSord(g['rank'])} most of {g['of']} to {g['label']}"
+
+
+def SSord(n: int) -> str:                                       # noqa: N802
+    return f"{n}{'tsnrhtdd'[(n // 10 % 10 != 1) * (n % 10 < 4) * n % 10::4]}"
+
+
 def text(h: Dict, sport: str) -> str:
     bits = [f"{when(r['when'], sport)} {r['name']} {r['value']:g}" + (f" ({r['vs']})" if r.get("vs") else "")
             for r in h["rows"]]
