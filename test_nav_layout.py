@@ -100,3 +100,9 @@ def test_sidebar_controls_in_the_owners_order():
     import inspect
     src = inspect.getsource(MB.sidebar)
     assert src.index("sportsbook") < src.index("pick'em")
+
+
+
+def test_the_office_sidebar_has_sport_at_the_top_too():
+    # Nov 27 (owner): the Test list's sidebar had Sport at the bottom; one order on every page
+    assert "_office_slot" not in SRC and SRC.count("slot=_sport_slot") == 2

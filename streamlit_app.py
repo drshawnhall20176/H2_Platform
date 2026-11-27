@@ -276,7 +276,7 @@ def run():
     if audience == "owner":
         st.session_state.setdefault(NL.PREVIEW_KEY, True)       # Nov 25: the customer layout is live -- on by default
     # Nov 25 (owner): the sidebar's controls in this order -- Sport, My sportsbook, My pick'em app, Layout, then the
-    # public-build note. The Sport picker is drawn here in the customer layout (the Owner Office draws its own).
+    # public-build note -- on every page, the Owner Office included (Nov 27, owner: "synergy site wide").
     import office as _OF0
     _early_sport = (NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
                     and not (audience == "owner" and _OF0.active(st.session_state)))
@@ -652,14 +652,13 @@ def run():
         for sec in OF.SECTION_ORDER[1:]:
             if office.get(sec):
                 office_nav[sec] = office[sec]
-        _office_slot = st.sidebar.container()
         if st.sidebar.button("⬅ Back to Today", key="office_back"):
             OF.leave(st.session_state)
             st.rerun()
         page = st.navigation(office_nav)
         st.session_state["_office_mode_sport_picker"] = True     # Nov 25: a real sport picker inside the Office
         try:
-            sports.render_sport_selector(multi=_SC.is_multi(getattr(page, "url_path", "")), slot=_office_slot)
+            sports.render_sport_selector(multi=_SC.is_multi(getattr(page, "url_path", "")), slot=_sport_slot)   # Nov 27 (owner): Sport at the top, as everywhere
         finally:
             st.session_state["_office_mode_sport_picker"] = False
         if today_pg is not None and getattr(page, "title", None) == "Today":
