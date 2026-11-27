@@ -560,14 +560,14 @@ def render_sport_selector(picker: bool = False, multi: bool = False, slot=None):
             opts = SC.sidebar_options(keys, multi)
             st.session_state["_office_sport"] = SC.sidebar_value(keys, multi)
 
+            _office = bool(st.session_state.get("_office_mode_sport_picker"))
+
             def _pick():                                        # Nov 26: the widget's value can be gone mid-switch
-                k = st.session_state.get("_office_sport")
-                if k and k != SC.MANY:
-                    SC.choose(k)
+                SC.pick_from_sidebar(st.session_state.get("_office_sport"), multi, _office)
             st.selectbox("Sport", opts, key="_office_sport", on_change=_pick,
                          format_func=lambda k: SC.label(k, get),
                          help="One choice for the whole site: this picker and the sport filter on the page always "
-                              "match. Pages that cover every sport also offer All sports here.")
+                              "match. All sports on a one-sport page opens Today.")
         else:
             st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
     return current

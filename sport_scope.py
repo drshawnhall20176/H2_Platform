@@ -112,25 +112,35 @@ def from_multi(key: str) -> None:
 
 
 # --------------------------------------------------------------------------- the sidebar picker
-def sidebar_options(keys: Sequence[str], multi: bool) -> List[str]:
-    if not multi:
-        return list(keys)
-    return [ALL] + ([MANY] if current() == MANY else []) + list(keys)
+def sidebar_options(keys: Sequence[str], multi: bool = True) -> List[str]:
+    """The same list on every page: a picker whose options change between pages is a new widget to the browser, which
+    can send back its first option (All sports) and wipe the choice (seen live, Nov 27)."""
+    return [ALL] + list(keys)
 
 
 def sidebar_value(keys: Sequence[str], multi: bool) -> str:
+    """All sports on a page that spans sports when that's the choice (several picked shows as All sports here; the
+    page's filter lists them); otherwise the sport the page shows."""
     cur = current()
     if multi and cur in (ALL, MANY):
-        return cur
+        return ALL
     sp = _ss().get("sport")
     return sp if sp in keys else (list(keys) or [""])[0]
+
+
+def pick_from_sidebar(k: Optional[str], multi: bool, office: bool = False) -> None:
+    """The sidebar picker changed. All sports on a single-sport page opens Today (every sport) -- there is no
+    all-sports version of that page."""
+    if not k:
+        return
+    choose(k)
+    if k == ALL and not multi and not office:
+        _ss()["_goto_page"] = "today"
 
 
 def label(k: str, get=None) -> str:
     if k == ALL:
         return "🌐 All sports"
-    if k == MANY:
-        return "🌐 Several sports: " + ", ".join(many())
     try:
         sp = (get or __import__("sports").get)(k)
         return f"{sp.icon} {sp.label}"
