@@ -17,6 +17,8 @@ import re
 import streamlit as st
 import cache_guard as _CG
 _CG.install()             # Nov 20: cap every cache before any module defines one
+import deploy_reload as _DR
+_DR.check()               # Nov 27: new code merged -> the platform's modules load fresh (no "tap restart")
 import table_style as _TS
 _TS.install()             # Nov 23 (owner): every table's columns centered, headers included
 _TS.install_phone()       # Nov 23 (owner): phones get cards instead of wide tables

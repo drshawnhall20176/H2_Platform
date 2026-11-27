@@ -5,7 +5,7 @@ import keep_warm as KW
 
 def test_keep_warm_is_dispatched_by_clockwork_on_its_own_cron():
     assert "keep-warm" in CW.WORKFLOWS
-    assert CW.crons_of("keep-warm") == ["57 * * * *"]
+    assert CW.crons_of("keep-warm") == ["27,57 * * * *"]
 
 
 def test_page_text_reads_every_frame():

@@ -63,7 +63,7 @@ live = [s for s in sports.enabled_sports() if sports.in_season(s.key)]
 props_sports = [s.key for s in live if s.key in CT.PROPS_SPORTS]
 
 
-@st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=8)   # Nov 27: the boards are rebuilt hourly
 def _load(day, keys, past=False):
     best = TB.collect(day, list(keys), past=past)
     try:
@@ -85,7 +85,7 @@ def _games_map(keys, day):
     return many(keys, day) if many else {k: CT.has_games(k, day) for k in keys}
 
 
-@st.cache_data(ttl=600, show_spinner=False, max_entries=4)
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=4)
 def _search_rows(day, keys):
     """Nov 25: every playable pick saved for the day (the player search), not just the top picks."""
     out = []
@@ -94,13 +94,13 @@ def _search_rows(day, keys):
     return out
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)   # Nov 27: records move when games are graded
 def _tag_recs(sp):
     import pick_records as PR
     return PR.tag_records(sp)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _lean_recs(lg):
     import pick_records as PR
     return PR.lean_records(lg)

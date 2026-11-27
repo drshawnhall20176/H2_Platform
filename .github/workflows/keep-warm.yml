@@ -4,7 +4,7 @@ name: keep-warm
 
 on:
   schedule:
-    - cron: "57 * * * *"     # every hour, after warm-slates (:49) has started
+    - cron: "27,57 * * * *"  # twice an hour (Nov 27): after warm-slates (:49), and again so 30-min caches stay full
   workflow_dispatch:
 
 permissions:
