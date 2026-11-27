@@ -261,3 +261,34 @@ def test_saved_lean_records_round_trip():
                                     now=now + timedelta(hours=4)) == {"fresh": (1, 1)}   # too old: worked out again
     finally:
         PR.lean_records = orig
+
+
+
+def test_coach_header_without_a_price():
+    import player_card as PC
+    p = {"Player": "Kel'el Ware", "Market": "Rebounds", "Side": "Under", "Line": 7.5, "ModelProb": 0.68,
+         "_earned": 0.5, "Game": "A @ B"}
+    chk = PC.coach_grade(p, "NBA", bets=[], tag_records_for=lambda sp: {})
+    assert chk["no_price"] and "No price posted yet" in PC.coach_html(chk) and "50%" in PC.coach_html(chk)
+    chk2 = PC.coach_grade(dict(p, Price=-115), "NBA", bets=[], tag_records_for=lambda sp: {})
+    assert not chk2.get("no_price") and chk2["grade"] in "ABCDFT"
+
+
+def test_game_card_names_a_rule_conflict():
+    import game_card as G
+    r = {"best": "West Virginia +26", "money": True, "money_pick": "Utah -26", "bet_market": "Spread",
+         "money_market": "Spread", "bet_side": "away", "money_side": "home"}
+    assert "Two rules disagree" in G.conflict(r)
+    assert G.conflict(dict(r, money_side="away")) == "" and G.conflict(dict(r, money=False)) == ""
+
+
+def test_test_list_remembers_dropped_picks():
+    import focus_list as FL
+    seen = {}
+    rows = [{"sport": "NCAAMB", "game": "A @ Liberty", "pick": "Liberty -5.5", "kind": FL.GAP, "time": "7:00 PM",
+             "open_as": "game"}]
+    assert FL.remember(seen, rows, "t") and not FL.remember(seen, rows, "t2")
+    gone = FL.dropped(seen, [])
+    assert [e["pick"] for e in gone] == ["Liberty -5.5"]
+    assert FL.dropped(seen, [], started=lambda e: True) == []
+    assert "off the board" in FL.why_dropped(gone[0], [], []).lower()

@@ -260,3 +260,72 @@ def log_item(r: Dict, book: str) -> Optional[Dict]:
             "book": book if use_book else (src.get("book") or "draftkings"),
             "notes_extra": {MONEY: "money-pick", TRACK: "tracked-rule", PAUSED: "paused-rule",
                             HELD: "held-back"}.get(r["kind"])}
+
+
+# --------------------------------------------------------------------------- dropped since earlier (Nov 27)
+# Owner, Nov 27 ("Liberty was on here but now it's not"): every pick the list has shown today is remembered, and one
+# that leaves before its game starts is listed with the reason it no longer qualifies, instead of just vanishing.
+SEEN_KEY = "testlist:seen:{}"
+
+
+def row_key(r: Dict) -> str:
+    return f"{r.get('sport')}|{r.get('game')}|{r.get('pick')}|{r.get('kind')}"
+
+
+def remember(seen: Dict, rows: Iterable[Dict], now_iso: str) -> bool:
+    """Add today's new rows to `seen` (in place). True when anything new was added (worth saving)."""
+    new = False
+    for r in rows or []:
+        k = row_key(r)
+        if k not in seen:
+            seen[k] = {"pick": r.get("pick"), "kind": r.get("kind"), "sport": r.get("sport"), "game": r.get("game"),
+                       "time": r.get("time"), "first": now_iso, "price": r.get("price"), "chance": r.get("chance"),
+                       "open_as": r.get("open_as")}
+            new = True
+    return new
+
+
+def why_dropped(e: Dict, winners: Iterable[Dict], props: Iterable[Dict]) -> str:
+    """Plain words for why a remembered pick is off the list now."""
+    import game_previews as GP
+    if e.get("open_as") == "game":
+        w = next((w for w in winners or [] if w.get("game") == e.get("game")), None)
+        if not w:
+            return "The game is off the board — the books took its lines down or it was rescheduled."
+        full = w.get("_full") or {}
+        lg = w.get("league") or e.get("sport") or ""
+        bits = []
+        try:
+            g = GP.gap_text(full, lg)
+            if e.get("kind") == GAP and g and not str(g).startswith("✅"):
+                bits.append(f"model and market now {g} pts apart — the close-gap rule needs 2 or less")
+        except Exception:                                       # noqa: BLE001
+            pass
+        if e.get("kind") in (MONEY, PAUSED):
+            ms, mp = w.get("money_score"), w.get("money_pick")
+            if not mp:
+                bits.append("its Money Score left the band (no 💰 side now)")
+            elif str(mp) not in str(e.get("pick")):
+                bits.append(f"the 💰 side moved to {mp}")
+            elif ms is not None:
+                bits.append(f"Money Score now {ms:.0f}")
+        return ("Still on the board, but " + "; ".join(bits) + ".") if bits else \
+            "Still on the board, but its line moved and it no longer qualifies."
+    name = str(e.get("pick") or "")
+    p = next((p for p in props or [] if p.get("pick") and str(p.get("pick")) == name), None)
+    if not p:
+        return "Off the board — the books took the prop down (often a status change) or the line moved past the model."
+    return f"Still on the board as {p.get('use') or 'no edge'} — the price or line moved out of its rule."
+
+
+def dropped(seen: Dict, current: Iterable[Dict], started=None) -> List[Dict]:
+    """Remembered picks that aren't on the list now and whose game hasn't started."""
+    now_keys = {row_key(r) for r in current or []}
+    out = []
+    for k, e in (seen or {}).items():
+        if k in now_keys:
+            continue
+        if started is not None and started(e):
+            continue
+        out.append(e)
+    return sorted(out, key=lambda e: str(e.get("time") or ""))

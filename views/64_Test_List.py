@@ -59,6 +59,26 @@ except Exception as exc:                                        # noqa: BLE001
     st.stop()
 
 every = FL.build(props, winners, kinds=FL.KINDS, parse_time=C._kick_dt)
+
+# Nov 27 (owner: "Liberty was on here but now it's not"): remember every pick shown today; one that leaves before its
+# game starts is listed below with the reason
+_dropped = []
+try:
+    import model_store as _MSD
+    _seen_key = FL.SEEN_KEY.format(day)
+    _seen = dict(_MSD.get_setting(_seen_key, None) or {})
+    if FL.remember(_seen, every, _now.isoformat()):
+        _MSD.save_setting(_seen_key, _seen)
+
+    def _begun(e):
+        k = C._kick_dt(e.get("time"))
+        try:
+            return k is not None and k <= _now
+        except TypeError:
+            return False
+    _dropped = FL.dropped(_seen, every, started=_begun)
+except Exception:                                               # noqa: BLE001 -- the list never depends on it
+    _dropped = []
 sports_here = sorted({r["sport"] for r in every})
 d1, d2 = st.columns([3, 1])
 import sport_scope as _SC                                       # Nov 27: this filter and the sidebar are one choice
@@ -187,6 +207,14 @@ m3.metric("⏸ Paused / off · 📉 Held back", f"{n[FL.PAUSED]} · {n[FL.HELD]}
 m4.metric("Boards read at", read_at)
 # Nov 27 (owner: the explanations pushed the list down): the how-to-read text one tap away, the list right under the
 # numbers
+if _dropped:
+    with st.expander(f"↩️ Dropped since earlier today ({len(_dropped)}) — and why", expanded=False):
+        st.dataframe(pd.DataFrame([{"Time": e.get("time") or "", "Pick": e.get("pick"), "Was": e.get("kind"),
+                                    "Why it's off": FL.why_dropped(e, winners, props)} for e in _dropped]),
+                     hide_index=True, width="stretch")
+        st.caption("Picks this list showed earlier today that no longer qualify, before their games start. The list "
+                   "follows the books' lines every hour, so a pick leaves when its line moves out of its rule.")
+
 with st.expander("ℹ️ What Bet and Paper rows mean", expanded=False):
     st.caption("**Bet** rows are the tested picks. **Paper** rows are every rule still being tested, paused or held "
                "back — track them (or log them at a small test stake) so each one builds the record that decides "
@@ -236,7 +264,16 @@ if book != base:
     _df.insert(_df.columns.get_loc(f"{_bl} now") + 1, f"{_bl} vs {_base_l}", [r.get("vs_base") or "—" for r in rows])
 _after = f"{_bl} vs {_base_l}" if book != base else f"{_base_l} move"
 _df.insert(_df.columns.get_loc(_after) + 1, f"{_bl} needs", [FL.pct(r.get("book_need")) for r in rows])
-_df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Go?", [r.get("book_verdict") or "—" for r in rows])
+def _go(r):
+    """Nov 27 (owner: '✅ Go' on a paused rule's moneylines read like 'bet this'): on a paper row the verdict only says
+    the price is fair for the chance -- the rule itself isn't proven, so it says so."""
+    v = r.get("book_verdict") or "—"
+    if r.get("kind") in (FL.PAUSED, FL.HELD, FL.GAP, FL.TRACK):
+        return {"✅ Go": "✅ Price OK (paper)", "🟡 Thin": "🟡 Price thin (paper)"}.get(v, v)
+    return v
+
+
+_df.insert(_df.columns.get_loc(f"{_bl} needs") + 1, "Go?", [_go(r) for r in rows])
 _df.insert(_df.columns.get_loc("Go?") + 1, "Best price now",
            ["—" if r.get("best_price") is None else f"{r['best_price']:+.0f} {O.book_label(r['best_book'])}"
             for r in rows])
@@ -273,6 +310,8 @@ with st.expander("📖 How to read the columns", expanded=False):
            "baseline.\n" if book != base else
            "- Pick another book in **Check prices at** to put its price and its comparison beside your baseline.\n")
         + f"- **Go?** (at {_bl}): ✅ Go = earned chance 1+ point over the price's break-even · 🟡 Thin = 0–1 point "
+        "· on a Paper row it reads **Price OK (paper)**: the price is fair for the chance, but the rule behind it isn't "
+        "proven, so it's not a bet "
         "(shop the price) · ⛔ No go = under break-even, or a worse line · 🔁 = a different, better line (re-check: "
         "the chance was read at the pick's line) · 📝 Paper = a test pick with no chance of its own yet.\n"
         "- **Best price now**: the best of every sportsbook at the pick's exact line.\n"

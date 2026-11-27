@@ -498,6 +498,17 @@ def coach_grade(p: Dict, sport: str, bets=None, tag_records_for=None) -> Optiona
     it = log_item(p, sport)
     if it is None:
         return None
+    if it.get("price") is None:
+        # Nov 27 (owner): a pick with no price at your book was graded B ("no live price to check") -- grade it at the
+        # best price elsewhere when there is one, and say plainly when there's none
+        alt = next((p.get(k) for k in ("Price", "Odds", "best_price") if p.get(k) not in (None, "", "—")), None)
+        try:
+            it = dict(it, price=float(alt)) if alt is not None else it
+        except (TypeError, ValueError):
+            pass
+        if it.get("price") is None:
+            return {"grade": "—", "no_price": True, "flags": [], "legs": [{}],
+                    "chance": it.get("chance")}
     import coach as CO
     import pytz
     from datetime import datetime
@@ -522,6 +533,15 @@ def coach_reason(chk: Dict) -> str:
 def coach_html(chk: Optional[Dict]) -> str:
     if not chk:
         return ""
+    if chk.get("no_price"):
+        ch = chk.get("chance")
+        return (f'<div style="flex:1;min-width:200px;max-width:380px;display:flex;gap:12px;align-items:center;'
+                f'border-left:3px solid {HB.GRAY};padding:2px 0 2px 12px;">'
+                f'<div style="color:{HB.GRAY};font-size:34px;font-weight:800;line-height:1;">—</div>'
+                f'<div><div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.06em;">MY COACH</div>'
+                f'<div style="color:{HB.INK};font-size:14px;font-weight:700;">No price posted yet</div>'
+                f'<div style="color:{HB.INK_SOFT};font-size:12.5px;line-height:1.35;">Can\'t grade it until a book '
+                f'prices it' + (f' — the model gives it {float(ch):.0%}' if ch is not None else '') + '.</div></div></div>')
     g = chk["grade"]
     col = COACH_COLOR.get(g, HB.GRAY)
     why = coach_reason(chk)
