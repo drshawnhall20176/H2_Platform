@@ -532,7 +532,7 @@ def require_live_engine(feature_name: str = "This page") -> bool:
     return True
 
 
-def render_sport_selector(picker: bool = False):
+def render_sport_selector(picker: bool = False, multi: bool = False, slot=None):
     """Sidebar sport indicator -- shows the active sport as a compact read-only label.
     The real interactive selector lives on the Home page where it's always visible and
     unobstructed. This label keeps sidebar users oriented without taking up space or
@@ -549,18 +549,25 @@ def render_sport_selector(picker: bool = False):
         st.session_state["sport"] = current
 
     active = get(current)
-    with st.sidebar:
+    with (slot if slot is not None else st.sidebar):
         if picker or st.session_state.get("_office_mode_sport_picker"):
             # Nov 25 (owner: "there is no way to change to a different sport within the bet log without having to
-            # exit out to the today screen"): inside the Owner Office the sidebar's sport is a real picker
-            st.session_state["_office_sport"] = current
+            # exit out to the today screen"): inside the Owner Office the sidebar's sport is a real picker.
+            # Nov 27 (owner: the sidebar said NFL while the page showed all sports): one choice for the whole site
+            # (sport_scope) -- on a page that spans sports the picker offers All sports, and the page's own filter
+            # and this picker always show the same thing.
+            import sport_scope as SC
+            opts = SC.sidebar_options(keys, multi)
+            st.session_state["_office_sport"] = SC.sidebar_value(keys, multi)
 
             def _pick():                                        # Nov 26: the widget's value can be gone mid-switch
-                st.session_state["sport"] = st.session_state.get("_office_sport") or st.session_state.get(
-                    "sport", DEFAULT_SPORT)
-            st.selectbox("Sport", keys, key="_office_sport", on_change=_pick,
-                         format_func=lambda k: f"{get(k).icon} {get(k).label}" if get(k) else k,
-                         help="Every page in the menu shows this sport (Today's own bar sets it too).")
+                k = st.session_state.get("_office_sport")
+                if k and k != SC.MANY:
+                    SC.choose(k)
+            st.selectbox("Sport", opts, key="_office_sport", on_change=_pick,
+                         format_func=lambda k: SC.label(k, get),
+                         help="One choice for the whole site: this picker and the sport filter on the page always "
+                              "match. Pages that cover every sport also offer All sports here.")
         else:
             st.markdown(f"**Sport:** {active.icon} {active.label}" if active else "**Sport:** MLB")
     return current

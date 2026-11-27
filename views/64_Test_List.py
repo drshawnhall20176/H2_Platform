@@ -61,7 +61,10 @@ except Exception as exc:                                        # noqa: BLE001
 every = FL.build(props, winners, kinds=FL.KINDS, parse_time=C._kick_dt)
 sports_here = sorted({r["sport"] for r in every})
 d1, d2 = st.columns([3, 1])
-pick_sports = d1.multiselect("Sports", sports_here, placeholder="All sports", key="tl_sports")
+import sport_scope as _SC                                       # Nov 27: this filter and the sidebar are one choice
+_SC.seed_multi("tl_sports", sports_here)
+pick_sports = d1.multiselect("Sports", sports_here, placeholder="All sports", key="tl_sports",
+                             on_change=_SC.from_multi, args=("tl_sports",))
 hide_started = d2.toggle("Hide games that have started", value=day == _now.strftime("%Y-%m-%d"), key="tl_hide")
 rows = FL.build(props, winners, kinds=kinds or FL.DEFAULT_KINDS, sports=pick_sports or None, parse_time=C._kick_dt)
 if hide_started:

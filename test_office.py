@@ -109,4 +109,9 @@ def test_customer_layout_has_a_real_sport_picker():
     assert not at.exception
     pick = [s for s in at.selectbox if s.label == "Sport"]
     assert pick, "no Sport picker in the customer sidebar"
-    assert pick[0].value == at.session_state["sport"] and len(pick[0].options) > 1
+    # Nov 27: on Today (every sport) the sidebar and Today's bar are one choice -- a new visit starts on All sports
+    assert pick[0].value == "__all__" and len(pick[0].options) > 1
+    pick[0].set_value("NHL").run()
+    assert not at.exception and at.session_state["sport"] == "NHL" and not at.session_state["cc_all"]
+    bar = at.button_group(key="today_one")                                  # Today's bar follows the sidebar
+    assert bar.value == ("NHL" if "NHL" in bar.options else "ALL")

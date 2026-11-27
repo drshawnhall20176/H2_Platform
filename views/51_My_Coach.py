@@ -130,8 +130,10 @@ st.caption("Every bet on offer with a live price, judged at its **earned** chanc
            "its record) and held to your rules below. Only bets that keep every rule and that the coach would place "
            "make the list — 🟢 Good bets first, then your best lane, then the biggest edge; at most 5 from one sport.")
 _TOP_SPORTS = ["NFL", "NBA", "NHL", "NCAAF", "NCAAMB"]
+import sport_scope as _SC                                       # Nov 27: this filter and the sidebar are one choice
+_SC.seed_single("coach_top_sport", ["🌐 All sports"] + _TOP_SPORTS, "🌐 All sports")
 _top_pick = st.radio("Sport", ["🌐 All sports"] + _TOP_SPORTS, horizontal=True, key="coach_top_sport",
-                     label_visibility="collapsed")
+                     label_visibility="collapsed", on_change=_SC.from_single, args=("coach_top_sport", "🌐 All sports"))
 _top_keys = _TOP_SPORTS if _top_pick.startswith("🌐") else [_top_pick]
 import hashlib as _hl0
 _code0 = _hl0.md5(open(CO.__file__, "rb").read()).hexdigest()

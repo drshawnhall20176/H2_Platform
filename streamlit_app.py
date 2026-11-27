@@ -280,8 +280,10 @@ def run():
     import office as _OF0
     _early_sport = (NL.is_commercial(audience, st.session_state.get(NL.PREVIEW_KEY))
                     and not (audience == "owner" and _OF0.active(st.session_state)))
-    if _early_sport:
-        sports.render_sport_selector(picker=True)
+    import sport_scope as _SC
+    # Nov 27: the Sport picker keeps its place at the top of the sidebar, but is drawn once the page is known, so it
+    # can offer All sports on a page that spans sports (sport_scope)
+    _sport_slot = st.sidebar.container()
     try:                                                        # Nov 25: site-wide "My sportsbook / pick'em app"
         import my_books as MB
         MB.sidebar()
@@ -622,9 +624,9 @@ def run():
         sections = NL.arrange(sections)      # customer order; Today replaces Home
         # Nov 25 (owner, the day it went live: "there is no way to return to a sports selector"): a real sport picker
         # in the customer sidebar -- Today's bar was the only way to change sport
-        if not _early_sport:                                    # the layout was switched on this run
-            sports.render_sport_selector(picker=True)
         _cnav = st.navigation(sections)
+        sports.render_sport_selector(picker=True, multi=_SC.is_multi(getattr(_cnav, "url_path", "")),
+                                     slot=_sport_slot)
         # Nov 27: Today's "Live now" strip changes the sport and parks the Live page here (it only exists in the
         # menu once the menu is built for that sport)
         _goto = st.session_state.pop("_goto_page", None)
@@ -650,15 +652,16 @@ def run():
         for sec in OF.SECTION_ORDER[1:]:
             if office.get(sec):
                 office_nav[sec] = office[sec]
-        st.session_state["_office_mode_sport_picker"] = True     # Nov 25: a real sport picker inside the Office
-        try:
-            sports.render_sport_selector()
-        finally:
-            st.session_state["_office_mode_sport_picker"] = False
+        _office_slot = st.sidebar.container()
         if st.sidebar.button("⬅ Back to Today", key="office_back"):
             OF.leave(st.session_state)
             st.rerun()
         page = st.navigation(office_nav)
+        st.session_state["_office_mode_sport_picker"] = True     # Nov 25: a real sport picker inside the Office
+        try:
+            sports.render_sport_selector(multi=_SC.is_multi(getattr(page, "url_path", "")), slot=_office_slot)
+        finally:
+            st.session_state["_office_mode_sport_picker"] = False
         if today_pg is not None and getattr(page, "title", None) == "Today":
             OF.leave(st.session_state)
             st.rerun()
