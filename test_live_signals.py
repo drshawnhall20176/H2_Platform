@@ -243,3 +243,21 @@ def test_game_card_can_log_the_spread_and_the_total():
     no_flag = GLT.market_item({"_full": dict(full, pick=None)}, "Spread")       # not flagged: still the model's side
     assert no_flag and no_flag["pick"].startswith("Pittsburgh Steelers +2.5")    # Denver by 2.1 < 2.5: home covers
     assert GLT.market_item({"_full": dict(full, pick=None, model_margin=None)}, "Spread") is None
+
+
+def test_saved_lean_records_round_trip():
+    from datetime import datetime, timedelta, timezone
+    import pick_records as PR
+    d = {"Spread": (10, 18), ("Spread", 2): (4, 6), "Total": (0, 0)}
+    store = {}
+    now = datetime(2026, 11, 27, 18, tzinfo=timezone.utc)
+    orig = PR.lean_records
+    try:
+        PR.lean_records = lambda lg, *a, **k: d
+        assert PR.save_lean_records(["NBA"], save=lambda k, v: store.__setitem__(k, v), now=now) == 1
+        assert PR.lean_records_fast("NBA", get=lambda k, dflt=None: store.get(k), now=now + timedelta(hours=1)) == d
+        PR.lean_records = lambda lg, *a, **k: {"fresh": (1, 1)}
+        assert PR.lean_records_fast("NBA", get=lambda k, dflt=None: store.get(k),
+                                    now=now + timedelta(hours=4)) == {"fresh": (1, 1)}   # too old: worked out again
+    finally:
+        PR.lean_records = orig

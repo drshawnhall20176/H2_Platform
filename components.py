@@ -135,9 +135,8 @@ LIVE_DATA_PAGES = {
     "Postgame Review", "QB Lab", "Slip Lab", "Speculative Basket", "Suggested Parlays", "Tennis Lab", "UFC Fight Card",
     "Model Dashboard", "Retrospective", "Position Matchups", "Command Center", "League Schedules",
 }
-LOAD_NOTICE = ("⏳ Load times vary: this page pulls live odds and game data. The first load of the day can take up to "
-               "a minute or two; after that it's quicker (most data is reused for 5–15 minutes). If it's still "
-               "running, give it a moment before refreshing.")
+# Nov 27 (owner: too much text above the content; the pages are fast now): one short line
+LOAD_NOTICE = "⏳ Live odds and game data — the first load after a quiet spell takes longer; then it's quick."
 
 
 def needs_load_notice(title: str) -> bool:

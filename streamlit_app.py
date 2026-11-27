@@ -233,7 +233,7 @@ def run():
         # and a fresh session starts on it.
         st.session_state["sport"] = _sports.from_link(keys) or _sports.default_selectable(_owner)
     active_sport = st.session_state["sport"]
-    _sports.keep_in_link(active_sport)
+    # Nov 27: the link is kept by the Sport picker, once the page is known (sports.render_sport_selector)
 
     # Sidebar sport picker -- called here so it renders in the sidebar. Streamlit places
     # st.navigation() page links at the top of the sidebar regardless of call order, so the

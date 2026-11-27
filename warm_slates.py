@@ -53,6 +53,11 @@ def main(argv=None) -> int:
     save_games_on(day, seen)
     boards(day)
     grade_live_signals(day)
+    try:                                                        # Nov 27: Today's 30-day game-line records, saved
+        import pick_records as PR
+        print(f"lean records saved: {PR.save_lean_records(('NBA', 'NCAAMB', 'NHL', 'NFL', 'NCAAF', 'WNBA'))}")
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"lean records not saved ({type(exc).__name__})")
     return 0
 
 

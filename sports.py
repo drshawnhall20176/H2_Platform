@@ -564,6 +564,16 @@ def render_sport_selector(picker: bool = False, multi: bool = False, slot=None, 
 
             def _pick():                                        # Nov 26: the widget's value can be gone mid-switch
                 SC.pick_from_sidebar(st.session_state.get("_office_sport"), multi, _office, sport_goto)
+            # Nov 27 (owner: the link kept an old ?sport= after a change): the link says what the page shows -- the
+            # sport, or nothing on an every-sport page set to All sports
+            try:
+                if multi and SC.current() in (SC.ALL, SC.MANY):
+                    if LINK_PARAM in st.query_params:
+                        del st.query_params[LINK_PARAM]
+                else:
+                    keep_in_link(st.session_state.get("sport") or current)
+            except Exception:                                   # noqa: BLE001
+                pass
             st.selectbox("Sport", opts, key="_office_sport", on_change=_pick,
                          format_func=lambda k: SC.label(k, get),
                          help="One choice for the whole site: this picker and the sport filter on the page always "
