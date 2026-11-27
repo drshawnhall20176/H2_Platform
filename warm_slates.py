@@ -49,12 +49,30 @@ def main(argv=None) -> int:
                       f"{time.time() - t0:.0f}s")
             except Exception as exc:                            # noqa: BLE001
                 print(f"NBA league sample failed ({type(exc).__name__}: {exc})")
+    seen.update(other_sports_games(day, set(seen)))
     save_games_on(day, seen)
     boards(day)
     return 0
 
 
 GAMES_KEY = "games_on:{day}"
+
+
+def other_sports_games(day: str, done: set, check=None) -> dict:
+    """Nov 27 (owner: speed): the sports this build doesn't make a board for (soccer, tennis, INTL, UFC, the off-season
+    leagues) -- checked here, side by side, so Today never asks their feeds on a member's load. 1 = games, 0 = none;
+    a sport whose check fails is left out (Today then asks it itself)."""
+    try:
+        import sports
+        keys = [s.key for s in sports.enabled_sports() if s.key not in done]
+        if check is None:
+            import customer_today as CT
+            check = lambda ks: CT.has_games_many(ks, day, saved={})
+        got = check(keys) if keys else {}
+        return {k: int(bool(v)) for k, v in got.items() if v is not None}
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"other sports' schedules failed ({type(exc).__name__}: {exc})")
+        return {}
 
 
 def save_games_on(day: str, seen: dict, save=None, get=None) -> None:

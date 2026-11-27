@@ -51,3 +51,17 @@ def test_members_are_not_sent_to_the_office():
     t = CT.empty_reason(["NBA"], {"NFL": 10}, owner=False)
     assert "Test list" not in t and "under Games" in t
     assert "Test list" in CT.empty_reason(["NBA"], {"NFL": 10})
+
+
+def test_build_checks_the_sports_it_has_no_board_for(monkeypatch):
+    import types
+    import sports
+    import warm_slates as WS
+    monkeypatch.setattr(sports, "enabled_sports", lambda: [types.SimpleNamespace(key=k)
+                                                           for k in ("NBA", "NFL", "SOCCER", "UFC", "TENNIS")])
+    seen = []
+    got = WS.other_sports_games("2026-11-27", {"NBA", "NFL"},
+                                check=lambda ks: seen.extend(ks) or {k: (None if k == "UFC" else k == "SOCCER")
+                                                                    for k in ks})
+    assert seen == ["SOCCER", "UFC", "TENNIS"]
+    assert got == {"SOCCER": 1, "TENNIS": 0}
