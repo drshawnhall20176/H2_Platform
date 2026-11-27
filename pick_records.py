@@ -372,3 +372,56 @@ def market_counts(sport: str) -> Dict[str, int]:
     except Exception:                                           # noqa: BLE001
         pass
     return {}
+
+
+# --------------------------------------------------------------------------- saved by the hourly job (Nov 27)
+# Owner, Nov 27 (first loads after a quiet spell still slow): the 30-day game-line records were Today's slowest step
+# (~4 s: every league's saved games graded on the page). The hourly warm-slates job now works them out and saves them;
+# the page reads the saved copy when it's fresh and only computes when it isn't.
+LEAN_KEY = "records:lean:{}"
+LEAN_MAX_AGE_H = 3
+
+
+def _lean_ser(d: Dict) -> Dict:
+    return {(f"{k[0]}|{k[1]}" if isinstance(k, tuple) else k): list(v) for k, v in (d or {}).items()}
+
+
+def _lean_de(d: Dict) -> Dict:
+    out = {}
+    for k, v in (d or {}).items():
+        if "|" in k:
+            mk, b = k.split("|", 1)
+            out[(mk, int(b))] = tuple(v)
+        else:
+            out[k] = tuple(v)
+    return out
+
+
+def save_lean_records(leagues, save=None, now=None) -> int:
+    from datetime import datetime, timezone
+    import model_store as MS
+    save = save or MS.save_setting
+    n = 0
+    for lg in leagues:
+        try:
+            save(LEAN_KEY.format(lg), {"at": (now or datetime.now(timezone.utc)).isoformat(),
+                                       "data": _lean_ser(lean_records(lg))})
+            n += 1
+        except Exception:                                       # noqa: BLE001
+            continue
+    return n
+
+
+def lean_records_fast(league: str, get=None, now=None) -> Dict:
+    """The saved copy when it's under LEAN_MAX_AGE_H hours old, else lean_records worked out now."""
+    from datetime import datetime, timezone
+    try:
+        import model_store as MS
+        rec = (get or MS.get_setting)(LEAN_KEY.format(league), None)
+        if rec and rec.get("at"):
+            age = (now or datetime.now(timezone.utc)) - datetime.fromisoformat(rec["at"])
+            if age.total_seconds() < LEAN_MAX_AGE_H * 3600:
+                return _lean_de(rec.get("data") or {})
+    except Exception:                                           # noqa: BLE001
+        pass
+    return lean_records(league)

@@ -103,7 +103,8 @@ def _tag_recs(sp):
 @st.cache_data(ttl=3600, show_spinner=False)
 def _lean_recs(lg):
     import pick_records as PR
-    return PR.lean_records(lg)
+    f = getattr(PR, "lean_records_fast", None)                  # Nov 27: the hourly job's saved copy
+    return f(lg) if f else PR.lean_records(lg)
 
 
 with _PF.timed("Boards: picks + game lines (TB.collect, winner_rows)"):

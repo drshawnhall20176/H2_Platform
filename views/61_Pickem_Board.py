@@ -57,7 +57,8 @@ def _pk_changed():
 
 
 app = c1.radio("App", list(PK.APPS), format_func=lambda k: PK.APPS[k]["name"], horizontal=True, key="pk_app",
-               on_change=_pk_changed)
+               on_change=_pk_changed,
+               help="This is your saved pick'em app: changing it here changes it in the sidebar and on every page.")
 cfg = PK.APPS[app]
 priced = PK.is_priced(app)
 if cfg.get("power"):

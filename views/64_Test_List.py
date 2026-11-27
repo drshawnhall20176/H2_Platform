@@ -185,17 +185,20 @@ m1.metric("💰 Money picks · 🃏 Bets", f"{n[FL.MONEY]} · {n[FL.BET]}", help
 m2.metric("🧪 Close gap · prop rules", f"{n[FL.GAP]} · {n[FL.TRACK]}", help="Rules being tested forward: paper.")
 m3.metric("⏸ Paused / off · 📉 Held back", f"{n[FL.PAUSED]} · {n[FL.HELD]}", help="Paper: what those rules would bet.")
 m4.metric("Boards read at", read_at)
-st.caption("**Bet** rows are the tested picks. **Paper** rows are every rule still being tested, paused or held back — "
-           "track them (or log them at a small test stake) so each one builds the record that decides whether it goes "
-           "live. Rules that need the hourly board rebuild show up after the next one (:49 past the hour).")
-
-try:                                                            # the close-gap rule's forward record, right here
-    import candidate_rules as CR
-    cg = CR.status_line("NCAAMB", day)
-    if cg:
-        st.caption(cg)
-except Exception:                                               # noqa: BLE001
-    pass
+# Nov 27 (owner: the explanations pushed the list down): the how-to-read text one tap away, the list right under the
+# numbers
+with st.expander("ℹ️ What Bet and Paper rows mean", expanded=False):
+    st.caption("**Bet** rows are the tested picks. **Paper** rows are every rule still being tested, paused or held "
+               "back — track them (or log them at a small test stake) so each one builds the record that decides "
+               "whether it goes live. Rules that need the hourly board rebuild show up after the next one (:49 past "
+               "the hour).")
+    try:                                                        # the close-gap rule's forward record
+        import candidate_rules as CR
+        cg = CR.status_line("NCAAMB", day)
+        if cg:
+            st.caption(cg)
+    except Exception:                                           # noqa: BLE001
+        pass
 
 if not rows:
     st.info("Nothing on the list for these filters. That's an answer too: no tested pick qualifies right now. Boards "
