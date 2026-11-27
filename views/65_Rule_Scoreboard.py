@@ -52,7 +52,10 @@ f1, f2 = st.columns(2)
 stages = ["Live test", "Paused", "Paper"]
 pick_stage = f1.pills("Stage", stages, selection_mode="multi", default=stages, key="rs_stage")
 sports_ = sorted({r["sport"] for r in rules})
-pick_sport = f2.multiselect("Sports", sports_, placeholder="All sports", key="rs_sport")
+import sport_scope as _SC                                       # Nov 27: this filter and the sidebar are one choice
+_SC.seed_multi("rs_sport", sports_)
+pick_sport = f2.multiselect("Sports", sports_, placeholder="All sports", key="rs_sport",
+                            on_change=_SC.from_multi, args=("rs_sport",))
 shown = [r for r in rules if r["stage"] in (pick_stage or stages) and (not pick_sport or r["sport"] in pick_sport)]
 order = {"Live test": 0, "Paused": 1, "Paper": 2}
 shown.sort(key=lambda r: (order.get(r["stage"], 9), -(r["m"].get("n") or 0)))

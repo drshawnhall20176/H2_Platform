@@ -153,18 +153,15 @@ def _label(k):
     return f"{sp.icon} {k}" + (" · beta" if k in sports.LAB_SPORTS else "")
 
 
+import sport_scope as _SC                                       # Nov 27: this bar and the sidebar are one choice
+
+
 def _one_changed():
-    k = st.session_state.get("today_one")
-    if k and k != ALL:
-        st.session_state["sport"] = k                           # the sidebar follows the sport picked here
+    _SC.from_single("today_one", ALL)
 
 
 def _multi_changed():
-    now = list(st.session_state.get("today_sports") or [])
-    new = [k for k in now if k not in st.session_state.get("_today_prev", [])]
-    if new:
-        st.session_state["sport"] = new[-1]
-    st.session_state["_today_prev"] = now
+    _SC.from_multi("today_sports")
 
 
 def _mode_changed():
@@ -179,10 +176,11 @@ def _mode_changed():
 
 multi = st.session_state.get("today_multi", False)
 if multi:
+    _SC.seed_multi("today_sports", _bar)
     picked = st.pills("Sports", _bar, selection_mode="multi", key="today_sports", format_func=_label,
                       on_change=_multi_changed, label_visibility="collapsed") or None
 else:
-    st.session_state.setdefault("today_one", ALL)
+    _SC.seed_single("today_one", [ALL] + _bar, ALL)
     _one = st.pills("Sports", [ALL] + _bar, selection_mode="single", key="today_one",
                     format_func=_label, on_change=_one_changed, label_visibility="collapsed")
     picked = None if (not _one or _one == ALL) else [_one]

@@ -191,3 +191,25 @@ def test_the_money_pause_lifts_itself(monkeypatch):
                         {"money_games|NBA": {"stage": "Paused", "since": "2026-12-01"}})
     assert MSC.paused("NBA", "2026-12-03")
     MSC._STAGE_CACHE.clear()
+
+
+def test_one_sport_choice_for_the_whole_site():
+    import streamlit as st
+    import sport_scope as SC
+    ss = st.session_state
+    for k in ("sport", "cc_all", "sport_many", "f"):
+        ss.pop(k, None) if hasattr(ss, "pop") else None
+    assert SC.current() == SC.ALL                                # a new visit: All sports
+    SC.choose("NBA")
+    assert SC.current() == "NBA" and ss["sport"] == "NBA"
+    SC.seed_multi("f", ["NBA", "NHL"])
+    assert ss["f"] == ["NBA"]
+    ss["f"] = ["NBA", "NHL"]
+    SC.from_multi("f")
+    assert SC.current() == SC.MANY and SC.sidebar_options(["NBA", "NHL"], True)[:2] == [SC.ALL, SC.MANY]
+    assert SC.sidebar_value(["NBA", "NHL"], False) == "NHL"   # a single-sport page shows the last one picked
+    ss["f"] = []
+    SC.from_multi("f")
+    assert SC.current() == SC.ALL
+    SC.seed_single("g", ["All", "NBA"], "All")
+    assert ss["g"] == "All"

@@ -92,7 +92,8 @@ def test_model_record_page_renders_without_a_database():
 
 def test_sidebar_controls_in_the_owners_order():
     # Nov 25 (owner): Sport, My sportsbook, My pick'em app, Layout, then the public-build note
-    i = [SRC.index(x) for x in ("sports.render_sport_selector(picker=True)", "MB.sidebar()", '"📱 Layout"',
+    # Nov 27: the Sport picker's place is held by a container (drawn once the page is known)
+    i = [SRC.index(x) for x in ("_sport_slot = st.sidebar.container()", "MB.sidebar()", '"📱 Layout"',
                                 "🌐 Public build")]
     assert i == sorted(i)
     import my_books as MB

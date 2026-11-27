@@ -42,7 +42,10 @@ _covered = [s.key for s in sports.enabled_sports() if s.has_projections]
 sport_options = _covered + sorted({r["sport"] for r in all_rows} - set(_covered))
 c1, c2 = st.columns([1, 2])
 with c1:
-    sport_pick = st.selectbox("Sport", ["All sports"] + sport_options, key="record_sport")
+    import sport_scope as _SC                                   # Nov 27: this filter and the sidebar are one choice
+    _SC.seed_single("record_sport", ["All sports"] + sport_options, "All sports")
+    sport_pick = st.selectbox("Sport", ["All sports"] + sport_options, key="record_sport",
+                              on_change=_SC.from_single, args=("record_sport", "All sports"))
 with c2:
     basis = st.radio("Record basis", ["Everything the model flagged", "Published to the audience only"], horizontal=True,
                      key="record_basis",
