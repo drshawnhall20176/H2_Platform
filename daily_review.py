@@ -7,8 +7,8 @@ Postgame Review: for every sport with a slate (or open bets) it
   1. grades yesterday's kickoff snapshots against ESPN's box scores (postgame.fetch_results / grade -- the same code
      the Postgame Review page uses), and summarises them: the model's side, each Use tag's hit rate, each market,
      the "line far from the projection" props, the star-out props, why the misses missed, and the biggest misses;
-  2. lists the projection adjustments the last 30 days point to. These are SUGGESTIONS -- nothing changes the model
-     until an owner approves one on the Postgame Review page;
+  2. lists the projection adjustments the last 30 days point to, and (Nov 10) applies each one that holds up on the
+     props graded since that market's last change (postgame.auto_tunings) -- no approval needed;
   3. settles open Bet Log props by name against the final box (prop_settlement.build_plan) and then settles any
      parlay ticket whose legs now decide it. Anything uncertain -- a DNP, a name the box spells differently, a game
      that isn't final -- is left open and listed in the report.

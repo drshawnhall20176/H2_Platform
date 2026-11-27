@@ -155,3 +155,39 @@ def test_matchup_grade_text():
     assert RH.grade_text({"grade": "A", "rank": 2, "of": 32, "label": "WR1s", "stat": "rec_yds"}) == \
         "A · 2nd most of 32 to WR1s"
     assert RH.grade_text(None) == "—"
+
+
+def test_rules_move_by_their_own_record():
+    import rule_scoreboard as RS
+    base = {"rule": "close_gap", "key": "close_gap|NCAAMB", "health": "", "ready": False}
+    assert RS.next_stage(dict(base, stage="Paper", ready=True)) == ("Live test", "cleared Gate 1")
+    assert RS.next_stage(dict(base, stage="Paper", health="⛔ Pause line: x"))[0] == "Retired"
+    assert RS.next_stage(dict(base, stage="Retired")) == ("Paper", "its record moved back off the pause line")
+    assert RS.next_stage(dict(base, stage="Live test", ready=True)) == ("Proven", "cleared Gate 2")
+    assert RS.next_stage(dict(base, stage="Proven", health="⛔ Pause line: y"))[0] == "Paused"
+    assert RS.next_stage(dict(base, stage="Paused", ready=True)) == ("Live test", "cleared its return gate")
+    assert RS.next_stage(dict(base, stage="Live test")) is None
+    rec = {"rules": [dict(base, stage="Paper", ready=True),
+                     {"rule": "money_props", "key": "money_props|NBA", "stage": "Paper", "ready": True, "health": ""}]}
+    new, moves = RS.advance(rec, {}, "2026-11-27")
+    assert [m["key"] for m in moves] == ["close_gap|NCAAMB"]          # 💰 props keep their own weekly switch
+    assert new["close_gap|NCAAMB"]["stage"] == "Live test" and new["close_gap|NCAAMB"]["since"] == "2026-11-27"
+    assert RS.stage("close_gap", "NCAAMB", "2026-11-28", new) == "Live test"
+
+
+def test_the_money_pause_lifts_itself(monkeypatch):
+    import model_store as MS
+    import money_score as MSC
+    monkeypatch.setattr(MSC, "PAUSED", {"NCAAMB": "2026-11-22"})
+    MSC._STAGE_CACHE.clear()
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None, db_path=None: {})
+    assert MSC.paused("NCAAMB", "2026-11-27") and not MSC.paused("NCAAMB", "2026-11-20")
+    MSC._STAGE_CACHE.clear()
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None, db_path=None:
+                        {"money_games|NCAAMB": {"stage": "Live test", "since": "2026-12-01"}})
+    assert MSC.paused("NCAAMB", "2026-11-27") and not MSC.paused("NCAAMB", "2026-12-02")
+    MSC._STAGE_CACHE.clear()
+    monkeypatch.setattr(MS, "get_setting", lambda k, d=None, db_path=None:
+                        {"money_games|NBA": {"stage": "Paused", "since": "2026-12-01"}})
+    assert MSC.paused("NBA", "2026-12-03")
+    MSC._STAGE_CACHE.clear()

@@ -267,17 +267,40 @@ def result(s: Dict) -> Optional[str]:
     return "win" if (s["y"] == 1) == home_or_over else "loss"
 
 
+_STAGE_CACHE: Dict[str, tuple] = {}
+
+
+def paused(lg: str, day: Optional[str] = None) -> bool:
+    """Is the 💰 game-line rule paused for this league? Nov 27 (owner: every loop autonomous): the Rule scoreboard's
+    stage moves it -- a Paused league comes back by itself when its record clears the return gate, and a live league
+    pauses itself on a pause line. PAUSED is only the starting point for a league the scoreboard hasn't moved."""
+    import time as _t
+    import props_engine as PE
+    day = str(day or PE._et_today())[:10]
+    hit = _STAGE_CACHE.get("v")
+    if hit and _t.time() - hit[0] < 600:
+        stages = hit[1]
+    else:
+        try:
+            import model_store as MS
+            stages = MS.get_setting("rules:stages", None) or {}
+        except Exception:                                       # noqa: BLE001
+            stages = {}
+        _STAGE_CACHE["v"] = (_t.time(), stages)
+    moved = stages.get(f"money_games|{lg}") or {}
+    if moved.get("stage") and day >= str(moved.get("since") or ""):
+        return moved["stage"] == "Paused"
+    return lg in PAUSED and day >= PAUSED[lg]
+
+
 def is_money(lg: str, s: Optional[Dict], day: Optional[str] = None) -> bool:
     """💰 on a game line: a MONEY_LEAGUES moneyline / spread scoring inside BAND, while the live test (or the sport's
     weekly 💰 verdict) has 💰 on for that league."""
     import props_engine as PE
     if not s or lg not in MONEY_LEAGUES or s.get("mkt") not in MONEY_MARKETS:
         return False
-    if lg in PAUSED:
-        if day is None:
-            day = PE._et_today()
-        if str(day)[:10] >= PAUSED[lg]:
-            return False
+    if paused(lg, day):
+        return False
     ok = (BAND[0] <= s["score"] < BAND[1] and (s.get("chance") or 0) >= MIN_CHANCE
           and lg in PE.money_sports(day=day))
     if ok:                                                      # Nov 21: switched off by its record (shutoff.py)

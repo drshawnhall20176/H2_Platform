@@ -54,6 +54,7 @@ def _game_money_not_paused(monkeypatch, request):
     try:
         import money_score as _MSC
         monkeypatch.setattr(_MSC, "PAUSED", {})
+        _MSC._STAGE_CACHE.clear() if hasattr(_MSC, "_STAGE_CACHE") else None
     except Exception:                                           # noqa: BLE001
         pass
 

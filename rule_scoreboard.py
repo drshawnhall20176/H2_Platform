@@ -24,7 +24,7 @@ import math
 import random
 import sys
 from datetime import date, timedelta
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 KEY = "rules:scoreboard"
 WINDOW = 60
@@ -194,22 +194,26 @@ def health(m: Dict) -> str:
 
 
 # --------------------------------------------------------------------------- stage
-def stage(rule: str, sport: str, today: str) -> str:
-    """Where the rule sits today, from the switches the platform runs on."""
+def stage(rule: str, sport: str, today: str, stages: Optional[Dict] = None) -> str:
+    """Where the rule sits today: the stage its own record moved it to (rules:stages, Nov 27), else the switches the
+    platform runs on."""
     import props_engine as PE
+    saved = (stages or {}).get(f"{rule}|{sport}") if rule in MANAGED else None
+    if saved and saved.get("stage"):
+        return saved["stage"]
     if rule == "money_props":
         return "Live test" if sport in PE.money_sports(day=today) else "Paper"
     if rule == "lock":
         return "Live test"
     if rule == "money_games":
         import money_score as MSC
-        p = MSC.PAUSED.get(sport)
+        p = MSC.PAUSED.get(sport)                               # the seed; rules:stages moves it from here
         return "Paused" if p and today >= p else "Live test"
     return "Paper"
 
 
 def build(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict], today: str, get=None,
-          close_gap: Optional[List] = None) -> Dict:
+          close_gap: Optional[List] = None, stages: Optional[Dict] = None) -> Dict:
     """Every rule's picks and metrics for the page."""
     picks: Dict[str, List] = {}
     for sp, graded in (graded_by or {}).items():
@@ -227,7 +231,7 @@ def build(graded_by: Dict[str, Sequence[Dict]], games: Sequence[Dict], today: st
     for key, ps in sorted(picks.items()):
         rule, sp = key.split("|", 1)
         m = metrics(ps, weekly=sp in WEEKLY, today=today)
-        st_ = stage(rule, sp, today)
+        st_ = stage(rule, sp, today, stages)
         nxt = ("Close gap's gate" if rule == "close_gap" else
                "Gate 2" if st_ == "Live test" else "Return (Gate 2)" if st_ == "Paused" else "Gate 1")
         checks = close_gap_gate(m) if rule == "close_gap" else gate(m, GATE2 if st_ in ("Live test", "Paused") else GATE1)
@@ -274,7 +278,15 @@ def run(today: Optional[str] = None) -> Dict:
         except Exception:                                       # noqa: BLE001
             pass
         d0 += timedelta(days=1)
-    rec = build(graded_by, games, today)
+    stages = load_stages()
+    rec = build(graded_by, games, today, stages=stages)
+    new, moves = advance(rec, stages, today)                     # Nov 27: the Rulebook's gates move rules by themselves
+    if moves:
+        save_stages(new)
+        rec = build(graded_by, games, today, stages=new)
+        for m in moves:
+            print(f"stage: {m['key']} {m['from']} -> {m['to']} ({m['why']})")
+    rec["moves"] = moves
     save(rec)
     print(f"rule scoreboard: {len(rec['rules'])} rules scored through {today}; "
           f"{sum(r['ready'] for r in rec['rules'])} clear their next gate")
@@ -393,7 +405,7 @@ def stage_text(r: Optional[Dict], today: str) -> str:
     """'📝 Paper · 34 of 100 to Gate 1 · ~Dec 4' -- short enough for a table cell."""
     if not r:
         return "—"
-    if retired(r):
+    if retired(r) or r.get("stage") == "Retired":
         return "⛔ Retired by its record"
     st_ = r.get("stage") or "Paper"
     m = r.get("m") or {}
@@ -419,3 +431,75 @@ def stage_text(r: Optional[Dict], today: str) -> str:
 
 def by_key(rec: Optional[Dict]) -> Dict[str, Dict]:
     return {r["key"]: r for r in ((rec or {}).get("rules") or []) if r.get("key")}
+
+
+
+# --------------------------------------------------------------------------- the gates act on their own (Nov 27)
+# Owner, Nov 27: "all the feedback loops in the model should not have to await my approval. all of it should be
+# autonomous." The Rulebook's lifecycle now moves each rule by its own record, every morning after the scoreboard is
+# scored -- no one promotes, pauses or brings back a rule by hand:
+#   Paper     -> Live test  when it clears Gate 1          Paper  -> Retired  when it crosses a pause line
+#   Live test -> Proven     when it clears Gate 2          Live test / Proven -> Paused  on a pause line
+#   Paused    -> Live test  when it clears its return gate Retired -> Paper   when its record is back off the pause line
+# 💰 Money props and 🔒 Most probable keep their own automatic switches (the weekly money review and the shut-off), so
+# they are scored here but not moved. Saved under STAGES_KEY with the date and the reason; every move is printed.
+STAGES_KEY = "rules:stages"
+MANAGED = ("money_games", "close_gap", "nfl_under_vs_fav", "ncaaf_under", "ncaaf_under_same")
+LIVE = ("Live test", "Proven")
+
+
+def load_stages(get=None) -> Dict:
+    import model_store as MS
+    try:
+        return dict((get or MS.get_setting)(STAGES_KEY, None) or {})
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
+def save_stages(stages: Dict, save_fn=None) -> None:
+    import model_store as MS
+    (save_fn or MS.save_setting)(STAGES_KEY, stages)
+
+
+def next_stage(r: Dict) -> Optional[Tuple[str, str]]:
+    """(new stage, why) for one scored rule, or None when it stays."""
+    st_, ready = r.get("stage"), bool(r.get("ready"))
+    pause = str(r.get("health") or "").startswith("⛔")
+    if st_ == "Paper":
+        if pause:
+            return "Retired", r["health"]
+        if ready:
+            return "Live test", "cleared Gate 1"
+    elif st_ == "Retired":
+        if not pause:
+            return "Paper", "its record moved back off the pause line"
+    elif st_ in LIVE:
+        if pause:
+            return "Paused", r["health"]
+        if st_ == "Live test" and ready:
+            return "Proven", "cleared Gate 2"
+    elif st_ == "Paused" and ready and not pause:
+        return "Live test", "cleared its return gate"
+    return None
+
+
+def advance(rec: Dict, stages: Dict, today: str) -> Tuple[Dict, List[Dict]]:
+    new, moves = dict(stages or {}), []
+    for r in (rec or {}).get("rules") or []:
+        if r.get("rule") not in MANAGED:
+            continue
+        nx = next_stage(r)
+        if not nx:
+            continue
+        to, why = nx
+        hist = list((new.get(r["key"]) or {}).get("history") or [])
+        hist.append({"day": today, "from": r["stage"], "to": to, "why": why})
+        new[r["key"]] = {"stage": to, "since": today, "why": why, "history": hist[-20:]}
+        moves.append({"key": r["key"], "from": r["stage"], "to": to, "why": why, "day": today})
+    return new, moves
+
+
+def stage_of(key: str, stages: Optional[Dict] = None) -> Optional[str]:
+    """The stage a rule's record moved it to (None = never moved: its default)."""
+    st_ = (stages if stages is not None else load_stages()).get(key) or {}
+    return st_.get("stage")

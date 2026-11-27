@@ -162,7 +162,11 @@ try:
     for r in rows:
         _rr = _rules.get(RS.row_rule_key(r) or "")
         r["stage_text"] = RS.stage_text(_rr, day)
-        r["retired"] = bool(_rr) and RS.retired(_rr)
+        r["retired"] = bool(_rr) and (RS.retired(_rr) or _rr.get("stage") == "Retired")
+        # Nov 27 (owner: every loop autonomous): a paper rule its record promoted to Live test is a bet now
+        if _rr and _rr.get("stage") in ("Live test", "Proven") and r["kind"] in (FL.GAP, FL.TRACK):
+            r["kind"] = FL.BET
+            r["what"] = f"{_rr.get('label') or 'Rule'} — moved to {_rr['stage']} by its record"
     _retired_n = sum(1 for r in rows if r.get("retired"))
     if _retired_n and not st.toggle(f"Show {_retired_n} pick(s) from retired rules", value=False, key="tl_retired",
                                     help="A paper rule retires itself when its record crosses a pause line on the "
