@@ -52,7 +52,31 @@ def main(argv=None) -> int:
     seen.update(other_sports_games(day, set(seen)))
     save_games_on(day, seen)
     boards(day)
+    grade_live_signals(day)
     return 0
+
+
+def grade_live_signals(day: str) -> int:
+    """Nov 27: grade the live edges the Live page kept (live_signals.py) whose games have ended -- today's and
+    yesterday's, so a game nobody had open at the final whistle still gets its result."""
+    from datetime import date, timedelta
+    try:
+        import intl_hoops as I
+        import live_games as LG
+        import live_signals as LS
+        d = date.fromisoformat(day)
+
+        def summary(lg, event_id):
+            if lg not in LG.ESPN_PATH or not event_id:
+                return {}
+            return I._http(f"https://site.api.espn.com/apis/site/v2/sports/{LG.ESPN_PATH[lg]}/summary",
+                           {"event": event_id}) or {}
+        n = LS.grade_pending([(d - timedelta(days=1)).isoformat(), day], LG.games, summary)
+        print(f"live edges graded: {n}")
+        return n
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"live edges grading failed ({type(exc).__name__}: {exc})")
+        return 0
 
 
 GAMES_KEY = "games_on:{day}"

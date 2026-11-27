@@ -1,0 +1,133 @@
+"""Nov 27: live edges kept at first sighting and graded at the final (live_signals.py), the Live page's edges panel
+and record, and Today's Live-now strip (live_now.py)."""
+import json
+from datetime import date
+
+import pytest
+
+import live_now as LN
+import live_signals as LS
+import model_store as MS
+
+
+def _g(state="in", hs=50, as_=40, gid="g1"):
+    return {"league": "NBA", "id": gid, "event_id": "e1", "home": "Home", "away": "Away", "home_score": hs,
+            "away_score": as_, "state": state, "period": 3, "clock_left": 6.0, "halftime": False,
+            "kickoff": "2026-11-27T00:00:00Z", "detail": ""}
+
+
+def test_only_green_bets_are_kept_and_only_once():
+    saved = {}
+
+    def save(items):
+        new = {k: v for k, v in items.items() if k not in saved}
+        saved.update(new)
+        return len(items)
+    bets = [{"bet": "Home -4.5", "market": "Spread", "side": "home", "line": -4.5, "price": -110, "chance": 0.6,
+             "edge": 0.146},
+            {"bet": "Over 220.5", "market": "Total", "side": "over", "line": 220.5, "price": -110, "chance": 0.52,
+             "edge": -0.007}]
+    seen = set()
+    assert LS.record_new("2026-11-27", _g(), bets, "Q3 6:00", "t1", seen=seen, save=save) == 1
+    assert list(saved) == ["2026-11-27|NBA|g1|Home -4.5"]
+    assert LS.record_new("2026-11-27", _g(), bets, "Q3 5:00", "t2", seen=seen, save=save) == 0   # seen this session
+    first = json.loads(saved["2026-11-27|NBA|g1|Home -4.5"])
+    assert first["clock"] == "Q3 6:00" and first["score"] == "40–50" and first["result"] is None
+
+
+@pytest.mark.parametrize("sig,hs,as_,want", [
+    ({"type": "Spread", "side": "home", "line": -4.5}, 100, 95, "win"),
+    ({"type": "Spread", "side": "home", "line": -5.5}, 100, 95, "loss"),
+    ({"type": "Spread", "side": "away", "line": 5.0}, 100, 95, "push"),
+    ({"type": "Total", "side": "over", "line": 190.5}, 100, 95, "win"),
+    ({"type": "Total", "side": "under", "line": 190.5}, 100, 95, "loss"),
+    ({"type": "Moneyline", "side": "away", "line": None}, 100, 95, "loss"),
+])
+def test_grading_game_lines(sig, hs, as_, want):
+    assert LS.grade(sig, _g("post", hs, as_)) == want
+
+
+def test_props_grade_from_his_final_number_and_live_games_dont_grade():
+    sig = {"type": "Prop", "side": "over", "line": 24.5}
+    assert LS.grade(sig, _g("post"), 26) == "win"
+    assert LS.grade(sig, _g("post"), 24) == "loss"
+    assert LS.grade(sig, _g("in"), 30) is None
+
+
+def test_grade_pending_and_record():
+    rows = [dict(LS.row("2026-11-27", _g(), {"bet": "Home -4.5", "market": "Spread", "side": "home", "line": -4.5,
+                                              "price": -110, "chance": 0.6, "edge": 0.15}, "Q3", "t"),
+                 key="2026-11-27|NBA|g1|Home -4.5"),
+            dict(LS.row("2026-11-27", _g(), {"bet": "Over 200.5", "market": "Total", "side": "over", "line": 200.5,
+                                              "price": +120, "chance": 0.5, "edge": 0.1}, "Q3", "t"),
+                 key="2026-11-27|NBA|g1|Over 200.5")]
+    out = {}
+    n = LS.grade_pending(["2026-11-27"], lambda lg, d: [_g("post", 110, 100)], lambda lg, e: {}, save=out.update,
+                         rows=rows)
+    assert n == 2
+    graded = [json.loads(v) for v in out.values()]
+    assert {r["bet"]: r["result"] for r in graded} == {"Home -4.5": "win", "Over 200.5": "win"}
+    rec = LS.record(graded)
+    assert rec["w"] == 2 and rec["n"] == 2 and rec["units"] == pytest.approx(100 / 110 + 1.2)
+    assert LS.record_text(rec).startswith("2–0 · +2.1 units")
+
+
+def test_store_keeps_the_first_sighting(tmp_path):
+    db = str(tmp_path / "m.db")
+    MS.add_blobs_once(LS.KIND, {"2026-11-27|NBA|g1|x": "first"}, db_path=db)
+    MS.add_blobs_once(LS.KIND, {"2026-11-27|NBA|g1|x": "second"}, db_path=db)
+    MS.save_blobs(LS.KIND, {"2026-11-20|NBA|g0|y": "old"}, db_path=db)
+    got = MS.blobs_since(LS.KIND, "2026-11-25", db_path=db)
+    assert got == {"2026-11-27|NBA|g1|x": "first"}
+
+
+def test_live_now_strip_items():
+    games = {"NBA": [_g("in"), _g("pre", gid="g2")], "NHL": [dict(_g("in", 2, 1, "h1"), league="NHL")]}
+    got = LN.in_progress(["NBA", "NHL", "MLB"], lambda lg: games.get(lg, []))
+    assert sorted(g["id"] for g in got) == ["g1", "h1"]
+    items = LN.order([LN.item(got[0], {"model_margin": 3.0, "model_total": 220.0}, 0),
+                      LN.item(got[1], None, 2)])
+    assert items[0]["league"] == "NHL" and "🔥 2 live edges flagged" in LN.line(items[0])
+    assert "live read: Home" in LN.line(items[1])
+
+
+def test_live_page_shows_edges_panel_and_keeps_the_signal(monkeypatch):
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    import live_games as LG
+    st.cache_data.clear()
+    g = _g("in", 60, 40)
+    monkeypatch.setattr(LG, "games", lambda lg, day: [g])
+    monkeypatch.setattr(MS, "load_game_picks", lambda sport, ungraded=False, db_path=None: [])
+    monkeypatch.setattr(LG, "pregame_for", lambda g, picks: {"model_margin": 2.0, "model_total": 200.0, "source": "lab"})
+    monkeypatch.setattr(LG, "live_odds", lambda lg, key: [{"id": "o1", "home_team": "Home", "away_team": "Away"}])
+    import intl_picks as IP
+    monkeypatch.setattr(IP, "market", lambda ev, h, a: {"best_home": -110, "best_away": -110})
+    import best_bets_data as BBD
+    monkeypatch.setattr(BBD, "get_odds_api_key", lambda: "k")
+    kept = {}
+    monkeypatch.setattr(MS, "add_blobs_once", lambda kind, items, db_path=None: kept.update(items) or len(items))
+    at = AppTest.from_file("views/54_Live_Games.py", default_timeout=120)
+    at.session_state["sport"] = "NBA"
+    at.run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    assert any(m.value.startswith("**🔥 Live edges right now — 1**") for m in at.markdown)
+    assert list(kept) == ["%s|NBA|g1|Home to win" % next(iter(kept)).split("|")[0]]
+    assert any("How live edges have done" in e.label for e in at.expander)
+
+
+def test_today_shows_the_live_now_strip(monkeypatch):
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    import todays_best as TB
+    import customer_today as CT
+    st.cache_data.clear()
+    monkeypatch.setattr(TB, "collect", lambda day, keys, past=False: {"rows": [], "props": {}})
+    monkeypatch.setattr(TB, "winner_rows", lambda day, leagues=None, past=False: [])
+    monkeypatch.setattr(CT, "has_games_many", lambda keys, day, workers=8, saved=None: {k: True for k in keys},
+                        raising=False)
+    monkeypatch.setattr(LN, "board", lambda lg, day_s: [_g("in")] if lg == "NBA" else [])
+    at = AppTest.from_file("views/57_Today.py", default_timeout=60).run()
+    assert not at.exception, [str(e.value)[:300] for e in at.exception]
+    assert any(m.value.startswith("**🔴 Live now — 1 game in progress**") for m in at.markdown)
+    assert any(b.label == "Live →" for b in at.button)

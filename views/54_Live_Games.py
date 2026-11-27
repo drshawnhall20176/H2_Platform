@@ -54,7 +54,7 @@ def _picks(lg):
         return []
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def _odds(lg, api_key):
     return LG.live_odds(lg, api_key)
 
@@ -72,9 +72,11 @@ c1, c2 = st.columns([1, 1])
 _EVERY = {"Every 30 seconds": 30, "Every minute": 60, "Every 2 minutes": 120, "Off (manual)": None}
 _pick_every = c1.selectbox("Update", list(_EVERY), index=0, key="live_every")
 auto = _EVERY[_pick_every]
-with_lines = c2.toggle("Show the books' live lines (about 3 Odds API credits a minute while on; tennis 2 per "
-                       "tournament)",
-                       value=False, key="live_lines",
+# Nov 27 (owner: catch live bets): the books' live lines are on by default -- game lines and player props, checked
+# against the live read on every update. The fetch is cached and shared by everyone viewing, so it costs the same for
+# one viewer as for fifty.
+with_lines = c2.toggle("Check the books' live lines (game lines and player props, every update)",
+                       value=True, key="live_lines",
                        disabled=league not in ("NBA", "NCAAMB", "NHL", "WNBA", "EUROLEAGUE", "NBL", "TENNIS", "NFL",
                                                "NCAAF"))
 
@@ -138,21 +140,44 @@ def _box_panel(g):
         st.dataframe(pd.DataFrame(t["rows"]), hide_index=True, width="stretch")
 
 
-def _props_panel(g, rd, evs):
-    """Live player props for one game: stat so far, projected final, chance over the pre-game line; the books' live
-    prop lines on request."""
+@st.cache_data(ttl=45, show_spinner=False)
+def _live_prop_lines(lg, event_id, mkts):
+    import live_props as LP
+    return LP.live_prop_lines(lg, event_id, list(mkts), _api_key())
+
+
+def _prop_read(g, rd, evs):
+    """(rows, checked, note): the live props read for one game, and -- lines on -- the books' live prop lines priced
+    with it (Nov 27: automatic, it was a button)."""
     import live_props as LP
     snaps = _prop_snaps(g["league"], _today.isoformat())
     if not snaps:
-        st.caption("No pre-game prop reads saved for tonight — open a props page (Best Bets, Position Matchups) "
-                   "before tip-off and they're kept.")
-        return
-    summ = _summary(g["league"], g.get("event_id"))
-    rows = LP.read_props(g, rd, snaps, summ)
+        return [], [], ("No pre-game prop reads saved for tonight — open a props page (Best Bets, Position Matchups) "
+                        "before tip-off and they're kept.")
+    rows = LP.read_props(g, rd, snaps, _summary(g["league"], g.get("event_id")))
     if not rows:
-        st.caption("No props to read for this game yet (the box score is empty or no saved reads match its players).")
+        return [], [], "No props to read for this game yet (the box score is empty or no saved reads match its players)."
+    checked = []
+    if with_lines and evs and g["state"] == "in":
+        import intl_hoops as _I
+        ev = _I.match_event(evs or [], g["home"], g["away"])
+        if ev and ev.get("id"):
+            try:
+                lines = _live_prop_lines(g["league"], ev["id"], tuple(sorted({r["market"] for r in rows})))
+                checked = LP.check_lines(rows, lines or [], g["league"], rd["share_left"])
+            except Exception:                                   # noqa: BLE001 -- the props read still shows
+                checked = []
+    return rows, checked, None
+
+
+def _props_panel(rows, checked, note):
+    """Live player props for one game: stat so far, projected final, chance over the pre-game line; then the books'
+    live prop lines checked against the read."""
+    if note:
+        st.caption(note)
         return
-    rows.sort(key=lambda r: (-(r["p_over_pre"] or 0) if (r["p_over_pre"] or 0) >= 0.5 else -(1 - (r["p_over_pre"] or 0))))
+    rows = sorted(rows, key=lambda r: (-(r["p_over_pre"] or 0) if (r["p_over_pre"] or 0) >= 0.5
+                                       else -(1 - (r["p_over_pre"] or 0))))
     st.dataframe(pd.DataFrame([{
         "Player": r["player"], "Market": r["market"], "Now": r["now"], "Projected final": round(r["projected"], 1),
         "Pre-game line": r["pre_line"],
@@ -162,29 +187,113 @@ def _props_panel(g, rd, evs):
         for r in rows]), hide_index=True, width="stretch", column_config={
         "Over chance": st.column_config.NumberColumn(format="percent"),
         "Projected final": st.column_config.NumberColumn(format="%.1f")})
-    key = f"lp_{g['league']}_{g['id']}"
-    mkts = sorted({r["market"] for r in rows})
-    if st.button(f"📈 Check the books' live prop lines for this game (~{len(mkts)} credits)", key=key):
-        import intl_hoops as _I
-        import odds_api as O
-        import sports as _S
-        api = _api_key()
-        ev_list = evs or (O.fetch_events_all(api, sport=_S.get(g["league"]).odds_sport_key) if api else [])
-        ev = _I.match_event(ev_list or [], g["home"], g["away"])
-        lines = LP.live_prop_lines(g["league"], (ev or {}).get("id"), mkts, api) if ev else []
-        checked = LP.check_lines(rows, lines, g["league"], rd["share_left"])
-        st.session_state[key + "_res"] = checked if checked else "none"
-    res = st.session_state.get(key + "_res")
-    if res == "none":
-        st.caption("The books aren't showing live prop lines for this game right now.")
-    elif res:
-        st.dataframe(pd.DataFrame([{"Signal": b["signal"], "Bet": b["bet"], "Now": b["now"],
-                                    "Projected final": round(b["projected"], 1), "Price": b["price"],
-                                    "Model chance": b["chance"], "Edge per $1": b["edge"]} for b in res]),
-                     hide_index=True, width="stretch", column_config={
-                         "Price": st.column_config.NumberColumn(format="%+d"),
-                         "Model chance": st.column_config.NumberColumn(format="percent"),
-                         "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
+    if not with_lines:
+        st.caption("Turn on “Check the books' live lines” above to price these at the books.")
+        return
+    if not checked:
+        st.caption("The books aren't showing live prop lines for this game's players right now.")
+        return
+    st.markdown("**The books' live prop lines, checked against the read**")
+    st.dataframe(pd.DataFrame([{"Signal": b["signal"], "Bet": b["bet"], "Now": b["now"],
+                                "Projected final": round(b["projected"], 1), "Price": b["price"],
+                                "Model chance": b["chance"], "Edge per $1": b["edge"]} for b in checked]),
+                 hide_index=True, width="stretch", column_config={
+                     "Price": st.column_config.NumberColumn(format="%+d"),
+                     "Model chance": st.column_config.NumberColumn(format="percent"),
+                     "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
+
+
+def _edges_panel(items):
+    """Nov 27 (owner: catch live bets): every live line across tonight's games where the model's chance beats the price
+    by 5%+, biggest first, at the top of the page -- no opening game after game to find them."""
+    import live_signals as LS
+    found = []
+    for it in items:
+        g, r = it["g"], it["r"]
+        if not r:
+            continue
+        for b in list(r["bets"]) + list(it.get("checked") or []):
+            if LS.worth(b):
+                found.append((g, b))
+    found.sort(key=lambda x: -x[1]["edge"])
+    with st.container(border=True):
+        if not found:
+            st.markdown("**🔥 Live edges right now:** none — the books' live lines match the model's read on every "
+                        "game in progress (an edge needs the model's chance to beat the price by 5%+).")
+            return
+        st.markdown(f"**🔥 Live edges right now — {len(found)}**")
+        st.dataframe(pd.DataFrame([{
+            "Game": f"{g['away']} {g['away_score']:.0f} @ {g['home']} {g['home_score']:.0f}", "Clock": LG.clock_text(g),
+            "Bet": b["bet"], "Type": b.get("market") or "", "Price": b["price"], "Model chance": b["chance"],
+            "Edge per $1": b["edge"], "Check": "⚠ Price may be stale — check it" if b["edge"] >= LS.STALE_EDGE else ""}
+            for g, b in found]), hide_index=True, width="stretch", column_config={
+            "Price": st.column_config.NumberColumn(format="%+d"),
+            "Model chance": st.column_config.NumberColumn(format="percent"),
+            "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
+        st.caption("Edge per $1 = the model's chance × the payout − 1, at the best live price we found. Live lines move "
+                   "in seconds: check the price at your book before you bet. A very big edge usually means a book "
+                   "hasn't moved its line yet after a run of scoring, so it may be gone by the time you look. Every "
+                   "edge shown here is kept and graded — the record is at the bottom of the page.")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _signals(since_day):
+    import live_signals as LS
+    return LS.load(since_day)
+
+
+def _keep_signals(items, done):
+    """Save tonight's new 🟢 live edges (first sighting), and grade the saved ones whose game just ended."""
+    import live_signals as LS
+    seen = st.session_state.setdefault("_live_sig_seen", set())
+    now_iso = datetime.now(pytz.utc).isoformat()
+    for it in items:
+        if it["r"] and it["g"]["state"] == "in":
+            try:
+                LS.record_new(_today.isoformat(), it["g"], list(it["r"]["bets"]) + list(it.get("checked") or []),
+                              LG.clock_text(it["g"]), now_iso, seen=seen)
+            except Exception:                                   # noqa: BLE001 -- never costs the page
+                pass
+    if not done:
+        return
+    try:
+        ids = {str(g.get("id")) for g in done}
+        rows = [r for r in _signals(_today.isoformat()) if not r.get("result") and r.get("league") == league
+                and str(r.get("game_id")) in ids]
+        if rows:
+            by = {str(g.get("id")): g for g in done}
+            if LS.grade_pending([_today.isoformat()], lambda lg, d: list(by.values()), _summary, rows=rows):
+                _signals.clear()
+    except Exception:                                           # noqa: BLE001
+        pass
+
+
+def _record_panel():
+    import live_signals as LS
+    rows = _signals(LS.since(_today, 30))
+    rec = LS.record(rows)
+    with st.expander(f"📒 How live edges have done — last 30 days: {LS.record_text(rec)}", expanded=False):
+        if not rows:
+            st.caption("Nothing yet: live edges are kept from Nov 27 on, the first time each one shows on this page.")
+            return
+        by = rec["by"]
+        if by:
+            st.dataframe(pd.DataFrame([{"Type": k, "Graded": d["n"], "Won": d["w"], "Lost": d["l"], "Push": d["p"],
+                                        "Units": round(d["units"], 2), "Per bet": d["roi"]}
+                                       for k, d in sorted(by.items())]), hide_index=True, width="stretch",
+                         column_config={"Per bet": st.column_config.NumberColumn(format="percent")})
+        recent = list(reversed(rows))[:40]
+        st.dataframe(pd.DataFrame([{"Day": r.get("day"), "League": r.get("league"), "Game": r.get("game"),
+                                    "Seen at": f"{r.get('clock')} ({r.get('score')})", "Bet": r.get("bet"),
+                                    "Price": r.get("price"), "Edge per $1": r.get("edge"),
+                                    "Result": {"win": "✅ Won", "loss": "❌ Lost", "push": "➖ Push",
+                                               "void": "Void"}.get(r.get("result"), "⏳ Open")}
+                                   for r in recent]), hide_index=True, width="stretch", column_config={
+            "Price": st.column_config.NumberColumn(format="%+d"),
+            "Edge per $1": st.column_config.NumberColumn(format="%+.2f")})
+        st.caption(f"{rec['open']} still open. Paper record: one unit on each live edge at the price and the moment it "
+                   "FIRST showed here (later, better prices don't count), graded from the final score or box score. "
+                   "Every league together. Model signals only — nobody's bets.")
 
 
 @st.fragment(run_every=auto)
@@ -312,6 +421,9 @@ def _fair(p):
     return f"{-round(100 * p / (1 - p)):+d}" if p >= 0.5 else f"{round(100 * (1 - p) / p):+d}"
 
 
+_PROP_LEAGUES = ("NBA", "NCAAMB", "WNBA", "NHL", "NFL", "NCAAF")
+
+
 @st.fragment(run_every=auto)
 def board():
     gs = _games(league, _today)
@@ -351,13 +463,23 @@ def board():
                     mk = None
         r = LG.read_game(g, pre, mk)
         wh = r["read"]["win_home"] if r else None
+        props = ([], [], None)
+        if r and league in _PROP_LEAGUES:
+            try:
+                props = _prop_read(g, r["read"], evs)
+            except Exception:                                   # noqa: BLE001
+                props = ([], [], "The live props read couldn't load just now.")
         reads.append({"g": g, "pre": pre, "r": r, "win_home": wh, "start_home": _start_home(g, pre) if r else None,
                       "label": f"{g['away']} @ {g['home']}", "home": g["home"], "away": g["away"],
-                      "leader": None if wh is None else (g["home"] if wh >= 0.5 else g["away"])})
+                      "leader": None if wh is None else (g["home"] if wh >= 0.5 else g["away"]),
+                      "props": props, "checked": props[1]})
     st.caption(f"Updated {datetime.now(_ET):%-I:%M:%S %p} ET")
     C.kpi_row(LL.summary(reads, len(later), len(done)))
     if not live:
         st.info("No games in progress right now." + (" What's next is below." if later else ""))
+    elif with_lines:
+        _edges_panel(reads)
+    _keep_signals(reads, done)
     ordered = LL.order_live(reads)
     for n_card, it in enumerate(ordered):
         g, pre, r = it["g"], it["pre"], it["r"]
@@ -390,9 +512,11 @@ def board():
                 _bets_table(r["bets"])
             elif with_lines:
                 st.caption("No live line from the books for this game right now.")
-            if league in ("NBA", "NCAAMB", "WNBA", "NHL", "NFL", "NCAAF"):
-                with st.expander("🧍 Live player props"):
-                    _props_panel(g, rd, evs)
+            if league in _PROP_LEAGUES:
+                _pr = it.get("props") or ([], [], None)
+                _n = sum(1 for b in _pr[1] if b.get("edge") is not None and b["edge"] >= LG.MIN_EDGE)
+                with st.expander("🧍 Live player props" + (f" · 🟢 {_n} worth a look" if _n else "")):
+                    _props_panel(*_pr)
                 with st.expander("📋 Live box score"):
                     _box_panel(g)
     if later:
@@ -531,6 +655,7 @@ elif league == "SOCCER":
     soccer_board()
 else:
     board()
+    _record_panel()
 st.caption(
     "**Soccer** starts from each side's expected goals backed out of the sharp pre-match line (the goals model's own "
     "when there's none), scales them to the time left, adjusts for red cards, and adds the score so far. "

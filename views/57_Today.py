@@ -223,6 +223,79 @@ if not s["picks"] and not _past:                                # Nov 26 (owner)
     except Exception:                                           # noqa: BLE001
         pass
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _live_board(lg, day_s):
+    import live_now as _LN
+    return _LN.board(lg, day_s)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _live_picks(lg):
+    try:
+        import model_store as _MS
+        return _MS.load_game_picks(lg)
+    except Exception:                                           # noqa: BLE001
+        return []
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _live_edge_counts(day_s):
+    try:
+        import live_signals as _LS
+        return _LS.count_for_games(_LS.load(day_s), day_s)
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
+def _go_live(lg):
+    st.session_state["sport"] = lg
+    st.session_state["_goto_page"] = "live_games"
+
+
+@st.fragment(run_every=60)
+def _live_now(leagues, day_s):
+    """Nov 27 (owner: catch live bets): every game in progress, one tap from its live read on the Live page."""
+    import live_games as _LG
+    import live_now as _LN
+    games = _LN.in_progress(leagues, lambda lg: _live_board(lg, day_s))
+    if not games:
+        return
+    counts = _live_edge_counts(day_s)
+    items = []
+    for g in games:
+        pre = None
+        if g["league"] not in ("NFL", "NCAAF"):                 # football reads start from the books' line (Live page)
+            try:
+                pre = _LG.pregame_for(g, _live_picks(g["league"]))
+            except Exception:                                   # noqa: BLE001
+                pre = None
+        items.append(_LN.item(g, pre, counts.get(str(g.get("id")), 0)))
+    items = _LN.order(items)
+    with st.container(border=True):
+        st.markdown(f"**🔴 Live now — {len(items)} game{'s' if len(items) != 1 else ''} in progress**")
+        for x in items[:_LN.MAX_SHOWN]:
+            a, b = st.columns([5, 1])
+            a.markdown(_LN.line(x))
+            if b.button("Live →", key=f"golive_{x['league']}_{x['id']}",
+                        help="Open this sport's Live page: win chance, projected final, the books' live lines and props."):
+                _go_live(x["league"])
+                st.rerun()                                      # the whole app: the menu is rebuilt for the sport
+        if len(items) > _LN.MAX_SHOWN:
+            st.caption(f"+{len(items) - _LN.MAX_SHOWN} more on the Live page.")
+        st.caption("Updates every minute. 🔥 = live lines the model priced 5%+ better than the book today, kept and "
+                   "graded on the Live page.")
+
+
+if not _past:
+    try:
+        import live_now as _LNM
+        _lv = [k for k in _LNM.LEAGUES if k in _bar and (not picked or k in picked)]
+        if _lv:
+            with _PF.timed("Live now strip"):
+                _live_now(tuple(_lv), _day)
+    except Exception:                                           # noqa: BLE001 -- never costs the page
+        pass
+
 # Nov 25 (owner: "the ability to click a card and have it jump to a game or prop"): a Cards view -- every pick and game
 # opens its player card or game card (today_visual.py). Commercial layout only (this page already is); the tables are
 # one click away, and if the cards ever fail the page falls back to the tables.

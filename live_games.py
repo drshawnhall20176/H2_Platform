@@ -292,21 +292,22 @@ def read_game(g: Dict, pre: Optional[Dict], market: Optional[Dict] = None) -> Op
             ch = LM.cover_chance(rd, hs, side)
             team = g["home"] if side == "home" else g["away"]
             bets.append({"bet": f"{team} {line:+g}", "market": "Spread", "chance": ch, "price": price or -110,
-                         "edge": LM.edge(ch, price or -110)})
+                         "edge": LM.edge(ch, price or -110), "side": side, "line": float(line)})
     tl = market.get("total")
     if tl is not None:
         po = LM.over_chance(rd, tl)
         bets.append({"bet": f"Over {tl:g}", "market": "Total", "chance": po, "price": market.get("over_price") or -110,
-                     "edge": LM.edge(po, market.get("over_price") or -110)})
+                     "edge": LM.edge(po, market.get("over_price") or -110), "side": "over", "line": float(tl)})
         bets.append({"bet": f"Under {tl:g}", "market": "Total", "chance": 1 - po,
-                     "price": market.get("under_price") or -110, "edge": LM.edge(1 - po, market.get("under_price") or -110)})
+                     "price": market.get("under_price") or -110, "edge": LM.edge(1 - po, market.get("under_price") or -110),
+                     "side": "under", "line": float(tl)})
     for side, price in (("home", market.get("best_home")), ("away", market.get("best_away"))):
         if price is None:
             continue
         ch = rd["win_home"] if side == "home" else 1 - rd["win_home"]
         team = g["home"] if side == "home" else g["away"]
         bets.append({"bet": f"{team} to win", "market": "Moneyline", "chance": ch, "price": price,
-                     "edge": LM.edge(ch, price)})
+                     "edge": LM.edge(ch, price), "side": side, "line": None})
     for b in bets:
         e = b["edge"]
         b["signal"] = "🟢 Worth a look" if e is not None and e >= MIN_EDGE else \
