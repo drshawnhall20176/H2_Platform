@@ -292,3 +292,19 @@ def test_test_list_remembers_dropped_picks():
     assert [e["pick"] for e in gone] == ["Liberty -5.5"]
     assert FL.dropped(seen, [], started=lambda e: True) == []
     assert "off the board" in FL.why_dropped(gone[0], [], []).lower()
+
+
+def test_card_says_no_lean_trend_and_form_gap():
+    import player_card as PC
+    harris = {"Projection": 14.26, "Line": 14.5, "Side": "Under"}
+    assert PC.no_lean(harris, "Info only") and not PC.no_lean(dict(harris, Projection=13.0), "Info only")
+    assert not PC.no_lean(harris, "🃏 Bet")                                   # a bet is never shown as no lean
+    vals = [16, 15, 12, 17, 14, 13, 13]                                      # Under 14.5 cleared 2 of the last 5
+    t = PC.trend(vals, 14.5, "Under")
+    assert t["tone"] == "against" and t["text"] == "↔️ Trend leans Over (3 of 5)"
+    assert PC.trend([1, 0, 1], 0.5, "Under") is None
+    pr = {"Projection": 17.05, "_values": [20, 19, 18, 17, 18, 17, 18], "_mins": [29] * 7, "_proj_min": 28.0,
+          "_factor": 1.0}
+    gap = PC.form_gap(pr, "🟥 74%")
+    assert gap.startswith("Projection 1.1 below his recent form (18.1") and "74% blowout risk" in gap
+    assert PC.form_gap(dict(pr, Projection=18.0), "🟥 74%") is None

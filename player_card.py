@@ -49,6 +49,77 @@ def hit_text(values: List[float], line: Optional[float], side: str, n: Optional[
     return f"{k}/{len(vals)} ({k / len(vals):.0%})"
 
 
+# --------------------------------------------------------------------------- lean, trend and form (Nov 27)
+# Owner, Nov 27 (Darren Harris: "Under 14.5" in gold with a 14.3 projection, the Under 2-of-5 lately, and a Pts+Reb
+# projection a point under his form with the reason buried at the bottom): the header says when there's no real lean,
+# a chip says whether his recent games agree with the side, and a line says why the projection differs from his form.
+def lean_gap(projection, line) -> Optional[float]:
+    try:
+        return None if projection is None or line is None else float(projection) - float(line)
+    except (TypeError, ValueError):
+        return None
+
+
+def no_lean(p: Dict, bet: str = "") -> bool:
+    """A side with nothing behind it: not a bet, and the projection within a hair of the line (the larger of 0.35 or
+    4% of the line) -- shown as "No lean", not as a gold pick."""
+    if bet and "Info only" not in bet and "No edge" not in bet:
+        return False
+    g, line = lean_gap(p.get("Projection"), p.get("Line")), p.get("Line")
+    if g is None:
+        return False
+    return abs(g) < max(0.35, 0.04 * abs(float(line)))
+
+
+def trend(values: List[float], line, side: str, n: int = 5) -> Optional[Dict]:
+    """{"text", "tone"}: do his last n games agree with the side? None with fewer than 4 games or no side."""
+    vals = list(values or [])[:n]
+    if line is None or side not in ("Over", "Under") or len(vals) < 4:
+        return None
+    k = sum(cleared(v, line, side) for v in vals)
+    other = "Over" if side == "Under" else "Under"
+    if k / len(vals) >= 0.6:
+        return {"text": f"📈 Trend agrees ({k} of {len(vals)})", "tone": "agree"}
+    if k / len(vals) <= 0.4:
+        return {"text": f"↔️ Trend leans {other} ({len(vals) - k} of {len(vals)})", "tone": "against"}
+    return {"text": f"Trend split ({k} of {len(vals)})", "tone": "split"}
+
+
+def form_gap(p: Dict, blowout: Optional[str] = None, n: int = 7) -> Optional[str]:
+    """Why the projection sits away from his recent average, when it does by 0.75+ (or 5%): his projected minutes, the
+    matchup and the blowout risk -- the pieces the projection is built from."""
+    vals = [float(v) for v in list(p.get("_values") or [])[:n] if v is not None]
+    try:
+        proj = float(p.get("Projection"))
+    except (TypeError, ValueError):
+        return None
+    if len(vals) < 4:
+        return None
+    form = sum(vals) / len(vals)
+    gap = proj - form
+    if abs(gap) < max(0.75, 0.05 * abs(form)):
+        return None
+    why = []
+    mins = [float(m) for m in list(p.get("_mins") or [])[:n] if m is not None]
+    pm = p.get("_proj_min")
+    if mins and pm is not None and abs(float(pm) - sum(mins) / len(mins)) >= 1.5:
+        why.append(f"about {float(pm):.0f} minutes tonight vs {sum(mins) / len(mins):.0f} lately")
+    f = p.get("_factor")
+    if f is not None and abs(float(f) - 1) >= 0.03:
+        why.append(f"tonight's defense {'gives up more' if float(f) > 1 else 'allows less'} than average to his "
+                   f"position ({(float(f) - 1):+.0%})")
+    try:
+        bp = int(str(blowout or "").strip("🟥🟨🟩⬜ ").split("%")[0])
+    except ValueError:
+        bp = None
+    if bp is not None and bp >= 50 and gap < 0:
+        why.append(f"{bp}% blowout risk — starters can sit late")
+    if not why:
+        why.append("the model weighs his whole season, not only the last few games")
+    return (f"Projection {abs(gap):.1f} {'below' if gap < 0 else 'above'} his recent form ({form:.1f} over his last "
+            f"{len(vals)}): " + "; ".join(why) + ".")
+
+
 def bar_chart(rows: List[Dict], line: Optional[float], projection: Optional[float], label: str,
               proj_label: str = "Projection"):
     import altair as alt
@@ -352,6 +423,21 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
         coach_mid = coach_html(coach_grade(p, sport))
     except Exception:                                           # noqa: BLE001 -- the card never breaks on it
         coach_mid = ""
+    lean_off = no_lean(p, bet)
+    tr = trend(vals, line, side) if not lean_off else None
+    tchip = "" if not tr else " " + HB.chip(tr["text"], {"agree": HB.BLUE, "against": HB.GOLD}.get(tr["tone"], HB.GRAY))
+    try:
+        import game_previews as _GPB
+        _blow = _GPB.game_blowouts(sport, [p.get("Game")]).get(p.get("Game"))
+    except Exception:                                           # noqa: BLE001
+        _blow = None
+    if lean_off:
+        g = lean_gap(p.get("Projection"), line)
+        tonight = (f'<div style="color:{HB.GRAY};font-size:26px;font-weight:800;">No lean</div>'
+                   f'<div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""} · projection '
+                   f'{float(p["Projection"]):.1f} vs {line:g}</div>')
+    else:
+        tonight = None
     head = (f'<div style="background:linear-gradient(110deg,{HB.NAVY},{HB.SLATE});border:1px solid {HB.EDGE};'
             f'border-radius:14px;padding:16px 20px;margin:4px 0 10px;">'
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
@@ -360,11 +446,14 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
             f' vs {p.get("Opp") or p.get("Versus") or ""} · {p.get("Time") or ""}</div>'
             f'<div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap;">{HB.bet_chip(bet or "Info only")}'
             + (f' {HB.chip(str(p.get("_use") or p.get("Use")), HB.BLUE)}' if (p.get("_use") or p.get("Use")) else "")
-            + mchip + f'</div></div>' + coach_mid +
+            + mchip + tchip + f'</div></div>' + coach_mid +
             f'<div style="text-align:right;"><div style="color:{HB.INK_SOFT};font-size:12px;letter-spacing:.06em;">'
-            f'TONIGHT</div><div style="color:{HB.GOLD};font-size:26px;font-weight:800;">{side} {"" if line is None else f"{line:g}"}'
-            f'</div><div style="color:{HB.INK};font-size:14px;">{p.get("Market") or ""}'
-            + (f' · {float(price):+.0f}' if price is not None else "") + '</div></div></div></div>')
+            f'TONIGHT</div>'
+            + (tonight or (f'<div style="color:{HB.GOLD};font-size:26px;font-weight:800;">{side} '
+                           f'{"" if line is None else f"{line:g}"}</div><div style="color:{HB.INK};font-size:14px;">'
+                           f'{p.get("Market") or ""}' + (f' · {float(price):+.0f}' if price is not None else "")
+                           + '</div>'))
+            + '</div></div></div>')
     st.markdown(head, unsafe_allow_html=True)
     note = injury_note(p, sport)
     if note:
@@ -382,6 +471,15 @@ def render(p: Dict, sport: str, bet: str = "", kpis: Optional[List[Dict]] = None
         {"icon": "5️⃣", "value": hit_text(vals, line, side, 5), "label": "Last 5 vs this line"},
         {"icon": "🔟", "value": hit_text(vals, line, side, 10), "label": "Last 10 vs this line"},
     ])
+    try:
+        _fg = form_gap(p, _blow)
+        if _fg:
+            st.caption("📐 " + _fg)
+    except Exception:                                           # noqa: BLE001
+        pass
+    if lean_off:
+        st.caption(f"No lean: the projection is within a hair of the line, so the {side} shown is a coin flip — the "
+                   "tiles and bars still count his games against the line for that side.")
     rows = bars(vals, line, side, window)                     # Nov 25: the card's L5 / L10 / L20 filter
     ch = bar_chart(rows, line, p.get("Projection"), p.get("Market") or "Value")
     if ch is not None:

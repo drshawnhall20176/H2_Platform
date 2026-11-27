@@ -226,8 +226,11 @@ def _game_dialog(w: Dict, props: List[Dict]):
     if who:                                                     # Nov 25: a player opened from this game card
         if _st.button("← Back to the game", key=f"{k}_back"):
             _st.session_state.pop(f"{k}_player", None)
+            _st.session_state.pop(f"{k}_player_mk", None)
             _st.rerun(scope="fragment")
-        row = next((r for r in game_props if _norm(player_of(r)) == _norm(who)), None)
+        _mk = _st.session_state.get(f"{k}_player_mk")
+        row = next((r for r in game_props if _norm(player_of(r)) == _norm(who) and market_label(r) == _mk), None) \
+            or next((r for r in game_props if _norm(player_of(r)) == _norm(who)), None)
         if row is not None:
             player_view(row, w.get("sport") or "", game_props, key=f"{k}_pv")
         else:                                                   # a name from Who's out / the rotation, no prop tonight
@@ -450,6 +453,7 @@ def _players_section(w: Dict, rows: Sequence[Dict], k: str) -> None:
                 if _st.button(label, key=f"{k}_pl_{_norm(team)}_{i}", width="stretch",
                               type="primary" if _bet_mark(r).startswith("🃏") else "secondary"):
                     _st.session_state[f"{k}_player"] = player_of(r)
+                    _st.session_state[f"{k}_player_mk"] = market_label(r)    # Nov 27: open on the prop listed here
                     _st.rerun(scope="fragment")
     _st.caption("💎 has a value long shot tonight (an alternate line at +400 or longer) · "
                 "🃏 a bet (highlighted) · 🧪 tracking · no mark = the model's read only. Each player shows a bet if he has "
