@@ -149,6 +149,29 @@ for r in rows:
     except Exception:                                           # noqa: BLE001
         r.update({"book_verdict": "— Couldn't check", "app_verdict": "—"})
 
+# Nov 27 (owner build list): each row's rule, its stage and its distance to the next gate (the Rule scoreboard's saved
+# record); a paper rule whose record has crossed a pause line retires itself from the default view
+_retired_n = 0
+try:
+    import rule_scoreboard as RS
+
+    @st.cache_data(ttl=1800, show_spinner=False)
+    def _rules_rec():
+        return RS.load()
+    _rules = RS.by_key(_rules_rec())
+    for r in rows:
+        _rr = _rules.get(RS.row_rule_key(r) or "")
+        r["stage_text"] = RS.stage_text(_rr, day)
+        r["retired"] = bool(_rr) and RS.retired(_rr)
+    _retired_n = sum(1 for r in rows if r.get("retired"))
+    if _retired_n and not st.toggle(f"Show {_retired_n} pick(s) from retired rules", value=False, key="tl_retired",
+                                    help="A paper rule retires itself when its record crosses a pause line on the "
+                                         "Rule scoreboard (losing even at the top of its range, or the close keeps "
+                                         "moving against it). Its picks stay out of the list unless you show them."):
+        rows = [r for r in rows if not r.get("retired")]
+except Exception:                                               # noqa: BLE001 -- the list never depends on it
+    pass
+
 n = FL.counts(rows)
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("💰 Money picks · 🃏 Bets", f"{n[FL.MONEY]} · {n[FL.BET]}", help="The real bets: tested and live.")
@@ -211,11 +234,12 @@ _df.insert(_df.columns.get_loc("Best price now") + 1, MB.app_label(app), [r.get(
 _SHORT = {FL.MONEY: "💰 Money", FL.BET: "🃏 Bet", FL.GAP: "🧪 Close gap", FL.TRACK: "🧪 Prop rule",
           FL.PAUSED: "⏸ Paused rule", FL.HELD: "📉 Held back"}
 _df["Type"] = [_SHORT.get(r["kind"], r["kind"]) for r in rows]
+_df.insert(_df.columns.get_loc("Type") + 1, "Stage", [r.get("stage_text") or "—" for r in rows])
 # Nov 26 (owner: "the table does not fit the screen well"): the columns a decision needs, the rest one switch away
 _all = st.toggle("Show all columns", value=False, key="tl_all_cols",
                  help="Adds the sport, Bet or paper, the board's own price / needs / edge, the selected book's "
                       "break-even, the pick'em app, the line move, why each pick is here and the game.")
-_core = ["Time", "Pick", "Type", f"{_base_l} now", f"{_base_l} move"]
+_core = ["Time", "Pick", "Type", "Stage", f"{_base_l} now", f"{_base_l} move"]
 if book != base:
     _core += [f"{_bl} now", f"{_bl} vs {_base_l}"]
 _core += ["Go?", "Best price now"]
@@ -224,9 +248,13 @@ CL.table(_view_df, key=f"tl_table_{day}", items=rows, open_fn=_open, hide_index=
          width="stretch", caption="Tap a row for its card — the read, the recent games and the line history.",
          column_config={"Pick": st.column_config.TextColumn("Pick", width="medium"),
                         "Time": st.column_config.TextColumn("Time", width="small"),
-                        "Type": st.column_config.TextColumn("Type", width="small")})
+                        "Type": st.column_config.TextColumn("Type", width="small"),
+                        "Stage": st.column_config.TextColumn("Stage", width="medium")})
 with st.expander("📖 How to read the columns", expanded=False):
     st.markdown(
+        "- **Stage**: the rule behind the pick, where it stands on the Rule scoreboard (📝 Paper → 🧪 Live test → ✅ "
+        "Proven), its graded picks against the next gate, and roughly when it gets there at its current pace. — = a "
+        "tested tag (its own record decides it), not a rule.\n"
         f"- **{_base_l} now**: your book's price right now (My sportsbook, the baseline); a different line shows as "
         "\"at <line>\".\n"
         f"- **{_base_l} move**: how it has moved since the board read the pick: ▲ better for you, ▼ worse, = "

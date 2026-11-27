@@ -359,3 +359,63 @@ def forecast(r: Dict, today: str) -> Dict:
                 "text": f"Not this season at this pace — needs ~{need:,} more picks (~{pace:.1f} a day)"}
     return {"state": "on_track", "date": eta.isoformat(),
             "text": f"On track for ~{eta:%b} {eta.day} if the edge holds ({need:,} more picks at ~{pace:.1f} a day)"}
+
+
+# --------------------------------------------------------------------------- the Test list's Stage column (Nov 27)
+# Owner, Nov 27 (build list): each Test-list row says which rule put it there, where that rule stands and roughly when
+# it reaches its next gate -- and a paper rule whose record crosses a pause line retires itself (leaves the list's
+# default view) instead of waiting for someone to notice. Live rules already switch off by market (shutoff.py).
+STAGE_ICON = {"Paper": "📝", "Live test": "🧪", "Paused": "⏸", "Proven": "✅", "Retired": "⛔"}
+
+
+def retired(r: Dict) -> bool:
+    """A paper rule that has crossed a pause line (health): it retires itself."""
+    return r.get("stage") == "Paper" and str(r.get("health") or "").startswith("⛔")
+
+
+def row_rule_key(row: Dict) -> Optional[str]:
+    """The scoreboard key ("rule|sport") of the rule behind a Test-list row, or None for tested tags / held-back ones."""
+    import focus_list as FL
+    kind, sp, what = row.get("kind"), row.get("sport") or "", str(row.get("what") or "")
+    game = row.get("open_as") == "game"
+    if kind == FL.GAP:
+        return "close_gap|NCAAMB"
+    if kind in (FL.MONEY, FL.PAUSED):
+        if game:
+            return f"money_games|{sp}"
+        return f"{'lock' if what.startswith('🔒') else 'money_props'}|{sp}"
+    if kind == FL.TRACK and what.startswith("NFL / college football Under"):
+        return {"NFL": "nfl_under_vs_fav|NFL", "NCAAF": "ncaaf_under|NCAAF"}.get(sp)
+    return None
+
+
+def stage_text(r: Optional[Dict], today: str) -> str:
+    """'📝 Paper · 34 of 100 to Gate 1 · ~Dec 4' -- short enough for a table cell."""
+    if not r:
+        return "—"
+    if retired(r):
+        return "⛔ Retired by its record"
+    st_ = r.get("stage") or "Paper"
+    m = r.get("m") or {}
+    n = m.get("n") or 0
+    gate_n = (CLOSE_GAP_GATE["n"] if r.get("rule") == "close_gap" else
+              GATE2["n"] if st_ in ("Live test", "Paused") else GATE1["n"])
+    bits = [f"{STAGE_ICON.get(st_, '')} {st_}".strip(), f"{n} of {gate_n} to {r.get('next') or 'Gate 1'}"]
+    try:
+        f = forecast(r, today)
+    except Exception:                                           # noqa: BLE001
+        f = {}
+    if f.get("state") == "on_track" and f.get("date"):
+        d = date.fromisoformat(f["date"])
+        bits.append(f"~{d:%b} {d.day}")
+    elif f.get("state") == "proven":
+        bits.append("clears it now")
+    elif f.get("state") in ("losing", "below_bar"):
+        bits.append("behind the bar")
+    elif f.get("state") == "not_this_season":
+        bits.append("not this season")
+    return " · ".join(bits)
+
+
+def by_key(rec: Optional[Dict]) -> Dict[str, Dict]:
+    return {r["key"]: r for r in ((rec or {}).get("rules") or []) if r.get("key")}

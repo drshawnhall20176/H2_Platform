@@ -512,9 +512,33 @@ for p in view:
     p["_league"] = _active.key
 _cols.append("_league")
 _rename["_league"] = "League"
+# Nov 27 (owner build list, PropSeason's matchup letter): how much tonight's defense gives up in the pick's stat to the
+# player's role, A+ (the most) to F -- one pass over the board, the league tables cached 3 hours (soft_spots)
+try:
+    import role_history as _RH
+    import soft_spots as _SSb
+    if _props_model and _active.key in _SSb.SPORTS:
+        _lg = _SSb.cached_league(_active.key, date_str)
+        _tbls: dict = {}
+        for p in view:
+            p["_matchup"] = _RH.grade_text(_RH.matchup_grade(_active.key, _lg, p.get("Player") or "", p.get("Team") or "",
+                                                             p.get("Game") or "", p.get("Market") or "", tables=_tbls))
+        if any(p["_matchup"] != "—" for p in view):
+            _cols.append("_matchup")
+            _rename["_matchup"] = "Matchup"
+except Exception:                                               # noqa: BLE001 -- the board never depends on it
+    pass
 _FIRST = ["_league", "Time", "Game", "_bet", "Player", "Team", "Market", "Side", "_display_line", "_display_price", "ModelProb",
-          "_earned", "_use", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
+          "_earned", "_use", "_matchup", "_gblow", "_agree", "_blowout_risk", "Projection", "L5", "L10", "_cushion"]
 _cols = [c for c in _FIRST if c in _cols] + [c for c in _cols if c not in _FIRST]
+# Nov 27 (owner build list, PropSeason's simple / advanced): the columns a decision needs, the rest one switch away --
+# the same switch the Test list has
+_CORE = ["_league", "Time", "Game", "_bet", "Player", "Market", "Side", "_display_line", "_display_price", "_earned",
+         "_use", "_matchup", "L10"]
+if _props_model and not st.toggle("Show all columns", value=False, key="bb_all_cols",
+                 help="Adds the team, Model %, the projection, L5, the cushion, blowout risk, whether the model and the "
+                      "market agree, the Money score, the stake, warnings and why the model likes it."):
+    _cols = [c for c in _cols if c in _CORE] or _cols
 df = pd.DataFrame(view)[_cols]
 df = df.rename(columns=_rename)
 import card_links as _CL                                        # Nov 25 (owner): a row opens the player card
@@ -532,7 +556,9 @@ if _props_model:
     st.caption("🧭 Same model as **Position Matchups → Player props**: Projection, Model % (its Chance) and Side match "
                "that page at the book's line. Only priced plays it leans on are listed. A price with a book name in "
                "brackets is the best price elsewhere — your book doesn't post that player. **L5 / L10**: how many of "
-               "his last 5 / 10 games cleared tonight's line on the pick's side. **Money score**: what the price pays "
+               "his last 5 / 10 games cleared tonight's line on the pick's side. **Matchup**: how much tonight's "
+               "defense gives up in this stat to his role, A+ (the most in the league) to F — a description, not a "
+               "chance (the projection already counts it). **Money score**: what the price pays "
                "per $1, from a chance that trusts the model only as far as its record against the books has earned "
                "(refit every morning). Shown beside 💰 while it builds a live record; in testing NBA picks scoring "
                "+4% to +12% returned +3.5% per $1 over 1,131. **Earned %**: the model's chance corrected to its track "

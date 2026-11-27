@@ -131,3 +131,27 @@ def test_today_shows_the_live_now_strip(monkeypatch):
     assert not at.exception, [str(e.value)[:300] for e in at.exception]
     assert any(m.value.startswith("**🔴 Live now — 1 game in progress**") for m in at.markdown)
     assert any(b.label == "Live →" for b in at.button)
+
+
+def test_test_list_stage_labels_and_retired_rules():
+    import focus_list as FL
+    import rule_scoreboard as RS
+    assert RS.row_rule_key({"kind": FL.GAP, "sport": "NCAAMB"}) == "close_gap|NCAAMB"
+    assert RS.row_rule_key({"kind": FL.MONEY, "sport": "NBA", "open_as": "game"}) == "money_games|NBA"
+    assert RS.row_rule_key({"kind": FL.PAUSED, "sport": "NHL", "what": "🔒 Most probable — off"}) == "lock|NHL"
+    assert RS.row_rule_key({"kind": FL.TRACK, "sport": "NFL", "what": "NFL / college football Under rule"}) == \
+        "nfl_under_vs_fav|NFL"
+    assert RS.row_rule_key({"kind": FL.BET, "sport": "NBA"}) is None
+    r = {"rule": "money_props", "stage": "Paper", "next": "Gate 1", "health": "", "m": {"n": 34}, "picks": []}
+    assert RS.stage_text(r, "2026-11-27").startswith("📝 Paper · 34 of 100 to Gate 1")
+    gone = dict(r, health="⛔ Pause line: losing even at the top of its range")
+    assert RS.retired(gone) and RS.stage_text(gone, "2026-11-27") == "⛔ Retired by its record"
+    assert not RS.retired(dict(gone, stage="Live test"))          # live rules switch off by market (shutoff.py)
+    assert RS.stage_text(None, "2026-11-27") == "—"
+
+
+def test_matchup_grade_text():
+    import role_history as RH
+    assert RH.grade_text({"grade": "A", "rank": 2, "of": 32, "label": "WR1s", "stat": "rec_yds"}) == \
+        "A · 2nd most of 32 to WR1s"
+    assert RH.grade_text(None) == "—"

@@ -18,7 +18,8 @@
 #   day) that doesn't need 15-minute resolution the way "catch the closing line before tip-off"
 #   genuinely does.
 #
-# SCHEDULE, deliberately coarse — 4 runs/day, spread across when lines actually tend to move
+# SCHEDULE (Nov 27: now HOURLY 10am-1am ET -- see the crons below; the note that follows is the original reasoning)
+#   was 4 runs/day, spread across when lines actually tend to move
 #   (morning open, midday, pre-evening-slate, early evening) — not the CLV workflow's dense
 #   per-evening cadence. This is a reasonable STARTING cadence, not a backtested one (no line-
 #   movement history exists yet to check it against — that's exactly what this workflow is for).
@@ -38,10 +39,11 @@ name: capture-line-snapshots
 
 on:
   schedule:
-    - cron: "0 14 * * *"   # 14:00 UTC (~10am ET) — morning line
-    - cron: "0 18 * * *"   # 18:00 UTC (~2pm ET)  — midday
-    - cron: "0 21 * * *"   # 21:00 UTC (~5pm ET)  — pre-evening slate
-    - cron: "0 0 * * *"    # 00:00 UTC (~8pm ET)  — evening
+    # Nov 27 (owner: credits are plentiful): every hour from ~10am to ~1am ET, so the market watch and the Test list
+    # see each move within the hour it happened (was 4 a day). A run is ~1-2 min and only prices games starting
+    # within 24 h; nothing runs overnight, when the books barely move.
+    - cron: "8 14-23 * * *"
+    - cron: "8 0-5 * * *"
   workflow_dispatch: {}    # manual "Run workflow" button (handy for testing)
 
 permissions:
