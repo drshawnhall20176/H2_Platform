@@ -532,7 +532,7 @@ def require_live_engine(feature_name: str = "This page") -> bool:
     return True
 
 
-def render_sport_selector(picker: bool = False, multi: bool = False, slot=None):
+def render_sport_selector(picker: bool = False, multi: bool = False, slot=None, sport_goto=None):
     """Sidebar sport indicator -- shows the active sport as a compact read-only label.
     The real interactive selector lives on the Home page where it's always visible and
     unobstructed. This label keeps sidebar users oriented without taking up space or
@@ -563,7 +563,7 @@ def render_sport_selector(picker: bool = False, multi: bool = False, slot=None):
             _office = bool(st.session_state.get("_office_mode_sport_picker"))
 
             def _pick():                                        # Nov 26: the widget's value can be gone mid-switch
-                SC.pick_from_sidebar(st.session_state.get("_office_sport"), multi, _office)
+                SC.pick_from_sidebar(st.session_state.get("_office_sport"), multi, _office, sport_goto)
             st.selectbox("Sport", opts, key="_office_sport", on_change=_pick,
                          format_func=lambda k: SC.label(k, get),
                          help="One choice for the whole site: this picker and the sport filter on the page always "

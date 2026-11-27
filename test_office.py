@@ -115,3 +115,16 @@ def test_customer_layout_has_a_real_sport_picker():
     assert not at.exception and at.session_state["sport"] == "NHL" and not at.session_state["cc_all"]
     bar = at.button_group(key="today_one")                                  # Today's bar follows the sidebar
     assert bar.value == ("NHL" if "NHL" in bar.options else "ALL")
+
+
+def test_classic_layout_has_the_same_sport_picker():
+    # Nov 27 (owner: "synergy site wide"): customer layout off -- the same Sport picker, on All sports on Today
+    from streamlit.testing.v1 import AppTest
+    import nav_layout as NL
+    at = AppTest.from_file("streamlit_app.py", default_timeout=120)
+    at.secrets["AUDIENCE"] = "owner"
+    at.session_state[NL.PREVIEW_KEY] = False
+    at.run()
+    assert not at.exception
+    pick = [s for s in at.sidebar.selectbox if s.label == "Sport"]
+    assert pick and pick[0].value == "__all__"

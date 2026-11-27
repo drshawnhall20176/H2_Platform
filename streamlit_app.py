@@ -676,12 +676,16 @@ def run():
         today = next((p for p in sections["🏠 START HERE"] if getattr(p, "title", None) == "Today"), None)
         if today is not None and getattr(target, "title", None) != "Today":
             st.switch_page(today)
-    if getattr(target, "title", None) == "Today":                # the default page reports an empty url_path
+    # Nov 27 (owner: "synergy site wide"): the classic workbench gets the same Sport picker in the same top slot. On
+    # Today (every sport, no filter of its own) it reads All sports, and picking a sport opens that sport's desk.
+    _going = st.session_state.get("_goto_page") not in (None, "today")
+    if getattr(target, "title", None) == "Today" and not _going:  # the default page reports an empty url_path
+        sports.render_sport_selector(picker=True, multi=True, slot=_sport_slot, sport_goto="home")
         _today_sidebar()
         st.navigation({"🏠 START HERE": sections.get("🏠 START HERE", [])}).run()
         return
-    sports.render_sport_selector()
     nav = st.navigation(sections)
+    sports.render_sport_selector(picker=True, multi=_SC.is_multi(getattr(nav, "url_path", "")), slot=_sport_slot)
     # Nov 17: a page that changed the sport and wants another sport's page (Promotions -> King of the Court) parks its
     # target here; it can only be switched to once the menu is built for the new sport.
     goto = st.session_state.pop("_goto_page", None)
@@ -720,14 +724,13 @@ def sport_bar(url_path, page_of: dict, keys, page_ok) -> None:
     if whole:
         opts = [ALL_SPORTS] + opts
 
+    import sport_scope as _SCB                                  # Nov 27: the same choice as the sidebar picker
+
     def _switch():
         k = st.session_state.get("_sport_bar")
-        if k == ALL_SPORTS:
-            st.session_state["cc_all"] = True
-        elif k:
-            st.session_state["cc_all"] = False
-            st.session_state["sport"] = k
-    cur = ALL_SPORTS if whole and st.session_state.get("cc_all") else st.session_state.get("sport")
+        if k:
+            _SCB.choose(_SCB.ALL if k == ALL_SPORTS else k)
+    cur = ALL_SPORTS if whole and _SCB.current() in (_SCB.ALL, _SCB.MANY) else st.session_state.get("sport")
     st.session_state["_sport_bar"] = cur if cur in opts else None
     st.pills("Sport", opts, key="_sport_bar", on_change=_switch, label_visibility="collapsed",
              format_func=lambda k: "🌐 All sports" if k == ALL_SPORTS else
