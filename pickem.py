@@ -211,6 +211,7 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
         if not cands:
             continue
         priced = [c for c in (clean_exchanges(o) for o in offs) if (c.get("over") or {}) and (c.get("under") or {})]
+        posting = sorted({b for o in offs for b in list((o.get("over") or {})) + list((o.get("under") or {}))})
         book = PE.shop(priced) if priced else None
         t = PE.trust_for(sport, read.get("market"))
         w = PE.MODEL_WEIGHT * (1.0 if t is None else t)
@@ -236,6 +237,7 @@ def legs(reads: Dict, offers: Sequence[Dict], app: str, sport: str) -> List[Dict
                         "book_over": book.get("p_market") if book else None, "books_over_at_app": pb,
                         "multiplier": mult, "price": price if priced_app else None, "needed": need,
                         "far": far_from_books(line, book["line"] if book else None),
+                        "sport": sport, "posting": posting,
                         "_score": score}
         if best:
             best.pop("_score", None)
@@ -250,7 +252,7 @@ def best_entry(legs_: Sequence[Dict], n: int, floor: float) -> List[Dict]:
     out, games = [], set()
     for x in sorted(legs_, key=lambda x: -(x["chance"] - (x.get("needed") or 0.0))):
         bar = max(floor, x["needed"]) if x.get("needed") is not None else floor   # table AND its own price
-        if x["basis"] != "books" or x.get("far") or x["chance"] < bar or x.get("game") in games:
+        if x["basis"] != "books" or x.get("far") or x.get("blocked") or x["chance"] < bar or x.get("game") in games:
             continue
         out.append(x)
         games.add(x.get("game"))
@@ -273,7 +275,7 @@ def entry_odds(entry: Sequence[Dict], app: str, flex: bool = False, sport: Optio
     if n < 2 or (mult is None and table is None):
         return None
     legs_sim = [{"p": x["chance"], "player": x["player"], "game": x.get("game"), "market": x.get("market"),
-                 "side": "Over" if x["side"] == "More" else "Under", "sport": sport} for x in entry]
+                 "side": "Over" if x["side"] == "More" else "Under", "sport": x.get("sport") or sport} for x in entry]
     R = SIM.correlation_matrix(legs_sim)
     rng = np.random.default_rng(7)
     from statistics import NormalDist
@@ -287,3 +289,60 @@ def entry_odds(entry: Sequence[Dict], app: str, flex: bool = False, sport: Optio
     dist = {k: float((hits == k).mean()) for k in range(n + 1)}
     pay = sum(dist[k] * (table.get(k, 0.0) if table else (mult if k == n else 0.0)) for k in dist)
     return {"all": dist[n], "ev": pay - 1.0, "dist": dist, "mult": mult, "table": table}
+
+
+
+# --------------------------------------------------------------------------- what can go wrong before you submit (Nov 27)
+# Owner, Nov 27 (a PrizePicks entry built on a game that had already kicked off, and on Isaiah Joe while DraftKings had
+# pulled his prop): the board now says, per pick, when it can't be played or shouldn't be trusted, and the strongest
+# entry never uses one.
+SPORTSBOOKS_EXCLUDED = {"novig", "prophetx", "prizepicks", "underdog", "pick6", "parlayplay", "dabble_us_dfs",
+                        "betr_us_dfs", "sleeper"}
+
+
+def started(x: Dict, now=None) -> bool:
+    """Has his game kicked off? (the apps lock a pick at its game's start)"""
+    from datetime import datetime, timezone
+    k = x.get("kickoff")
+    if not k:
+        return False
+    try:
+        t = datetime.fromisoformat(str(k).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t <= (now or datetime.now(timezone.utc))
+
+
+def flag(x: Dict, my_book: Optional[str] = None, injury: Optional[str] = None, now=None) -> Optional[str]:
+    """The one warning that matters most for this pick, or None. Sets x["blocked"] when the entry must skip it."""
+    msg = None
+    if started(x, now):
+        msg = "🔒 Started — locked"
+    elif injury == "out":
+        msg = "⛔ Listed out"
+    elif injury == "questionable":
+        msg = "⚠️ Questionable — check his status"
+    else:
+        books = [b for b in (x.get("posting") or []) if b not in SPORTSBOOKS_EXCLUDED]
+        if my_book and books and my_book not in books and x.get("basis") == "books":
+            msg = f"⚠️ Not at {my_book_name(my_book)} — often a status doubt; check before you pick"
+    x["blocked"] = msg is not None
+    x["flag"] = msg or ""
+    return msg
+
+
+def my_book_name(b: str) -> str:
+    return {"draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "caesars": "Caesars",
+            "fanatics": "Fanatics", "espnbet": "ESPN BET", "hardrockbet": "Hard Rock", "betrivers": "BetRivers"
+            }.get(b, b)
+
+
+def start_label(kick, today) -> str:
+    """'7:40 PM' today, 'Sat 1:00 PM' otherwise (ET) -- the apps group a slate by start time."""
+    import components as C
+    d = C._kick_dt(kick)
+    if d is None:
+        return "Time TBD"
+    return d.strftime("%-I:%M %p") if d.date() == today else d.strftime("%a %-I:%M %p")
