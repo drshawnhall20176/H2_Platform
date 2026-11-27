@@ -622,7 +622,16 @@ def run():
         # in the customer sidebar -- Today's bar was the only way to change sport
         if not _early_sport:                                    # the layout was switched on this run
             sports.render_sport_selector(picker=True)
-        st.navigation(sections).run()
+        _cnav = st.navigation(sections)
+        # Nov 27: Today's "Live now" strip changes the sport and parks the Live page here (it only exists in the
+        # menu once the menu is built for that sport)
+        _goto = st.session_state.pop("_goto_page", None)
+        if _goto:
+            for _pgs in sections.values():
+                for _pg in _pgs:
+                    if getattr(_pg, "url_path", None) == _goto and getattr(_cnav, "url_path", None) != _goto:
+                        st.switch_page(_pg)
+        _cnav.run()
         return
     # Nov 17 (owner): on the Today entry page no sport is chosen yet, so the sidebar shows only START HERE and the
     # model's 30-day record -- not "Sport: ..." and the sport's pages, which would contradict the page. The page the

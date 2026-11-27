@@ -252,6 +252,7 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
             e = LM.edge(ch, price)
             out.append({"player": r["player"], "bet": f"{r['player']} {r['market']} {side} {ln['line']:g}",
                         "now": r["now"], "projected": r["projected"], "chance": ch, "price": price, "edge": e,
+                        "market": "Prop", "stat": r["market"], "side": side.lower(), "line": float(ln["line"]),
                         "signal": "🟢 Worth a look" if e >= 0.05 else "🟡 Close" if e >= 0 else "🔴 Pass"})
     return sorted(out, key=lambda b: -b["edge"])
 

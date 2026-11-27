@@ -885,6 +885,35 @@ def save_blobs(kind: str, items: Dict[str, str], db_path: Optional[str] = None) 
         return 0
 
 
+def add_blobs_once(kind: str, items: Dict[str, str], db_path: Optional[str] = None) -> int:
+    """Like save_blobs, but a key already saved is left as it was (Nov 27: a live signal keeps its FIRST sighting)."""
+    if not items or _test_run(db_path):
+        return 0
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            ts = _now()
+            for k, v in items.items():
+                cur.execute(f"INSERT INTO blob_cache (kind, k, payload, ts) VALUES ({ph},{ph},{ph},{ph}) "
+                            f"ON CONFLICT (kind, k) DO NOTHING", [kind, str(k), v, ts])
+        return len(items)
+    except Exception:                                           # noqa: BLE001
+        return 0
+
+
+def blobs_since(kind: str, since_key: str, db_path: Optional[str] = None) -> Dict[str, str]:
+    """{k: payload} for every blob of `kind` whose key sorts at or after `since_key` (keys that start with a date)."""
+    if db_path is None and not available():
+        return {}
+    try:
+        with _conn(db_path) as (con, ph):
+            cur = con.cursor()
+            cur.execute(f"SELECT k, payload FROM blob_cache WHERE kind={ph} AND k >= {ph}", [kind, str(since_key)])
+            return {str(r[0]): r[1] for r in cur.fetchall()}
+    except Exception:                                           # noqa: BLE001
+        return {}
+
+
 # --------------------------------------------------------------------------- results archive (Nov 3)
 # Completed tennis matches and international basketball games, kept so the models refit daily without re-crawling.
 def save_results(sport: str, rows: List[Dict], db_path: Optional[str] = None) -> int:
