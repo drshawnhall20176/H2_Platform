@@ -13,6 +13,8 @@ Do not duplicate page-building logic here — if this file ever needs more than 
 that's a sign the logic belongs back in streamlit_app.py instead.
 """
 
-from streamlit_app import run
+import deploy_reload            # Nov 27: new code merged -> streamlit_app and every module load fresh (no restart)
+deploy_reload.check()
+from streamlit_app import run   # noqa: E402
 
 run()
