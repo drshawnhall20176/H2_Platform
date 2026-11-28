@@ -27,3 +27,28 @@ def test_page_text_reads_every_frame():
 def test_no_url_is_a_quiet_skip(monkeypatch, capsys):
     monkeypatch.setattr(KW, "URL", "")
     assert KW.main([]) == 0 and "isn't set" in capsys.readouterr().out
+
+
+def test_warm_page_times_one_more_page_and_never_raises(monkeypatch):
+    """Nov 28: Pick'em and All picks are opened after Today so members don't pay their cold load."""
+    monkeypatch.setattr(KW.time, "sleep", lambda s: None)
+
+    class Frame:
+        url = "x"
+
+        def __init__(self, t):
+            self.t = t
+
+        def inner_text(self, sel, timeout=0):
+            return self.t
+
+    class Page:
+        def __init__(self, t, boom=False):
+            self.frames, self.boom = [Frame(t)], boom
+
+        def goto(self, url, **k):
+            if self.boom:
+                raise RuntimeError("net")
+    assert KW.warm_page(Page("266 DK Pick6 lines read"), "u", ("lines read",)) is not None
+    assert KW.warm_page(Page("", boom=True), "u", ("lines read",)) is None
+    assert [p for p, _ in KW.EXTRA][0] == "pickem_board"
