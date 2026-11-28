@@ -82,10 +82,45 @@ m3.metric("Parlay unit", f"${r['parlay_unit']:,.2f}", f"{s['unit_pct'] * P.PARLA
           delta_color="off")
 m4.metric("Singles ROI", _pct(r["singles_roi"], True), f"{r['singles']} settled", delta_color="off")
 m5.metric("Largest drawdown", _pct(r["max_dd"]) if r["path"] else "—")
+_withdrawn = r["moved"] - r["adjusted"]
 st.caption(_md(f"Bankroll = starting ${float(s['start_bankroll']):,.2f} {r['profit']:+,.2f} betting profit"
-           + (f" {r['moved']:+,.2f} moved in/out" if r["moved"] else "")
+           + (f" {_withdrawn:+,.2f} moved in/out" if _withdrawn else "")
+           + (f" {r['adjusted']:+,.2f} balance adjustments" if r["adjusted"] else "")
            + f". Above your starting bankroll: **${r['above_start']:,.2f}** — what you could withdraw and still "
              "be at the plan's starting size. Stakes are figured from what's in the book, so record withdrawals below."))
+
+# Nov 28 (owner: "the bankroll needs to balance"): what the sportsbooks should show right now, and a way to make the
+# plan agree with them
+_op = r["open"]
+st.markdown(_md(f"**What your sportsbooks should show right now: ${r['cash_expected']:,.2f}** — the bankroll less "
+                f"${_op['staked']:,.2f} tied up in {_op['n']} open bet(s) (a book takes the stake out when it's placed; "
+                "the plan counts it when it settles)."))
+with st.expander("⚖️ Balance check — make the plan match your sportsbooks"):
+    st.caption(_md("Add up the cash balance in every sportsbook and pick'em app you bet from (not counting open bets — "
+                   "they're already out of the balance) and enter the total. If it differs from the amount above, the "
+                   "difference is recorded as a balance adjustment dated today, so the bankroll and the unit start from "
+                   "the real number. It isn't counted as betting profit. Before you do: check the open bets below — "
+                   "one that has actually settled, or a bet missing from the Bet Log, is the usual reason they differ."))
+    with st.form("prog_balance"):
+        _actual = st.number_input("Total in my sportsbooks right now ($)", min_value=0.0,
+                                  value=float(max(0.0, r["cash_expected"])), step=1.0)
+        if st.form_submit_button("Match the plan to this balance"):
+            _adj = P.balance_adjustment(_actual, r, datetime.now(pytz.timezone("US/Eastern")).date().isoformat())
+            if _adj is None:
+                st.success("Already balanced — nothing to record.")
+            elif MS.save_setting(P.SETTINGS_KEY, dict(s, transfers=list(s.get("transfers") or []) + [_adj])):
+                st.success(_md(f"Recorded a balance adjustment of ${_adj['amount']:+,.2f}."))
+                st.rerun()
+            else:
+                st.error("Couldn't save it.")
+    if _op["rows"]:
+        st.caption(f"Open bets ({_op['n']}):")
+        st.dataframe(pd.DataFrame([{"Date": str(b.get("slate_date") or b.get("ts_placed") or "")[:10],
+                                    "Bet": " ".join(str(b.get(k) or "") for k in ("player", "market", "side", "line")).strip(),
+                                    "Book": b.get("book") or "", "Stake": float(b.get("stake") or 0)}
+                                   for b in _op["rows"]]),
+                     hide_index=True, width="stretch",
+                     column_config={"Stake": st.column_config.NumberColumn(format="$%.2f")})
 
 with st.expander("💸 Record a withdrawal or deposit"):
     with st.form("prog_move"):
@@ -103,7 +138,10 @@ with st.expander("💸 Record a withdrawal or deposit"):
             else:
                 st.error("Couldn't save it.")
     for t in reversed(list(s.get("transfers") or [])):
-        st.caption(_md(f"{t['date']}: {'withdrew' if float(t['amount']) < 0 else 'deposited'} ${abs(float(t['amount'])):,.2f}"))
+        if t.get("kind") == "adjustment":
+            st.caption(_md(f"{t['date']}: balance adjustment {float(t['amount']):+,.2f} ({t.get('note') or ''})"))
+        else:
+            st.caption(_md(f"{t['date']}: {'withdrew' if float(t['amount']) < 0 else 'deposited'} ${abs(float(t['amount'])):,.2f}"))
 
 
 def _gate_table(gates):

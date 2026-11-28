@@ -126,3 +126,20 @@ def test_dollar_amounts_on_the_page_are_not_read_as_math():
         if line.lstrip().startswith(("st.caption(f", "st.markdown(f")) and "$" in line:
             raise AssertionError("unescaped money text: " + line.strip())
     assert src.count("_md(") >= 5
+
+
+def test_the_balance_check_records_the_difference_as_an_adjustment_not_profit():
+    """Nov 28 (owner: the bankroll needs to balance)."""
+    import progression as P
+    from datetime import date
+    bets = [{"slate_date": "2026-11-10", "stake": 10.0, "entry_odds": 100, "result": "win", "is_real_bet": True},
+            {"slate_date": "2026-11-27", "stake": 4.0, "entry_odds": -110, "result": None, "is_real_bet": True}]
+    s = {"start_date": "2026-11-01", "start_bankroll": 100.0}
+    r = P.plan(s, bets, today=date(2026, 11, 28))
+    assert r["bankroll"] == 110.0 and r["open"] == {"n": 1, "staked": 4.0, "rows": r["open"]["rows"]}
+    assert r["cash_expected"] == 106.0
+    adj = P.balance_adjustment(101.5, r, "2026-11-28")
+    assert adj["amount"] == -4.5 and adj["kind"] == "adjustment"
+    assert P.balance_adjustment(106.0, r, "2026-11-28") is None
+    r2 = P.plan(dict(s, transfers=[adj]), bets, today=date(2026, 11, 28))
+    assert r2["cash_expected"] == 101.5 and r2["profit"] == 10.0 and r2["adjusted"] == -4.5    # profit unchanged
