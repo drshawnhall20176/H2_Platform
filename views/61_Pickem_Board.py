@@ -89,24 +89,45 @@ def _load(sk):
     reads = BBD.load_slate_reads(sk, date_str, BBD.O.DEFAULT_BOOK)
     got = PK.legs(reads or {}, offers or [], app, sk)
     if got:
-        return got, None
+        return got, None, {}
     _in_feed = sum(1 for o in offers or [] if app in (o.get("pickem") or {}))
-    for a in PK.APPS:
-        _feed_apps[a] = _feed_apps.get(a, 0) + sum(1 for o in offers or [] if a in (o.get("pickem") or {}))
+    feed = {a: sum(1 for o in offers or [] if a in (o.get("pickem") or {})) for a in PK.APPS}
     return [], ("not in our odds feed yet" if not _in_feed else
-                f"{_in_feed} lines in the feed, none for players the model has read yet")
+                f"{_in_feed} lines in the feed, none for players the model has read yet"), feed
+
+
+def _load_safe(sk):
+    try:
+        return _load(sk)
+    except Exception as e:                                      # noqa: BLE001 -- one sport's feed never blanks the rest
+        return [], f"couldn't load ({type(e).__name__})", {}
 
 
 legs, _why, _feed_apps = [], {}, {}
 with st.spinner("Reading the apps' lines…"):
+    # Nov 28: the sports load side by side -- each is mostly waiting on the odds feed, and one after another the
+    # first visit after a restart took 106 s. Results are gathered in the same order as before.
+    _results = {}
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        _ctx = get_script_run_ctx()
+
+        def _run(sk):
+            if _ctx is not None:
+                add_script_run_ctx(ctx=_ctx)
+            return _load_safe(sk)
+        with ThreadPoolExecutor(max_workers=max(1, min(6, len(CHOSEN)))) as _ex:
+            _results = dict(zip(CHOSEN, _ex.map(_run, CHOSEN)))
+    except Exception:                                           # noqa: BLE001 -- fall back to one at a time
+        _results = {}
     for _sk in CHOSEN:
-        try:
-            _got, _w = _load(_sk)
-        except Exception as e:                                  # noqa: BLE001 -- one sport's feed never blanks the rest
-            _got, _w = [], f"couldn't load ({type(e).__name__})"
+        _got, _w, _feed = _results.get(_sk) or _load_safe(_sk)
         legs += _got
         if _w:
             _why[_sk] = _w
+        for a, k in (_feed or {}).items():
+            _feed_apps[a] = _feed_apps.get(a, 0) + k
 if not legs:
     # Nov 18 (owner: "not sure why this says DK hasn't posted when I see values on their site"): say which it is --
     # the odds feed isn't carrying this app's lines, or it is but none match a player the model read
