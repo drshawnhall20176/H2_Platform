@@ -2769,3 +2769,21 @@ runpy.run_path({page!r})
     assert not at.exception, at.exception
     strong = [d.value for d in at.dataframe if "Best price" in d.value.columns]
     assert strong and set(strong[0]["Result"]) == {"✅ won", "❌ lost"}
+
+
+def test_a_fresh_visit_opens_on_a_sport_playing_today():
+    """Nov 28 (a Saturday visit opened on NFL with no NFL games)."""
+    import sports
+    keys = [s.key for s in sports.selectable_sports(True)]
+    assert len(keys) > 2
+    pick = sports.default_selectable(True, games={keys[0]: 0, keys[2]: 5})
+    assert pick == keys[2]
+    assert sports.default_selectable(True, games={}) == sports.default_selectable(True)
+
+
+def test_the_hourly_count_is_games_starting_that_day_not_the_weeks_slate():
+    import warm_slates as W
+    meta = [{"game_date": "2026-11-28T17:00Z"}, {"game_date": "2026-11-29T18:00Z"},
+            {"game_date": "2026-11-29T03:30Z"},                # 10:30 PM ET on the 28th
+            {"game_date": ""}]
+    assert W.games_on_day(meta, "2026-11-28") == 3
