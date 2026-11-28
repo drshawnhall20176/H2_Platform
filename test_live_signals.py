@@ -321,7 +321,8 @@ def test_live_prop_lines_keep_one_main_line_and_blend():
             {"description": "A B", "name": "Over", "point": 20.5, "price": -105},
             {"description": "A B", "name": "Under", "point": 20.5, "price": -115}]}]}]}
     lines = LP.live_prop_lines("NBA", "e1", ["Points"], "k", fetch=lambda e, ks: data)
-    assert len(lines) == 1 and lines[0]["line"] == 20.5 and lines[0]["over"] == -105 and lines[0]["books"] == 2
+    assert len(lines) == 1 and lines[0]["line"] == 20.5 and lines[0]["over"] == -107.5 and lines[0]["best_over"] == -105
+    assert lines[0]["books"] == 2
     assert 0.45 < lines[0]["p_over_mkt"] < 0.52
 
 
@@ -332,3 +333,13 @@ def test_first_night_props_stay_out_of_the_record():
     line = {"type": "Spread", "result": "loss", "price": -110}
     rec = LS.record([old, new, line])
     assert rec["n"] == 2 and rec["by"]["Prop"]["n"] == 1
+
+
+def test_a_prop_needs_three_books_and_a_bigger_cushion_to_be_worth_a_look():
+    import live_props as LP
+    rows = [{"player": "A B", "market": "Points", "now": 10, "remaining": 0.5, "pre_projection": 20, "projected": 20}]
+    thin = LP.check_lines(rows, [{"player": "A B", "market": "Points", "line": 14.5, "over": 300, "under": -400,
+                                  "p_over_mkt": 0.2, "books": 2}], "NBA", 0.5)
+    assert thin and not any(LS.worth(b) for b in thin)                 # big edge, but only two books post it
+    assert LS.worth({"edge": 0.06, "price": -110})                    # game lines keep the 5-point bar
+    assert not LS.worth({"edge": 0.06, "price": -110, "signal": "🟡 Close"})

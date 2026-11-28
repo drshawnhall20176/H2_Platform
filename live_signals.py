@@ -20,7 +20,8 @@ from typing import Callable, Dict, Iterable, List, Optional
 KIND = "live_signal"
 # Nov 27: v2 = live props priced at one main line, blended toward the books' no-vig chance. The props kept on the first
 # night (every alternate line at the best price anywhere, ~200 a game) are left out of the record -- noise, not edges.
-VER = 2
+# v3 (same night): priced at the books' median live price, a 7-point cushion, 3+ books -- v2 still flagged ~55 a game.
+VER = 3
 MIN_EDGE = 0.05
 STALE_EDGE = 0.20         # an edge this big usually means the book's line hasn't caught up with the game yet
 
@@ -31,7 +32,8 @@ def key(day: str, league: str, game_id, bet: str) -> str:
 
 def worth(b: Dict) -> bool:
     e = b.get("edge")
-    return e is not None and e >= MIN_EDGE and b.get("price") is not None
+    return (e is not None and e >= MIN_EDGE and b.get("price") is not None
+            and str(b.get("signal") or "🟢").startswith("🟢"))           # props carry a stricter 🟢 of their own
 
 
 def row(day: str, g: Dict, b: Dict, clock: str, now_iso: str) -> Dict:

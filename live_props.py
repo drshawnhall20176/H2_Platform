@@ -247,15 +247,19 @@ def live_prop_lines(league: str, event_id: str, markets: Sequence[str], api_key:
         main = max(two, key=lambda r: (len(set(r["prices"]["over"]) & set(r["prices"]["under"])),
                                        len(r["prices"]["over"]) + len(r["prices"]["under"])))
         ov, un = main["prices"]["over"], main["prices"]["under"]
+        # Nov 27: the edge is taken at the books' typical (median) live price -- the best price anywhere is often a
+        # stale quote at one book, an "edge" by itself that's gone by the time you look
         out.append({"player": main["player"], "market": main["market"], "line": main["line"],
-                    "over": max(ov.values()), "under": max(un.values()),
+                    "over": _median(list(ov.values())), "under": _median(list(un.values())),
+                    "best_over": max(ov.values()), "best_under": max(un.values()),
                     "p_over_mkt": _no_vig(_median(list(ov.values())), _median(list(un.values()))),
                     "books": len(set(ov) | set(un))})
     return out
 
 
-LIVE_PROP_WEIGHT = 0.35      # the live props read's say against the books' own chance -- untested, so a minority
-PROP_MIN_EDGE = 0.05
+LIVE_PROP_WEIGHT = 0.25      # the live props read's say against the books' own chance -- untested, so a minority
+PROP_MIN_EDGE = 0.07         # Nov 27: 0.05 still left ~55 a game "worth a look" -- props need a bigger cushion
+PROP_MIN_BOOKS = 3           # a line only one or two books post is too thin to call an edge
 
 
 def _median(xs):
@@ -296,7 +300,9 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
             out.append({"player": r["player"], "bet": f"{r['player']} {r['market']} {side} {ln['line']:g}",
                         "now": r["now"], "projected": r["projected"], "chance": ch, "price": price, "edge": e,
                         "market": "Prop", "stat": r["market"], "side": side.lower(), "line": float(ln["line"]),
-                        "signal": "🟢 Worth a look" if e >= PROP_MIN_EDGE else "🟡 Close" if e >= 0 else "🔴 Pass"})
+                        "books": ln.get("books"),
+                        "signal": ("🟢 Worth a look" if e >= PROP_MIN_EDGE and (ln.get("books") or PROP_MIN_BOOKS)
+                                   >= PROP_MIN_BOOKS else "🟡 Close" if e >= 0 else "🔴 Pass")})
     return sorted(out, key=lambda b: -b["edge"])
 
 

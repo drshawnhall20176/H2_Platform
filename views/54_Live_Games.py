@@ -518,7 +518,7 @@ def board():
                 st.caption("No live line from the books for this game right now.")
             if league in _PROP_LEAGUES:
                 _pr = it.get("props") or ([], [], None)
-                _n = sum(1 for b in _pr[1] if b.get("edge") is not None and b["edge"] >= LG.MIN_EDGE)
+                _n = sum(1 for b in _pr[1] if __import__("live_signals").worth(b))
                 with st.expander("🧍 Live player props" + (f" · 🟢 {_n} worth a look" if _n else "")):
                     _props_panel(*_pr)
                 with st.expander("📋 Live box score"):
