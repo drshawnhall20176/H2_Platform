@@ -23,6 +23,11 @@ PUBLIC = "https://h2discorduser.streamlit.app/"
 URL = os.environ.get("PUBLIC_APP_URL", "").strip() or PUBLIC
 WAKE_TEXT = ("get this app back up", "Yes, get this app back up")
 DONE_TEXT = ("GAMES · EARLIEST", "No pick clears the bar", "Player picks today", "PLAYER PICKS TODAY")
+# Nov 28: after Today, the pages whose first load is slowest (measured cold: Pick'em 56 s, All picks 51 s). Their
+# caches are shared by every visitor, so one bot visit after each board build makes them quick for members.
+_BB_DONE = ("How 'best' is defined", "No play", "No picks")
+EXTRA = (("pickem_board", ("lines read", "isn't carrying", "lines to read")),
+         ("best_bets?sport=NBA", _BB_DONE), ("best_bets?sport=NCAAMB", _BB_DONE), ("best_bets?sport=NCAAF", _BB_DONE))
 
 
 def page_text(page) -> str:
@@ -62,12 +67,30 @@ def visit(url: str = URL, wait_s: int = 180) -> dict:
                 break
             time.sleep(1)
         time.sleep(5)                                           # let the last cached loads finish
+        if "done" in marks:
+            for path, done in EXTRA:
+                marks[path] = warm_page(page, url.rstrip("/") + "/" + path, done)
         if "done" not in marks:                                 # say what it saw instead (no picks are printed)
             marks["frames"] = [(fr.url[:80]) for fr in page.frames]
             marks["saw"] = " | ".join(page_text(page).split("\n")[:12])[:400]
         b.close()
     marks["total"] = round(time.time() - t0, 1)
     return marks
+
+
+def warm_page(page, url: str, done, wait_s: int = 100):
+    """Open one more page in the same browser; seconds until it shows one of `done`, or None. Never raises."""
+    t0 = time.time()
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(4)                                           # let Streamlit swap out the previous page
+        while time.time() - t0 < wait_s:
+            if any(d in page_text(page) for d in done):
+                return round(time.time() - t0, 1)
+            time.sleep(1)
+    except Exception:                                           # noqa: BLE001
+        pass
+    return None
 
 
 def main(argv=None) -> int:
