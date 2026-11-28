@@ -35,7 +35,7 @@ def main(argv=None) -> int:
         except Exception as exc:                                # noqa: BLE001 -- one sport failing never stops the rest
             print(f"{key}: build failed ({type(exc).__name__}: {exc})")
             continue
-        seen[key] = len(meta or [])
+        seen[key] = games_on_day(meta, day)
         if rows:
             SS.save(key, day, (rows, meta))
         print(f"{key} {day}: {len(rows)} players, {len(meta)} games, {time.time() - t0:.0f}s"
@@ -85,6 +85,19 @@ def grade_live_signals(day: str) -> int:
 
 
 GAMES_KEY = "games_on:{day}"
+
+
+def games_on_day(meta, day: str) -> int:
+    """Nov 28: games that START on `day` (Eastern). NFL and college football build the whole week's slate, so counting
+    the slate said NFL had 16 games on a Saturday with none -- Today showed an NFL button and a fresh visit opened on a
+    sport with nothing to bet. A game with no readable start time counts (better shown than hidden)."""
+    import sports
+    n = 0
+    for g in meta or []:
+        dt = sports.game_dt(str(g.get("game_date") or g.get("_game_date") or ""))
+        if dt is None or dt.date().isoformat() == str(day)[:10]:
+            n += 1
+    return n
 
 
 def other_sports_games(day: str, done: set, check=None) -> dict:

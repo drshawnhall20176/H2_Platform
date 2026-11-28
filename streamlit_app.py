@@ -231,7 +231,16 @@ def run():
         # Nov 25 (owner: "Page not found" after a restart): a restart forgets the session, so a sport-only page's
         # link landed on the default sport, where that page doesn't exist. The sport rides in the link (?sport=NBA)
         # and a fresh session starts on it.
-        st.session_state["sport"] = _sports.from_link(keys) or _sports.default_selectable(_owner)
+        _games_today = None
+        if not _sports.from_link(keys):
+            try:                                                # Nov 28: open on a sport playing today
+                import customer_today as _CT
+                from datetime import datetime as _dtm
+                import pytz as _ptz
+                _games_today = _CT.saved_games_on(_dtm.now(_ptz.timezone("US/Eastern")).strftime("%Y-%m-%d"))
+            except Exception:                                   # noqa: BLE001
+                _games_today = None
+        st.session_state["sport"] = _sports.from_link(keys) or _sports.default_selectable(_owner, games=_games_today)
     active_sport = st.session_state["sport"]
     # Nov 27: the link is kept by the Sport picker, once the page is known (sports.render_sport_selector)
 

@@ -384,8 +384,16 @@ def selectable_sports(owner: bool = True, day=None) -> List[Sport]:
     return out + list(LAB_SPORTS.values())
 
 
-def default_selectable(owner: bool = True, day=None) -> str:
+def default_selectable(owner: bool = True, day=None, games: Optional[Dict[str, int]] = None) -> str:
+    """The sport a fresh visit opens on. Nov 28 (owner: a Saturday visit opened on NFL with no NFL games): the first
+    sport, in menu order, with games today by the hourly build's count (`games`); the old default when none is known."""
     keys = [s.key for s in selectable_sports(owner, day)]
+    if games:
+        playing = [k for k in keys if (games.get(k) or 0) > 0]
+        if DEFAULT_SPORT in playing:
+            return DEFAULT_SPORT
+        if playing:
+            return playing[0]
     return DEFAULT_SPORT if DEFAULT_SPORT in keys else (keys[0] if keys else DEFAULT_SPORT)
 
 
