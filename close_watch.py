@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Tuple
 WATCH_MINUTES = 345
 CAPTURE_LEADS = (45, 5)
 EVENTS_REFRESH_S = 1800
+IDLE_RECHECK_S = 900          # Nov 28: with nothing to capture, look again this often until the window ends
 GAME_MARKETS = {"Spread": "spreads", "Puck Line": "spreads", "Run Line": "spreads", "Total": "totals",
                 "Moneyline": "h2h"}
 
@@ -204,8 +205,14 @@ def run(api_key: str, minutes: int = WATCH_MINUTES, once: bool = False, now_fn=l
         open_bets = [b for b in B.list_bets(settled=False) if watchable(b)]
         led = [r for r in ledger_fn(now_fn()) if (LC.kickoff(r) or now_fn() + timedelta(hours=1)) > now_fn()]
         if not open_bets and not led:
-            print("No open bets or shown picks to watch.")
-            break
+            # Nov 28: keep watching instead of ending -- bets logged on the site later in the day (the usual case) had
+            # no run left to price them; only 60 of 314 settled singles had a closing price
+            if once:
+                print("No open bets or shown picks to watch.")
+                break
+            print("Nothing open yet -- checking again in 15 minutes.")
+            sleep_fn(IDLE_RECHECK_S)
+            continue
         need = {b.get("sport") or "" for b in open_bets} | {r.get("sport") or "" for r in led}
         if events_at is None or (now_fn() - events_at).total_seconds() > EVENTS_REFRESH_S or not need <= have_sports:
             events_by_sport = _events(api_key, sorted(need))
@@ -258,8 +265,9 @@ def run(api_key: str, minutes: int = WATCH_MINUTES, once: bool = False, now_fn=l
         if once:
             break
         if nxt is None:
-            print("No more starts with open bets or shown picks in view.")
-            break
+            print("No more starts with open bets or shown picks in view -- checking again in 15 minutes.")
+            sleep_fn(IDLE_RECHECK_S)
+            continue
         if nxt >= end:
             print(f"Next capture ({nxt:%H:%M} UTC) is after this run's window; a later run takes it.")
             break
