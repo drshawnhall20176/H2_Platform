@@ -52,3 +52,14 @@ def test_warm_page_times_one_more_page_and_never_raises(monkeypatch):
     assert KW.warm_page(Page("266 DK Pick6 lines read"), "u", ("lines read",)) is not None
     assert KW.warm_page(Page("", boom=True), "u", ("lines read",)) is None
     assert [p for p, _ in KW.EXTRA][0] == "pickem_board"
+
+
+def test_the_pickem_only_visit_is_its_own_mode(monkeypatch):
+    """Nov 28: warm-pickem.yml opens just the Pick'em board every 10 minutes."""
+    seen = []
+    monkeypatch.setattr(KW, "visit_pickem", lambda url: seen.append(url) or {"pickem_board": 12.0})
+    monkeypatch.setattr(KW, "visit", lambda url: (_ for _ in ()).throw(AssertionError("full visit")))
+    assert KW.main(["--pickem", "https://x.app"]) == 0 and seen == ["https://x.app"]
+    import pathlib
+    wf = pathlib.Path(".github/workflows/warm-pickem.yml").read_text()
+    assert "keep_warm.py --pickem" in wf and "workflow_dispatch" in wf

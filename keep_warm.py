@@ -93,12 +93,32 @@ def warm_page(page, url: str, done, wait_s: int = 100):
     return None
 
 
+def visit_pickem(url: str = URL) -> dict:
+    """Nov 28 (owner: speed on a big college Saturday): just the Pick'em board, every 10 minutes (warm-pickem.yml) --
+    its lines are saved for 10 minutes, so a visit this often keeps a member's first open quick. Opening the board
+    (not the site's Today) is enough: its loads are the shared caches."""
+    from playwright.sync_api import sync_playwright
+    t0 = time.time()
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        page = b.new_page()
+        secs = warm_page(page, url.rstrip("/") + "/" + EXTRA[0][0], EXTRA[0][1], wait_s=150)
+        b.close()
+    return {"pickem_board": secs, "total": round(time.time() - t0, 1)}
+
+
 def main(argv=None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+    argv = list(argv if argv is not None else sys.argv[1:])
+    pickem_only = "--pickem" in argv
+    argv = [a for a in argv if a != "--pickem"]
     url = argv[0] if argv else URL
     if not url:
         print("keep-warm: PUBLIC_APP_URL isn't set -- nothing to visit (the owner site is private)")
         return 0
+    if pickem_only:
+        m = visit_pickem(url)
+        print("keep-warm (pick'em):", m)
+        return 0 if m.get("pickem_board") is not None else 1
     m = visit(url)
     print("keep-warm:", m)
     return 0 if "done" in m else 1

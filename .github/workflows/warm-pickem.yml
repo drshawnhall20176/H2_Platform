@@ -1,0 +1,30 @@
+# Keep the Pick'em board warm (keep_warm.py --pickem, Nov 28): a headless browser opens it every 10 minutes on a
+# busy day so a member's first open finds its lines already loaded.
+name: warm-pickem
+
+on:
+  schedule:
+    - cron: "4,14,24,34,44,54 * * * *"  # Nov 28: the Pick'em board every 10 minutes (its lines are saved 10 minutes)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the browser
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+      - name: Open the site
+        env:
+          PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+        run: python keep_warm.py --pickem

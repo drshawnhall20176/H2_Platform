@@ -665,7 +665,9 @@ def generic_fetch_info(sport_key: str, date_str: str) -> Optional[Dict]:
     return _FETCH_INFO.get((sport_key, date_str))
 
 
-@st.cache_data(ttl=300, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
+# Nov 28 (owner: "yes speed up"): lines and reads saved 10 minutes (was 5) -- the Pick'em board rebuilt them on most
+# visits; warm-pickem.yml opens it every 10 minutes. Prices can be up to 10 minutes old (owner accepted).
+@st.cache_data(ttl=600, show_spinner=False, max_entries=32)   # Nov 20: bounded memory under load
 def fetch_generic_offers(sport_key: str, date_str: str, api_key: str) -> List[Dict]:
     """The ONE real-offers fetch for every non-MLB sport (MLB has fetch_mlb_real_lines): cached, so
     load_generic_best_bets_board and Slip Lab — which needs the raw per-book offers, not just the
@@ -1015,7 +1017,7 @@ def compose_board(sport_key: str, reads: Optional[Dict], rows: List[Dict], legac
     return SP.plays(reads, rows, sport_key) + rest
 
 
-@st.cache_data(ttl=300, show_spinner=False, max_entries=32)
+@st.cache_data(ttl=600, show_spinner=False, max_entries=32)
 def load_slate_reads(sport_key: str, date_str: str, preferred_book: str = O.DEFAULT_BOOK) -> Optional[Dict]:
     """slate_reads_for with its own slate + offers fetch (both shared with Best Bets through their caches), for
     pages that build their own board (Edge Board).
