@@ -860,6 +860,16 @@ def _locked_table(at):
 
 
 def test_the_locked_calls_table_follows_the_time_slot_and_game_pickers(monkeypatch, isolated_ledger):
+    # Nov 27: the ledger won't lock a call for a game that has started, so after 1 PM ET this test's slate shrank and it
+    # failed every afternoon and evening. Pin the ledger's clock to this morning so the whole slate is still ahead.
+    import datetime as _dt
+    morning = ET.localize(datetime.now(ET).replace(hour=9, minute=0, second=0, microsecond=0, tzinfo=None))
+
+    class _Morning(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return morning.astimezone(tz) if tz else morning.replace(tzinfo=None)
+    monkeypatch.setattr(AL, "datetime", _Morning)
     at = _run_slots(monkeypatch, "NBA")
     assert not at.exception, [e.value for e in at.exception]
     full = _locked_table(at)
