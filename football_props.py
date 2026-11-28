@@ -188,6 +188,27 @@ def opportunity(stats: Dict, kind: str, has_targets: bool = True) -> float:
     return _num(s.get(kind))
 
 
+# Nov 28: the names people type when logging a bet (and the apps print) for the markets above -- "Passing Yards" on a
+# logged PrizePicks leg would otherwise never grade
+MARKET_ALIASES = {"passing yards": "Pass Yards", "pass yds": "Pass Yards", "passing yds": "Pass Yards",
+                  "rushing yards": "Rush Yards", "rush yds": "Rush Yards", "rushing yds": "Rush Yards",
+                  "rec yards": "Receiving Yards", "rec yds": "Receiving Yards", "receiving yds": "Receiving Yards",
+                  "recs": "Receptions", "rec": "Receptions",
+                  "rush + rec yds": "Rush + Rec Yards", "rush+rec yards": "Rush + Rec Yards",
+                  "rushing + receiving yards": "Rush + Rec Yards",
+                  "passing tds": "Passing TDs", "pass tds": "Passing TDs", "pass attempts": "Pass Attempts",
+                  "passing attempts": "Pass Attempts", "pass completions": "Pass Completions",
+                  "completions": "Pass Completions", "rushing attempts": "Rush Attempts", "carries": "Rush Attempts"}
+
+
+def canonical_market(market: str) -> str:
+    """The MARKETS name for a market as typed; unchanged when it isn't a known spelling."""
+    m = str(market or "").strip()
+    if m in MARKETS:
+        return m
+    return MARKET_ALIASES.get(m.lower(), m)
+
+
 def market_value(stats: Dict, market: str) -> float:
     return sum(_num((stats or {}).get(k)) for k in MARKETS[market]["stats"])
 
