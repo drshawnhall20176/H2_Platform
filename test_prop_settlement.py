@@ -43,3 +43,14 @@ def test_an_unfinished_game_stays_pending():
     plan = PS.build_plan([bet(1, "Duke Watson", "Rush Attempts", "Under", 14.5)], "NCAAF",
                          fetch=lambda url, params=None: BOARD if url.endswith("scoreboard") else live)
     assert plan["proposed"] == [] and plan["still_pending"][0]["why"] == "game not final yet"
+
+
+def test_football_legs_typed_with_common_names_still_grade():
+    """Nov 28: a PrizePicks leg logged as "Passing Yards" (the grader's name is Pass Yards) would never settle."""
+    import postgame as PG
+    st = {"rush_yds": 72, "rec": 8, "rec_yds": 101, "pass_yds": 230}
+    assert PG.stat_value("NCAAF", "Passing Yards", st) == 230
+    assert PG.stat_value("NCAAF", "Rushing Yards", st) == 72
+    assert PG.stat_value("NFL", "Rec Yards", st) == 101
+    assert PG.stat_value("NCAAF", "Receptions", st) == 8
+    assert PG.stat_value("NCAAF", "Bogus", st) is None

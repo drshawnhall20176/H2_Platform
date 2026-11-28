@@ -310,6 +310,7 @@ def stat_value(sport: str, market: str, stats: Dict) -> Optional[float]:
             return None
         return float(sum(_num(stats[p]) or 0.0 for p in parts))
     import football_props as FP
+    market = FP.canonical_market(market)                  # Nov 28: "Passing Yards" grades as Pass Yards
     return FP.market_value(stats, market) if market in FP.MARKETS else None
 
 
@@ -320,7 +321,7 @@ def actual_volume(sport: str, market: str, stats: Dict) -> Optional[float]:
     if FAMILY.get(sport) == "basketball":
         return _num(stats.get("min")) if "min" in stats else None
     import football_props as FP
-    m = FP.MARKETS.get(market) or {}
+    m = FP.MARKETS.get(FP.canonical_market(market)) or {}
     kind = m.get("opp")
     if kind in (None, "none"):
         return None
