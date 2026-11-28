@@ -303,7 +303,23 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
                         "books": ln.get("books"),
                         "signal": ("🟢 Worth a look" if e >= PROP_MIN_EDGE and (ln.get("books") or PROP_MIN_BOOKS)
                                    >= PROP_MIN_BOOKS else "🟡 Close" if e >= 0 else "🔴 Pass")})
-    return sorted(out, key=lambda b: -b["edge"])
+    return one_flag_per_player(sorted(out, key=lambda b: -b["edge"]))
+
+
+def one_flag_per_player(bets: List[Dict]) -> List[Dict]:
+    """Nov 28: one 🟢 per player -- his strongest. The same live read drives all of a player's props (a fast start
+    lifts his points, rebounds and PRA together), so five 🟢 rows for one player are one opinion, not five; one game
+    showed 27 after the Nov 27 tightening. The rest read 🟡 and say why. `bets` sorted by edge, biggest first."""
+    seen = set()
+    for b in bets:
+        if not str(b.get("signal") or "").startswith("🟢"):
+            continue
+        who = _norm(b.get("player"))
+        if who in seen:
+            b["signal"] = "🟡 Close (his best prop is flagged)"
+        else:
+            seen.add(who)
+    return bets
 
 
 # --------------------------------------------------------------------------- live box score tables (Nov 12)

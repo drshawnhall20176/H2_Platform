@@ -343,3 +343,27 @@ def test_a_prop_needs_three_books_and_a_bigger_cushion_to_be_worth_a_look():
     assert thin and not any(LS.worth(b) for b in thin)                 # big edge, but only two books post it
     assert LS.worth({"edge": 0.06, "price": -110})                    # game lines keep the 5-point bar
     assert not LS.worth({"edge": 0.06, "price": -110, "signal": "🟡 Close"})
+
+
+def test_only_a_players_strongest_live_prop_is_worth_a_look():
+    """Nov 28: one game still showed 27 green props -- mostly the same few players' stats off one live read."""
+    import live_props as LP
+    bets = [{"player": "A B", "edge": 0.12, "signal": "🟢 Worth a look"},
+            {"player": "A B", "edge": 0.09, "signal": "🟢 Worth a look"},
+            {"player": "C D", "edge": 0.08, "signal": "🟢 Worth a look"},
+            {"player": "A B", "edge": 0.01, "signal": "🟡 Close"}]
+    out = LP.one_flag_per_player(bets)
+    assert [b["signal"][:1] for b in out] == ["🟢", "🟡", "🟢", "🟡"]
+    assert not LS.worth(dict(out[1], price=-110))
+
+
+def test_the_record_counts_one_bet_per_call():
+    def r(bet, t, side, seen, player=None, res="win"):
+        return {"day": "2026-11-27", "league": "NBA", "game_id": "g1", "type": t, "side": side, "bet": bet,
+                "player": player, "seen_at": seen, "result": res, "price": -110, "ver": LS.VER}
+    rows = [r("Over 220.5", "Total", "over", "1"), r("Over 222.5", "Total", "over", "2", res="loss"),
+            r("Under 222.5", "Total", "under", "3"),
+            r("A B Points Over 20.5", "Prop", "over", "4", "A B"), r("A B Rebounds Over 8.5", "Prop", "over", "5", "A B")]
+    rec = LS.record(rows)
+    assert rec["n"] == 3 and rec["w"] == 3                       # first total over, the under, A B's first prop
+    assert LS.count_for_games(rows, "2026-11-27") == {"g1": 3}
