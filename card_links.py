@@ -11,7 +11,26 @@ from typing import Callable, Optional, Sequence
 
 
 def table(data, key: str, items: Sequence, open_fn: Callable, caption: Optional[str] = None, **kwargs) -> None:
-    """st.dataframe(data) whose row `i` opens `open_fn(items[i])`. `data` may be a DataFrame or a Styler."""
+    """st.dataframe(data) whose row `i` opens `open_fn(items[i])`. `data` may be a DataFrame or a Styler.
+
+    Nov 28 (owner: Pick'em "especially when clicking a row to open the game card"): the table is drawn in a fragment,
+    so ticking a row reruns only the table and opens the card -- not the whole page (Pick'em reloaded every sport's
+    lines first: 2.7 s before the card appeared). Falls back to a plain call where fragments aren't available."""
+    import streamlit as st
+    frag = getattr(st, "fragment", None)
+    if frag is None:
+        _table(data, key, items, open_fn, caption, **kwargs)
+        return
+    try:
+        frag(_table)(data, key, items, open_fn, caption, **kwargs)
+    except Exception as e:                                      # noqa: BLE001
+        if type(e).__name__ in ("StreamlitAPIException",):      # e.g. a page that already draws it in a fragment
+            _table(data, key, items, open_fn, caption, **kwargs)
+        else:
+            raise
+
+
+def _table(data, key: str, items: Sequence, open_fn: Callable, caption: Optional[str] = None, **kwargs) -> None:
     import streamlit as st
     flag = f"{key}__open"
 
