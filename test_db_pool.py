@@ -9,6 +9,7 @@ class FakeCur:
     def execute(self, q, *a):
         if self.fail: raise RuntimeError("gone")
         self.log.append(q[:20])
+    def fetchall(self): return []                           # Nov 28: the column check before any ALTER
 
 
 class FakeCon:

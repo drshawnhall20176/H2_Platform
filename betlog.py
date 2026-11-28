@@ -225,6 +225,9 @@ ALTER TABLE bets ADD COLUMN IF NOT EXISTS entry_odds_source TEXT;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS suggested_stake REAL;
 ALTER TABLE bets ADD COLUMN IF NOT EXISTS category TEXT;
 """
+_PG_COLUMNS = ("id", "ts_placed", "slate_date", "game", "player", "player_id", "market", "side", "line", "entry_odds",
+               "model_prob", "stake", "book", "close_odds", "result", "notes", "ticket", "sport", "trader", "is_real_bet",
+               "cashed_out_amount", "entry_odds_source", "suggested_stake", "category")
  
  
 # Nov 17: every read used to open a fresh SSL connection (~0.4 s to Supabase) AND re-run this whole schema (a dozen
@@ -313,8 +316,15 @@ def _pg_conn():
     try:
         if not _PG_SCHEMA_DONE:
             with con.cursor() as cur:
-                cur.execute(_PG_SCHEMA)
-                cur.execute("ALTER TABLE bets ADD COLUMN IF NOT EXISTS ticket TEXT")
+                # Nov 28: look before altering. ALTER TABLE takes the table's strongest lock even when the column is
+                # already there, so every new process (each scheduled job) queued behind any open read of the bets
+                # table -- the overnight "statement timeout" / dropped-connection failures. Now it alters only when a
+                # column is actually missing.
+                cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'bets'")
+                have = {r[0] for r in cur.fetchall()}
+                if not set(_PG_COLUMNS) <= have:
+                    cur.execute(_PG_SCHEMA)
+                    cur.execute("ALTER TABLE bets ADD COLUMN IF NOT EXISTS ticket TEXT")
             con.commit()
             _PG_SCHEMA_DONE = True
         yield con
@@ -339,6 +349,18 @@ def _pg_list() -> List[Dict]:
         return [dict(r) for r in cur.fetchall()]
  
  
+def _pg_list_retry() -> List[Dict]:
+    """Nov 28: a read is safe to retry -- a connection the server dropped (seen overnight: "SSL connection has been
+    closed unexpectedly") gets one fresh try after a short pause instead of failing the whole job."""
+    try:
+        return _pg_list()
+    except Exception as exc:                                    # noqa: BLE001
+        if type(exc).__name__ not in ("OperationalError", "InterfaceError", "QueryCanceled"):
+            raise
+        _time.sleep(3)
+        return _pg_list()
+
+
 def _pg_update(bet_id, fields) -> None:
     sets = ", ".join(f"{k}=%s" for k in fields)
     with _pg_conn() as con, con.cursor() as cur:
@@ -440,7 +462,7 @@ def same_team_recent_bets(team: str, bets: List[Dict], before_date: str,
 
 def list_bets(db_path: str = DB_PATH, settled: Optional[bool] = None,
               sport: Optional[str] = None, is_real_bet: Optional[bool] = None) -> List[Dict]:
-    rows = _pg_list() if USING_POSTGRES else _sqlite_list(db_path)
+    rows = _pg_list_retry() if USING_POSTGRES else _sqlite_list(db_path)
     if sport is not None:
         # Match the sport; treat legacy rows with no sport recorded as MLB (the original sport).
         rows = [b for b in rows if (b.get("sport") or "MLB") == sport]

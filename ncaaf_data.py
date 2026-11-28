@@ -588,8 +588,17 @@ def _fill_pass_attempts(records: List[Dict]) -> List[Dict]:
     return records
 
 
+_FILLED_ID = {"id": None}
+
+
 def load_player_game_stats(path: str = PLAYER_GAME_STATS_PATH) -> List[Dict]:
-    return _fill_pass_attempts(_cached_read_records(path))
+    # Nov 28: the fill pass (idempotent) runs once per loaded list, not on every call -- build_slate asks for this list
+    # once per player, and re-scanning ~195k rows each time made the hourly NCAAF build take 20+ minutes.
+    recs = _cached_read_records(path)
+    if _FILLED_ID["id"] != id(recs):
+        _fill_pass_attempts(recs)
+        _FILLED_ID["id"] = id(recs)
+    return recs
 
 
 _DRIVES_COLUMNS = ["season", "game_id", "week", "drive_id", "drive_number", "offense", "defense",
