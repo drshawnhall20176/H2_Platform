@@ -64,6 +64,12 @@ st.markdown(f"### Stage {name}")
 st.caption(why)
 
 
+def _md(text: str) -> str:
+    """Nov 28: Streamlit reads $...$ in markdown as a math formula -- the bankroll and goal lines rendered as italic
+    letters. Every dollar sign shown as text is escaped."""
+    return text.replace("$", "\\$")
+
+
 def _pct(x, sign=False):
     return "—" if x is None else (f"{x:+.1%}" if sign else f"{x:.0%}")
 
@@ -76,10 +82,10 @@ m3.metric("Parlay unit", f"${r['parlay_unit']:,.2f}", f"{s['unit_pct'] * P.PARLA
           delta_color="off")
 m4.metric("Singles ROI", _pct(r["singles_roi"], True), f"{r['singles']} settled", delta_color="off")
 m5.metric("Largest drawdown", _pct(r["max_dd"]) if r["path"] else "—")
-st.caption(f"Bankroll = starting ${float(s['start_bankroll']):,.2f} {r['profit']:+,.2f} betting profit"
+st.caption(_md(f"Bankroll = starting ${float(s['start_bankroll']):,.2f} {r['profit']:+,.2f} betting profit"
            + (f" {r['moved']:+,.2f} moved in/out" if r["moved"] else "")
            + f". Above your starting bankroll: **${r['above_start']:,.2f}** — what you could withdraw and still "
-             "be at the plan's starting size. Stakes are figured from what's in the book, so record withdrawals below.")
+             "be at the plan's starting size. Stakes are figured from what's in the book, so record withdrawals below."))
 
 with st.expander("💸 Record a withdrawal or deposit"):
     with st.form("prog_move"):
@@ -97,7 +103,7 @@ with st.expander("💸 Record a withdrawal or deposit"):
             else:
                 st.error("Couldn't save it.")
     for t in reversed(list(s.get("transfers") or [])):
-        st.caption(f"{t['date']}: {'withdrew' if float(t['amount']) < 0 else 'deposited'} ${abs(float(t['amount'])):,.2f}")
+        st.caption(_md(f"{t['date']}: {'withdrew' if float(t['amount']) < 0 else 'deposited'} ${abs(float(t['amount'])):,.2f}"))
 
 
 def _gate_table(gates):
@@ -165,14 +171,15 @@ else:
 st.markdown("##### The income goal, in numbers")
 g = r["goal"]
 if g["turnover"]:
-    st.markdown(
+    st.markdown(_md(
         f"- **${g['monthly']:,.0f} a month** at **{g['target_roi']:.1%}** ROI takes about **${g['turnover']:,.0f}** wagered a "
         f"month: {g['bets_per_month']} singles at about **${g['per_bet']:,.0f}** each.\n"
         f"- At {s['unit_pct']:.2%} a bet, that size needs a bankroll of about **${g['bankroll_needed']:,.0f}** "
         f"(today: ${r['bankroll']:,.0f}).\n"
         + (f"- Recent pace: **${g['pace']:+,.0f} a month** (last {min(3, len([m for m in r['months']]))} full months)."
-           if g["pace"] is not None else "- Recent pace: no full month on record yet."))
+           if g["pace"] is not None else "- Recent pace: no full month on record yet.")))
 t = r["tax"]
-st.caption(f"Tax note (estimate only, not tax advice): since 2026 only 90% of gambling losses are deductible. Losing "
-           f"stakes this year: ${t['losing_stakes']:,.0f}, so about ${t['nondeductible']:,.0f} can't be deducted and is "
-           "taxed as if won. Check with a tax professional before scaling.")
+st.caption(_md(f"Tax note (estimate only, not tax advice): since 2026 only 90% of gambling losses are deductible. Losing "
+           f"stakes this year (every real-money bet in the Bet Log, not just since the plan's start): "
+           f"${t['losing_stakes']:,.0f}, so about ${t['nondeductible']:,.0f} can't be deducted and is "
+           "taxed as if won. Check with a tax professional before scaling."))

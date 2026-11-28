@@ -150,8 +150,11 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     recent = full[-3:]
     pace = (sum(m["profit"] for m in recent) / len(recent)) if recent else None
 
-    losing_stakes_ytd = sum(float(b.get("stake") or 0) for b in settled
-                            if _res(b) == "loss" and _day(b)[:4] == str(today.year))
+    # Nov 28: the tax year is the calendar year -- every real-money loss in it, not only those since the plan started
+    year_money = B.money_bets([b for b in bets if b.get("is_real_bet") not in (False, 0, "0", "false")
+                               and _day(b)[:4] == str(today.year)])
+    losing_stakes_ytd = sum(float(b.get("stake") or 0) for b in year_money
+                            if _res(b) == "loss" and float(b.get("stake") or 0) > 0)
     moved = sum(moves.values())
     return {"settings": s, "stage": stage, "bankroll": round(bank, 2), "unit": round(unit, 2), "path": path,
             "parlay_unit": round(unit * PARLAY_UNIT_SHARE, 2), "moved": round(moved, 2),
