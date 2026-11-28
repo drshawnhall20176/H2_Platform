@@ -104,3 +104,25 @@ def test_withdrawal_lowers_bankroll_and_unit_but_not_profit_or_drawdown():
     r = P.plan(s, bets)
     assert r["bankroll"] == 100.0 and r["profit"] == 10.0 and r["moved"] == -10.0
     assert r["unit"] == 1.0 and r["parlay_unit"] == 0.5 and r["max_dd"] == 0.0
+
+
+def test_the_tax_line_counts_every_loss_in_the_calendar_year_not_just_since_the_plan_began():
+    """Nov 28: the plan started Nov 1, but the tax year is the whole year."""
+    import progression as P
+    bets = [{"slate_date": "2026-06-10", "stake": 20.0, "entry_odds": -110, "result": "loss", "is_real_bet": True},
+            {"slate_date": "2026-11-10", "stake": 5.0, "entry_odds": -110, "result": "loss", "is_real_bet": True},
+            {"slate_date": "2025-12-30", "stake": 50.0, "entry_odds": -110, "result": "loss", "is_real_bet": True},
+            {"slate_date": "2026-11-11", "stake": 9.0, "entry_odds": -110, "result": "loss", "is_real_bet": False}]
+    from datetime import date
+    r = P.plan({"start_date": "2026-11-01", "start_bankroll": 100}, bets, today=date(2026, 11, 28))
+    assert r["tax"]["losing_stakes"] == 25.0 and r["tax"]["nondeductible"] == 2.5
+    assert r["settled"] == 1                                       # the plan itself still starts Nov 1
+
+
+def test_dollar_amounts_on_the_page_are_not_read_as_math():
+    """Nov 28: '$150.00 ... $449.36' in a caption rendered as an italic math formula."""
+    src = open("views/42_Progression_Plan.py").read()
+    for line in src.splitlines():
+        if line.lstrip().startswith(("st.caption(f", "st.markdown(f")) and "$" in line:
+            raise AssertionError("unescaped money text: " + line.strip())
+    assert src.count("_md(") >= 5
