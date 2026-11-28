@@ -49,3 +49,23 @@ def test_run_captures_at_each_lead(monkeypatch):
     W.run("k", minutes=120, now_fn=lambda: t[0], sleep_fn=sleep)
     assert [f.strftime("%H:%M") for f in fetches] == ["23:45", "00:25"]
     assert writes == [(1, -120), (1, -120)]
+
+
+def test_a_bet_logged_after_the_watch_started_still_gets_its_close(monkeypatch):
+    """Nov 28: a run that found nothing open ended at once, so bets logged later in the day never got a closing price."""
+    import betlog as B
+    import close_watch as W
+    t = [datetime(2026, 11, 5, 20, 0, tzinfo=timezone.utc)]
+    writes = []
+    logged_at = datetime(2026, 11, 5, 22, 10, tzinfo=timezone.utc)            # placed 2h10m into the run
+    monkeypatch.setattr(B, "list_bets", lambda **kw: [_bet(1)] if t[0] >= logged_at else [])
+    monkeypatch.setattr(B, "update_bet", lambda i, **kw: writes.append((t[0].strftime("%H:%M"), i)))
+    monkeypatch.setattr(W, "_events", lambda key, sp: {"NBA": [EV]})
+    monkeypatch.setattr(W, "capture_event", lambda e, bets, key, sp: {1: -120})
+    monkeypatch.setattr(W, "_ledger_rows", lambda now: [])
+
+    def sleep(s):
+        t[0] += timedelta(seconds=s)
+    W.run("k", minutes=345, now_fn=lambda: t[0], sleep_fn=sleep, ledger_fn=lambda now: [])
+    assert [w[0] for w in writes] == ["23:45", "00:25"]                       # both leads before the 00:30 start
+    assert t[0] >= datetime(2026, 11, 6, 1, 45, tzinfo=timezone.utc)          # kept watching to the window's end
