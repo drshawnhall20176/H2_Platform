@@ -657,3 +657,17 @@ def test_load_rebuilds_missing_attempts_from_yards_per_attempt():
     ])
     assert [r.get("passing_ATT") for r in rows[:3]] == [36.0, 25.0, 21.0]
     assert rows[3].get("passing_ATT") is None and rows[4].get("passing_ATT") is None
+
+
+def test_the_pass_attempts_fill_runs_once_per_loaded_list(monkeypatch):
+    """Nov 28: build_slate asks for this list once per player; re-filling ~195k rows every time took 20+ minutes."""
+    import ncaaf_data as ND
+    recs = [{"passing_YDS": 250, "passing_AVG": 10.0}]
+    monkeypatch.setattr(ND, "_cached_read_records", lambda p: recs)
+    monkeypatch.setattr(ND, "_FILLED_ID", {"id": None})
+    calls = []
+    real = ND._fill_pass_attempts
+    monkeypatch.setattr(ND, "_fill_pass_attempts", lambda r: calls.append(1) or real(r))
+    for _ in range(5):
+        out = ND.load_player_game_stats()
+    assert out[0]["passing_ATT"] == 25.0 and len(calls) == 1

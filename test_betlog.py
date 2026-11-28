@@ -647,3 +647,74 @@ def test_model_split_puts_info_only_leans_in_their_own_group():
     s = B.model_split([mk("platform-test,close-gap-test", "win"), mk("platform-test,lean", "loss"),
                        mk("platform-test,lean", "loss")])
     assert (s["with"]["wins"], s["lean"]["losses"], s["own"]["settled"]) == (1, 2, 0)
+
+
+class _Cur:
+    def __init__(self, log, cols, fail=None):
+        self.log, self.cols, self.fail = log, cols, fail
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, *a):
+        self.log.append(sql.strip().split()[0])
+
+    def fetchall(self):
+        return [(c,) for c in self.cols]
+
+
+class _Con:
+    closed = False
+
+    def __init__(self, log, cols):
+        self.log, self.cols = log, cols
+
+    def cursor(self, **k):
+        return _Cur(self.log, self.cols)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _pg(monkeypatch, cols):
+    import betlog as B
+    log = []
+    monkeypatch.setattr(B, "_PG_SCHEMA_DONE", False)
+    monkeypatch.setattr(B, "_pg_checkout", lambda: _Con(log, cols))
+    monkeypatch.setattr(B, "_pg_checkin", lambda con, ok: None)
+    with B._pg_conn():
+        pass
+    return log
+
+
+def test_a_new_process_does_not_alter_the_bets_table_when_every_column_is_there(monkeypatch):
+    """Nov 28: ALTER TABLE locks the table even when the column exists -- the overnight job timeouts."""
+    import betlog as B
+    assert _pg(monkeypatch, B._PG_COLUMNS) == ["SELECT"]
+    assert "CREATE" in _pg(monkeypatch, [c for c in B._PG_COLUMNS if c != "category"])
+
+
+def test_a_dropped_connection_on_a_read_gets_one_more_try(monkeypatch):
+    import betlog as B
+
+    class OperationalError(Exception):
+        pass
+    n = []
+
+    def flaky():
+        n.append(1)
+        if len(n) == 1:
+            raise OperationalError("SSL connection has been closed unexpectedly")
+        return [{"id": 1}]
+    monkeypatch.setattr(B, "_pg_list", flaky)
+    monkeypatch.setattr(B._time, "sleep", lambda s: None)
+    assert B._pg_list_retry() == [{"id": 1}] and len(n) == 2
