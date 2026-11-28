@@ -222,6 +222,10 @@ def _edges_panel(items):
                         "game in progress (an edge needs the model's chance to beat the price by 5%+).")
             return
         st.markdown(f"**🔥 Live edges right now — {len(found)}**")
+        _more = len(found) - 30
+        found = found[:30]                                      # Nov 27: the 30 biggest; the rest are in each game
+        if _more > 0:
+            st.caption(f"The 30 biggest shown — {_more} more inside the games below.")
         st.dataframe(pd.DataFrame([{
             "Game": f"{g['away']} {g['away_score']:.0f} @ {g['home']} {g['home_score']:.0f}", "Clock": LG.clock_text(g),
             "Bet": b["bet"], "Type": b.get("market") or "", "Price": b["price"], "Model chance": b["chance"],

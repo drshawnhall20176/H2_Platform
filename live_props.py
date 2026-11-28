@@ -216,23 +216,64 @@ def live_prop_lines(league: str, event_id: str, markets: Sequence[str], api_key:
         k = odds_key(league, m)
         if k:
             back.setdefault(k, m)
-    best: Dict[tuple, Dict] = {}
+    # Nov 27 (owner, first live NBA night: 706 "edges", 120-208 props a game): the books post alternate lines and each
+    # book its own prices; taking the best price at every line made noise. Now ONE line per player and stat -- the main
+    # line, posted by the most books -- with the best price on each side for the bet and the books' median prices,
+    # no-vig, as the market's own chance (check_lines blends the live read toward it).
+    seen: Dict[tuple, Dict] = {}
     for bk in data.get("bookmakers") or []:
         for mk in bk.get("markets") or []:
             name = back.get(mk.get("key"))
             if not name:
                 continue
             for o in mk.get("outcomes") or []:
-                if o.get("point") is None or o.get("description") is None:
+                if o.get("point") is None or o.get("description") is None or o.get("price") is None:
+                    continue
+                side = str(o.get("name") or "").lower()
+                if side not in ("over", "under"):
                     continue
                 k = (_norm(o["description"]), name, float(o["point"]))
-                row = best.setdefault(k, {"player": o["description"], "market": name, "line": float(o["point"]),
-                                          "over": None, "under": None, "book": bk.get("key")})
-                side = str(o.get("name") or "").lower()
-                if side in ("over", "under") and o.get("price") is not None:
-                    if row[side] is None or float(o["price"]) > row[side]:
-                        row[side] = float(o["price"])
-    return list(best.values())
+                row = seen.setdefault(k, {"player": o["description"], "market": name, "line": float(o["point"]),
+                                          "prices": {"over": {}, "under": {}}})
+                row["prices"][side][bk.get("key")] = float(o["price"])
+    by_market: Dict[tuple, List[Dict]] = {}
+    for (pl, mk, _ln), row in seen.items():
+        by_market.setdefault((pl, mk), []).append(row)
+    out = []
+    for rows_ in by_market.values():
+        two = [r for r in rows_ if r["prices"]["over"] and r["prices"]["under"]]
+        if not two:
+            continue
+        main = max(two, key=lambda r: (len(set(r["prices"]["over"]) & set(r["prices"]["under"])),
+                                       len(r["prices"]["over"]) + len(r["prices"]["under"])))
+        ov, un = main["prices"]["over"], main["prices"]["under"]
+        out.append({"player": main["player"], "market": main["market"], "line": main["line"],
+                    "over": max(ov.values()), "under": max(un.values()),
+                    "p_over_mkt": _no_vig(_median(list(ov.values())), _median(list(un.values()))),
+                    "books": len(set(ov) | set(un))})
+    return out
+
+
+LIVE_PROP_WEIGHT = 0.35      # the live props read's say against the books' own chance -- untested, so a minority
+PROP_MIN_EDGE = 0.05
+
+
+def _median(xs):
+    xs = sorted(xs)
+    n = len(xs)
+    return None if not n else (xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2)
+
+
+def _implied(a):
+    a = float(a)
+    return 100 / (a + 100) if a > 0 else -a / (-a + 100)
+
+
+def _no_vig(over, under):
+    if over is None or under is None:
+        return None
+    po, pu = _implied(over), _implied(under)
+    return po / (po + pu) if po + pu > 0 else None
 
 
 def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share: float) -> List[Dict]:
@@ -246,6 +287,8 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
         if not r:
             continue
         po = chance_over(r["market"], r["now"], r["remaining"], share, r["pre_projection"], ln["line"], league)
+        if ln.get("p_over_mkt") is not None:                    # Nov 27: blended toward the books' no-vig chance
+            po = ln["p_over_mkt"] + LIVE_PROP_WEIGHT * (po - ln["p_over_mkt"])
         for side, ch, price in (("Over", po, ln.get("over")), ("Under", 1 - po, ln.get("under"))):
             if price is None:
                 continue
@@ -253,7 +296,7 @@ def check_lines(rows: Sequence[Dict], lines: Sequence[Dict], league: str, share:
             out.append({"player": r["player"], "bet": f"{r['player']} {r['market']} {side} {ln['line']:g}",
                         "now": r["now"], "projected": r["projected"], "chance": ch, "price": price, "edge": e,
                         "market": "Prop", "stat": r["market"], "side": side.lower(), "line": float(ln["line"]),
-                        "signal": "🟢 Worth a look" if e >= 0.05 else "🟡 Close" if e >= 0 else "🔴 Pass"})
+                        "signal": "🟢 Worth a look" if e >= PROP_MIN_EDGE else "🟡 Close" if e >= 0 else "🔴 Pass"})
     return sorted(out, key=lambda b: -b["edge"])
 
 
