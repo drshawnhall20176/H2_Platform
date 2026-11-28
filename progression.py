@@ -81,10 +81,13 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     # Nov 6: money moved in or out of the book (a withdrawal is negative). It changes the bankroll -- and so the unit --
     # but it isn't profit or loss, so it moves the drawdown peak with it.
     moves = defaultdict(float)
+    adjusted = 0.0                                              # Nov 28: balance-check corrections, kept apart
     for t in s.get("transfers") or []:
         try:
             if str(t["date"]) >= start:
                 moves[str(t["date"])[:10]] += float(t["amount"])
+                if t.get("kind") == "adjustment":
+                    adjusted += float(t["amount"])
         except (KeyError, TypeError, ValueError):
             continue
     bank, peak, max_dd, path = float(s["start_bankroll"]), float(s["start_bankroll"]), 0.0, []
@@ -156,7 +159,15 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     losing_stakes_ytd = sum(float(b.get("stake") or 0) for b in year_money
                             if _res(b) == "loss" and float(b.get("stake") or 0) > 0)
     moved = sum(moves.values())
-    return {"settings": s, "stage": stage, "bankroll": round(bank, 2), "unit": round(unit, 2), "path": path,
+    # Nov 28 (owner: "the bankroll needs to balance"): money tied up in bets that haven't settled. The sportsbooks
+    # take a stake out of the balance when it's placed; the plan counts it when it settles. So the books' cash today
+    # should be the bankroll less these.
+    open_rows = [b for b in money if not _res(b) and float(b.get("stake") or 0) > 0]
+    open_staked = sum(float(b.get("stake") or 0) for b in open_rows)
+    return {"open": {"n": len(open_rows), "staked": round(open_staked, 2),
+                     "rows": sorted(open_rows, key=lambda b: _day(b))},
+            "cash_expected": round(bank - open_staked, 2), "adjusted": round(adjusted, 2),
+            "settings": s, "stage": stage, "bankroll": round(bank, 2), "unit": round(unit, 2), "path": path,
             "parlay_unit": round(unit * PARLAY_UNIT_SHARE, 2), "moved": round(moved, 2),
             "above_start": round(max(0.0, bank - float(s["start_bankroll"])), 2),
             "profit": round(bank - moved - float(s["start_bankroll"]), 2), "settled": len(settled),
@@ -167,6 +178,16 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
             "goal": {"monthly": goal, "turnover": turnover, "per_bet": per_bet, "bankroll_needed": bank_needed,
                      "pace": pace, "bets_per_month": s["bets_per_month"], "target_roi": tr},
             "tax": {"nondeductible": round(losing_stakes_ytd * TAX_NONDEDUCTIBLE, 2), "losing_stakes": round(losing_stakes_ytd, 2)}}
+
+
+def balance_adjustment(actual_cash: float, r: Dict, when: str) -> Optional[Dict]:
+    """Nov 28: the transfer that makes the plan agree with the sportsbooks. `actual_cash` is the total of every
+    sportsbook balance right now (cash only -- open bets are already out of it). None when they already agree."""
+    diff = round(float(actual_cash) - float(r["cash_expected"]), 2)
+    if abs(diff) < 0.01:
+        return None
+    return {"date": str(when)[:10], "amount": diff, "kind": "adjustment",
+            "note": f"balance check: books ${float(actual_cash):,.2f}, plan expected ${float(r['cash_expected']):,.2f}"}
 
 
 # --------------------------------------------------------------------------- strategies (Nov 4)
