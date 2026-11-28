@@ -166,8 +166,8 @@ def plan(settings: Dict, bets: Sequence[Dict], today: Optional[date] = None) -> 
     open_staked = sum(float(b.get("stake") or 0) for b in open_rows)
     return {"open": {"n": len(open_rows), "staked": round(open_staked, 2),
                      "rows": sorted(open_rows, key=lambda b: _day(b))},
-            "cash_expected": round(bank - open_staked, 2), "adjusted": round(adjusted, 2),
-            "settings": s, "stage": stage, "bankroll": round(bank, 2), "unit": round(unit, 2), "path": path,
+            "cash_expected": round(bank - open_staked, 2) + 0.0, "adjusted": round(adjusted, 2),
+            "settings": s, "stage": stage, "bankroll": round(bank, 2) + 0.0, "unit": round(unit, 2) + 0.0, "path": path,
             "parlay_unit": round(unit * PARLAY_UNIT_SHARE, 2), "moved": round(moved, 2),
             "above_start": round(max(0.0, bank - float(s["start_bankroll"])), 2),
             "profit": round(bank - moved - float(s["start_bankroll"]), 2), "settled": len(settled),

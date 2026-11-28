@@ -143,3 +143,12 @@ def test_the_balance_check_records_the_difference_as_an_adjustment_not_profit():
     assert P.balance_adjustment(106.0, r, "2026-11-28") is None
     r2 = P.plan(dict(s, transfers=[adj]), bets, today=date(2026, 11, 28))
     assert r2["cash_expected"] == 101.5 and r2["profit"] == 10.0 and r2["adjusted"] == -4.5    # profit unchanged
+
+
+def test_a_bankroll_withdrawn_to_zero_reads_zero_not_minus_zero():
+    import progression as P
+    from datetime import date
+    bets = [{"slate_date": "2026-11-10", "stake": 0.1, "entry_odds": 200, "result": "win", "is_real_bet": True}]
+    r = P.plan({"start_date": "2026-11-01", "start_bankroll": 0.1, "transfers": [{"date": "2026-11-28", "amount": -0.3}]},
+               bets, today=date(2026, 11, 28))
+    assert f"{r['bankroll']:,.2f}" == "0.00" and f"{r['cash_expected']:,.2f}" == "0.00"
