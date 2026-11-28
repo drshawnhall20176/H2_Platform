@@ -190,14 +190,34 @@ def grade_pending(days: Iterable[str], games_for: Callable[[str, date], List[Dic
 
 
 # --------------------------------------------------------------------------- the record
+def group_key(r: Dict) -> tuple:
+    """Nov 28: one bet per opinion. A game line flagged again later at a moved number (Over 220.5, then Over 222.5) is
+    the same call; so is a player's second and third prop off the same live read. The record keeps the first one."""
+    g = (r.get("day"), r.get("league"), str(r.get("game_id")))
+    if r.get("type") == "Prop":
+        return g + ("prop", str(r.get("player") or "").lower())
+    return g + (r.get("type"), r.get("side"))
+
+
+def first_per_call(rows: Iterable[Dict]) -> List[Dict]:
+    out, seen = [], set()
+    for r in sorted(rows, key=lambda r: str(r.get("seen_at") or "")):
+        k = group_key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
 def record(rows: Iterable[Dict]) -> Dict:
-    """{"n", "w", "l", "p", "units", "roi", "by": {type: {...}}, "open"} -- graded signals at 1 unit each."""
+    """{"n", "w", "l", "p", "units", "roi", "by": {type: {...}}, "open"} -- graded signals at 1 unit each, one per
+    call (first_per_call)."""
     def blank():
         return {"n": 0, "w": 0, "l": 0, "p": 0, "units": 0.0}
     tot, by, open_ = blank(), {}, 0
+    rows = first_per_call(r for r in rows if not (r.get("type") == "Prop" and int(r.get("ver") or 1) < VER))
     for r in rows:
-        if r.get("type") == "Prop" and int(r.get("ver") or 1) < VER:
-            continue
         res = r.get("result")
         if not res:
             open_ += 1
@@ -228,7 +248,7 @@ def since(today: date, days: int = 30) -> str:
 def count_for_games(rows: Iterable[Dict], day: str) -> Dict[str, int]:
     """{game id: live edges flagged today} for the Today page's Live-now strip."""
     out: Dict[str, int] = {}
-    for r in rows:
+    for r in first_per_call(rows):
         if r.get("day") == str(day)[:10]:
             out[str(r.get("game_id"))] = out.get(str(r.get("game_id")), 0) + 1
     return out
