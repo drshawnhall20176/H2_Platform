@@ -18,6 +18,9 @@ from datetime import date, timedelta
 from typing import Callable, Dict, Iterable, List, Optional
 
 KIND = "live_signal"
+# Nov 27: v2 = live props priced at one main line, blended toward the books' no-vig chance. The props kept on the first
+# night (every alternate line at the best price anywhere, ~200 a game) are left out of the record -- noise, not edges.
+VER = 2
 MIN_EDGE = 0.05
 STALE_EDGE = 0.20         # an edge this big usually means the book's line hasn't caught up with the game yet
 
@@ -38,7 +41,7 @@ def row(day: str, g: Dict, b: Dict, clock: str, now_iso: str) -> Dict:
             "side": b.get("side"), "line": b.get("line"), "player": b.get("player"), "stat": b.get("stat"),
             "price": b.get("price"), "chance": b.get("chance"), "edge": b.get("edge"), "clock": clock,
             "score": f"{g.get('away_score', 0):.0f}–{g.get('home_score', 0):.0f}", "seen_at": now_iso,
-            "result": None}
+            "result": None, "ver": VER}
 
 
 def _ms():
@@ -191,6 +194,8 @@ def record(rows: Iterable[Dict]) -> Dict:
         return {"n": 0, "w": 0, "l": 0, "p": 0, "units": 0.0}
     tot, by, open_ = blank(), {}, 0
     for r in rows:
+        if r.get("type") == "Prop" and int(r.get("ver") or 1) < VER:
+            continue
         res = r.get("result")
         if not res:
             open_ += 1

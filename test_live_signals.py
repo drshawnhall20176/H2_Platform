@@ -308,3 +308,27 @@ def test_card_says_no_lean_trend_and_form_gap():
     gap = PC.form_gap(pr, "🟥 74%")
     assert gap.startswith("Projection 1.1 below his recent form (18.1") and "74% blowout risk" in gap
     assert PC.form_gap(dict(pr, Projection=18.0), "🟥 74%") is None
+
+
+def test_live_prop_lines_keep_one_main_line_and_blend():
+    import live_props as LP
+    data = {"bookmakers": [
+        {"key": "draftkings", "markets": [{"key": "player_points", "outcomes": [
+            {"description": "A B", "name": "Over", "point": 20.5, "price": -110},
+            {"description": "A B", "name": "Under", "point": 20.5, "price": -110},
+            {"description": "A B", "name": "Over", "point": 25.5, "price": 250}]}]},
+        {"key": "fanduel", "markets": [{"key": "player_points", "outcomes": [
+            {"description": "A B", "name": "Over", "point": 20.5, "price": -105},
+            {"description": "A B", "name": "Under", "point": 20.5, "price": -115}]}]}]}
+    lines = LP.live_prop_lines("NBA", "e1", ["Points"], "k", fetch=lambda e, ks: data)
+    assert len(lines) == 1 and lines[0]["line"] == 20.5 and lines[0]["over"] == -105 and lines[0]["books"] == 2
+    assert 0.45 < lines[0]["p_over_mkt"] < 0.52
+
+
+def test_first_night_props_stay_out_of_the_record():
+    import live_signals as LS
+    old = {"type": "Prop", "result": "win", "price": -110}
+    new = dict(old, ver=LS.VER)
+    line = {"type": "Spread", "result": "loss", "price": -110}
+    rec = LS.record([old, new, line])
+    assert rec["n"] == 2 and rec["by"]["Prop"]["n"] == 1
