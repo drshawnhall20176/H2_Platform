@@ -671,3 +671,13 @@ def test_the_pass_attempts_fill_runs_once_per_loaded_list(monkeypatch):
     for _ in range(5):
         out = ND.load_player_game_stats()
     assert out[0]["passing_ATT"] == 25.0 and len(calls) == 1
+
+
+def test_the_refresh_pulls_only_weeks_not_cached_plus_the_latest():
+    """Nov 28: re-pulling every week twice a day ran out the CFBD monthly quota."""
+    import refresh_ncaaf as R
+    cached = [{"season": 2026, "week": w} for w in (1, 2, 3)] + [{"season": 2025, "week": 4}]
+    assert R.weeks_to_fetch([1, 2, 3, 4, 5], cached, 2026) == [4, 5]          # 4 is only cached for 2025
+    assert R.weeks_to_fetch([1, 2, 3], cached, 2026) == [3]                   # nothing new: just the latest again
+    assert R.weeks_to_fetch([1, 2], [], 2026) == [1, 2]
+    assert R.weeks_to_fetch([], cached, 2026) == []

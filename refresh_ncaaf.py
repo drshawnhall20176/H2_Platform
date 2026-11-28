@@ -29,6 +29,23 @@ from datetime import date
 import ncaaf_data as ND
 
 
+def weeks_to_fetch(completed_weeks, cached_rows, year: int) -> list:
+    """Nov 28: only the completed weeks not already cached for `year`, plus the latest completed week again (CFBD
+    revises stats for a few days). Re-pulling every week on every run (~28 calls, twice a day) ran through the CFBD
+    free plan's monthly quota (429 on Nov 25 and Nov 28). Both refreshes merge into the cache, so this loses nothing."""
+    have = set()
+    for r in cached_rows or []:
+        try:
+            if int(float(r.get("season"))) == int(year) and r.get("week") is not None:
+                have.add(int(float(r["week"])))
+        except (TypeError, ValueError):
+            continue
+    weeks = sorted({int(w) for w in completed_weeks or []})
+    if not weeks:
+        return []
+    return sorted({w for w in weeks if w not in have} | {weeks[-1]})
+
+
 def main() -> int:
     year = int(sys.argv[1]) if len(sys.argv) > 1 else date.today().year
 
@@ -159,7 +176,9 @@ def main() -> int:
              "and ncaaf_projections.py's own docstrings for what those fallbacks are).")
     else:
         try:
-            path = ND.refresh_player_game_stats(year, api_key, completed_weeks)
+            _wk = weeks_to_fetch(completed_weeks, ND.load_player_game_stats(), year)
+            print(f"[NCAAF] per-game stats: fetching week(s) {_wk} (the rest are cached)")
+            path = ND.refresh_player_game_stats(year, api_key, _wk)
             game_stats = ND.load_player_game_stats(path)
             print(f"Cached {len(game_stats)} player-game row(s).")
         except Exception as e:  # noqa: BLE001
@@ -180,7 +199,9 @@ def main() -> int:
              "own get_team_drive_outcomes docstring for what that fallback is).")
     else:
         try:
-            path = ND.refresh_drives(year, api_key, completed_weeks)
+            _wk = weeks_to_fetch(completed_weeks, ND.load_drives(), year)
+            print(f"[NCAAF] drives: fetching week(s) {_wk} (the rest are cached)")
+            path = ND.refresh_drives(year, api_key, _wk)
             drives = ND.load_drives(path)
             print(f"Cached {len(drives)} drive row(s).")
         except Exception as e:  # noqa: BLE001
